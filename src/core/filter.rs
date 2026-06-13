@@ -10,6 +10,8 @@ pub enum FilterLevel {
     None,
     Minimal,
     Aggressive,
+    /// Code outline: keep declarations/signatures, elide function bodies.
+    Outline,
 }
 
 impl FromStr for FilterLevel {
@@ -21,6 +23,7 @@ impl FromStr for FilterLevel {
             "none" => Ok(FilterLevel::None),
             "minimal" => Ok(FilterLevel::Minimal),
             "aggressive" => Ok(FilterLevel::Aggressive),
+            "outline" => Ok(FilterLevel::Outline),
             _ => Err(format!("Unknown filter level: {}", s)),
         }
     }
@@ -33,6 +36,7 @@ impl std::fmt::Display for FilterLevel {
             FilterLevel::None => write!(f, "none"),
             FilterLevel::Minimal => write!(f, "minimal"),
             FilterLevel::Aggressive => write!(f, "aggressive"),
+            FilterLevel::Outline => write!(f, "outline"),
         }
     }
 }
@@ -315,12 +319,27 @@ impl FilterStrategy for AggressiveFilter {
     }
 }
 
+/// Code outline: declarations/signatures with function bodies elided. For
+/// languages the outliner doesn't support, falls back to the minimal filter so
+/// `-l outline` always returns something useful rather than erroring.
+struct OutlineFilter;
+
+impl FilterStrategy for OutlineFilter {
+    fn filter(&self, content: &str, lang: &Language) -> String {
+        match crate::core::outline::outline(content, lang) {
+            Some(out) => out,
+            None => MinimalFilter.filter(content, lang),
+        }
+    }
+}
+
 pub fn get_filter(level: FilterLevel) -> Box<dyn FilterStrategy> {
     match level {
         FilterLevel::Auto => Box::new(MinimalFilter),
         FilterLevel::None => Box::new(NoFilter),
         FilterLevel::Minimal => Box::new(MinimalFilter),
         FilterLevel::Aggressive => Box::new(AggressiveFilter),
+        FilterLevel::Outline => Box::new(OutlineFilter),
     }
 }
 

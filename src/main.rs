@@ -96,7 +96,7 @@ enum Commands {
         /// Files to read (supports multiple, like cat)
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
-        /// Filter: auto (default, token-aware), none (full content), minimal, aggressive
+        /// Filter: auto (default, token-aware), none (full content), minimal, aggressive, outline (signatures only, bodies elided)
         #[arg(short, long, default_value = "auto")]
         level: core::filter::FilterLevel,
         /// Max lines

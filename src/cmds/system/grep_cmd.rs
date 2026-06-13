@@ -29,26 +29,7 @@ pub fn run(
     let rg_pattern = pattern.replace(r"\|", "|");
 
     let mut rg_cmd = resolved_command("rg");
-    // --no-ignore-vcs: match grep -r behavior (don't skip .gitignore'd files).
-    // Without this, rg returns 0 matches for files in .gitignore, causing
-    // false negatives that make AI agents draw wrong conclusions.
-    // Using --no-ignore-vcs (not --no-ignore) so .ignore/.rgignore are still respected.
-    // -H: always emit the filename.
-    // -0: NUL-separate filename. Allows the parser to disambiguate filenames or
-    // content containing `:digits:` patterns (issue #1436).
-    rg_cmd.args(["-nH0", "--no-heading", "--no-ignore-vcs", &rg_pattern, path]);
-
-    if let Some(ft) = file_type {
-        rg_cmd.arg("--type").arg(ft);
-    }
-
-    for arg in extra_args {
-        // Fix: skip grep-ism -r flag (rg is recursive by default; rg -r means --replace)
-        if arg == "-r" || arg == "--recursive" {
-            continue;
-        }
-        rg_cmd.arg(arg);
-    }
+    rg_cmd.args(build_rg_args(&rg_pattern, path, file_type, extra_args));
 
     let result = exec_capture(&mut rg_cmd)
         .or_else(|_| {
@@ -180,6 +161,52 @@ pub fn run(
 ///
 /// Returns `None` for lines that do not match either shape (e.g. rg `-A`/`-B`
 /// context lines that use `-` as separator).
+fn build_rg_args(
+    rg_pattern: &str,
+    path: &str,
+    file_type: Option<&str>,
+    extra_args: &[String],
+) -> Vec<String> {
+    let mut args = Vec::new();
+
+    // --no-ignore-vcs: match grep -r behavior (don't skip .gitignore'd files).
+    // Without this, rg returns 0 matches for files in .gitignore, causing
+    // false negatives that make AI agents draw wrong conclusions.
+    // Using --no-ignore-vcs (not --no-ignore) so .ignore/.rgignore are still respected.
+    args.push("--no-heading".to_string());
+    args.push("--no-ignore-vcs".to_string());
+
+    if has_format_flag(extra_args) {
+        // Passthrough format flags such as -l/-c/-o have their own output shape.
+        // Do not force line numbers or NUL separators, otherwise the output is
+        // no longer grep-compatible (e.g. -l would emit NUL-terminated paths).
+        args.push(rg_pattern.to_string());
+        args.push(path.to_string());
+    } else {
+        // -n: line numbers, -H: always filename, -0: NUL-separate filename.
+        // NUL separation lets parse_match_line disambiguate filenames/content
+        // containing `:digits:` patterns (issue #1436).
+        args.push("-nH0".to_string());
+        args.push(rg_pattern.to_string());
+        args.push(path.to_string());
+    }
+
+    if let Some(ft) = file_type {
+        args.push("--type".to_string());
+        args.push(ft.to_string());
+    }
+
+    for arg in extra_args {
+        // Fix: skip grep-ism -r flag (rg is recursive by default; rg -r means --replace)
+        if arg == "-r" || arg == "--recursive" {
+            continue;
+        }
+        args.push(arg.clone());
+    }
+
+    args
+}
+
 fn parse_match_line(line: &str) -> Option<(String, usize, &str)> {
     lazy_static::lazy_static! {
         // NUL-separated (preferred, unambiguous).
@@ -336,13 +363,47 @@ mod tests {
     // Fix: -r flag (grep recursive) is stripped from extra_args (rg is recursive by default)
     #[test]
     fn test_recursive_flag_stripped() {
-        let extra_args: Vec<String> = vec!["-r".to_string(), "-i".to_string()];
-        let filtered: Vec<&String> = extra_args
-            .iter()
-            .filter(|a| *a != "-r" && *a != "--recursive")
-            .collect();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0], "-i");
+        let args = build_rg_args("needle", ".", None, &["-r".to_string(), "-i".to_string()]);
+        assert!(!args.contains(&"-r".to_string()));
+        assert!(args.contains(&"-i".to_string()));
+    }
+
+    #[test]
+    fn test_rg_args_normal_search_include_line_numbers_and_nul_separator() {
+        let args = build_rg_args("needle", "src", None, &[]);
+        assert!(args.contains(&"-nH0".to_string()));
+        assert!(args.contains(&"--no-heading".to_string()));
+        assert!(args.contains(&"--no-ignore-vcs".to_string()));
+    }
+
+    #[test]
+    fn test_rg_args_format_flags_do_not_force_nul_or_line_numbers() {
+        for flag in [
+            "-l",
+            "--files-with-matches",
+            "-c",
+            "--count",
+            "-o",
+            "--only-matching",
+        ] {
+            let args = build_rg_args("needle", "src", None, &[flag.to_string()]);
+            assert!(
+                args.contains(&flag.to_string()),
+                "missing passthrough flag {flag}"
+            );
+            assert!(
+                !args.contains(&"-nH0".to_string()),
+                "format flag {flag} must preserve grep-compatible output"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rg_args_preserve_type_filter_with_format_flag() {
+        let args = build_rg_args("needle", "src", Some("rust"), &["-l".to_string()]);
+        assert!(args.windows(2).any(|pair| pair == ["--type", "rust"]));
+        assert!(args.contains(&"-l".to_string()));
+        assert!(!args.contains(&"-nH0".to_string()));
     }
 
     // --- truncation accuracy ---

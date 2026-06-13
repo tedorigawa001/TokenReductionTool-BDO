@@ -256,7 +256,7 @@ enum Commands {
 
     /// Find files with compact tree output (accepts native find flags like -name, -type)
     Find {
-        /// All find arguments (supports both RTK and native find syntax)
+        /// All find arguments (supports both Bushido and native find syntax)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -327,7 +327,7 @@ enum Commands {
         extra_args: Vec<String>,
     },
 
-    /// Initialize rtk instructions for assistant CLI usage
+    /// Initialize bdo instructions for assistant CLI usage
     Init {
         /// Add to global assistant config directory instead of local project file
         #[arg(short, long)]
@@ -353,7 +353,7 @@ enum Commands {
         #[arg(long = "claude-md", group = "mode")]
         claude_md: bool,
 
-        /// Hook only, no RTK.md
+        /// Hook only, no Bushido.md
         #[arg(long = "hook-only", group = "mode")]
         hook_only: bool,
 
@@ -365,11 +365,11 @@ enum Commands {
         #[arg(long = "no-patch", group = "patch")]
         no_patch: bool,
 
-        /// Remove RTK artifacts for the selected assistant mode
+        /// Remove Bushido artifacts for the selected assistant mode
         #[arg(long)]
         uninstall: bool,
 
-        /// Target Codex CLI (uses AGENTS.md + RTK.md, no Claude hook patching)
+        /// Target Codex CLI (uses AGENTS.md + Bushido.md, no Claude hook patching)
         #[arg(long)]
         codex: bool,
 
@@ -443,7 +443,7 @@ enum Commands {
         yes: bool,
     },
 
-    /// Claude Code economics: spending (ccusage) vs savings (rtk) analysis
+    /// Claude Code economics: spending (ccusage) vs savings (bdo) analysis
     CcEconomics {
         /// Show detailed daily breakdown
         #[arg(short, long)]
@@ -558,7 +558,7 @@ enum Commands {
         args: Vec<String>,
     },
 
-    /// Discover missed RTK savings from Claude Code history
+    /// Discover missed Bushido savings from Claude Code history
     Discover {
         /// Filter by project path (substring match)
         #[arg(short, long)]
@@ -577,7 +577,7 @@ enum Commands {
         format: String,
     },
 
-    /// Show RTK adoption across Claude Code sessions
+    /// Show Bushido adoption across Claude Code sessions
     Session {},
 
     /// Manage telemetry consent and data (RGPD/GDPR)
@@ -752,16 +752,16 @@ enum Commands {
         since: u64,
     },
 
-    /// Rewrite a raw command to its RTK equivalent (single source of truth for hooks)
+    /// Rewrite a raw command to its Bushido equivalent (single source of truth for hooks)
     ///
     /// Exits 0 and prints the rewritten command if supported.
-    /// Exits 1 with no output if the command has no RTK equivalent.
+    /// Exits 1 with no output if the command has no Bushido equivalent.
     ///
     /// Used by Claude Code, Gemini CLI, and other LLM hooks:
-    ///   REWRITTEN=$(rtk rewrite "$CMD") || exit 0
+    ///   REWRITTEN=$(bdo rewrite "$CMD") || exit 0
     Rewrite {
         /// Raw command to rewrite (e.g. "git status", "cargo test && git push")
-        /// Accepts multiple args: `rtk rewrite ls -al` is equivalent to `rtk rewrite "ls -al"`
+        /// Accepts multiple args: `bdo rewrite ls -al` is equivalent to `bdo rewrite "ls -al"`
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -1131,7 +1131,7 @@ enum GoCommands {
     Other(Vec<OsString>),
 }
 
-/// RTK-only subcommands that should never fall back to raw execution.
+/// Bushido-only subcommands that should never fall back to raw execution.
 /// If Clap fails to parse these, show the Clap error directly.
 const BDO_META_COMMANDS: &[&str] = &[
     "gain",

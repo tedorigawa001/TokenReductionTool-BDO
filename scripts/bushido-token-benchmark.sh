@@ -30,17 +30,17 @@ count_tokens() {
 run_case() {
   local name="$1"
   local raw_cmd="$2"
-  local rtk_cmd="$3"
-  local raw_out rtk_out raw_tokens rtk_tokens saved pct raw_lines rtk_lines
+  local bdo_cmd="$3"
+  local raw_out bdo_out raw_tokens bdo_tokens saved pct raw_lines bdo_lines
 
   raw_out=$(eval "$raw_cmd" 2>&1 || true)
-  rtk_out=$(eval "$rtk_cmd" 2>&1 || true)
+  bdo_out=$(eval "$bdo_cmd" 2>&1 || true)
 
   raw_tokens=$(count_tokens "$raw_out")
-  rtk_tokens=$(count_tokens "$rtk_out")
+  bdo_tokens=$(count_tokens "$bdo_out")
   raw_lines=$(printf '%s' "$raw_out" | wc -l | tr -d ' ')
-  rtk_lines=$(printf '%s' "$rtk_out" | wc -l | tr -d ' ')
-  saved=$((raw_tokens - rtk_tokens))
+  bdo_lines=$(printf '%s' "$bdo_out" | wc -l | tr -d ' ')
+  saved=$((raw_tokens - bdo_tokens))
 
   if [ "$raw_tokens" -gt 0 ]; then
     pct=$((saved * 100 / raw_tokens))
@@ -49,7 +49,7 @@ run_case() {
   fi
 
   printf '%-24s %8d %8d %6d%% %7d %7d\n' \
-    "$name" "$raw_tokens" "$rtk_tokens" "$pct" "$raw_lines" "$rtk_lines"
+    "$name" "$raw_tokens" "$bdo_tokens" "$pct" "$raw_lines" "$bdo_lines"
 }
 
 printf '%-24s %8s %8s %6s %7s %7s\n' CASE RAW_TOK BDO_TOK SAVE RAW_LN BDO_LN
@@ -63,4 +63,6 @@ run_case 'git log' 'git log -10 --stat' '"$BDO_BIN" git log -n 10'
 run_case 'read default main' 'cat src/main.rs' '"$BDO_BIN" read src/main.rs'
 run_case 'read aggressive main' 'cat src/main.rs' '"$BDO_BIN" read src/main.rs -l aggressive'
 run_case 'smart main' 'cat src/main.rs' '"$BDO_BIN" smart src/main.rs'
-run_case 'cargo check' 'cargo check 2>&1 || true' '"$BDO_BIN" cargo check 2>&1 || true'
+if [ "${BDO_BENCH_SLOW:-0}" = "1" ]; then
+  run_case 'cargo check' 'cargo check 2>&1 || true' '"$BDO_BIN" cargo check 2>&1 || true'
+fi

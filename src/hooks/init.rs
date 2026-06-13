@@ -62,10 +62,10 @@ schema_version = 1
 # max_lines = 40
 "#;
 
-const BDO_MD: &str = "RTK.md";
+const BDO_MD: &str = "Bushido.md";
 const CLAUDE_MD: &str = "CLAUDE.md";
 const AGENTS_MD: &str = "AGENTS.md";
-const BDO_MD_REF: &str = "@RTK.md";
+const BDO_MD_REF: &str = "@Bushido.md";
 const GEMINI_MD: &str = "GEMINI.md";
 
 const BDO_BLOCK_START: &str = "<!-- bdo-instructions";
@@ -725,19 +725,19 @@ pub fn uninstall(
         removed.push("Integrity hash: removed".to_string());
     }
 
-    // 2. Remove RTK.md
+    // 2. Remove Bushido.md
     let rtk_md_path = claude_dir.join(BDO_MD);
     if rtk_md_path.exists() {
         if dry_run {
-            println!("[dry-run] would remove RTK.md: {}", rtk_md_path.display());
+            println!("[dry-run] would remove Bushido.md: {}", rtk_md_path.display());
         } else {
             fs::remove_file(&rtk_md_path)
-                .with_context(|| format!("Failed to remove RTK.md: {}", rtk_md_path.display()))?;
+                .with_context(|| format!("Failed to remove Bushido.md: {}", rtk_md_path.display()))?;
         }
-        removed.push(format!("RTK.md: {}", rtk_md_path.display()));
+        removed.push(format!("Bushido.md: {}", rtk_md_path.display()));
     }
 
-    // 3. Remove @RTK.md reference from CLAUDE.md
+    // 3. Remove @Bushido.md reference from CLAUDE.md
     let claude_md_path = claude_dir.join(CLAUDE_MD);
     if claude_md_path.exists() {
         let content = fs::read_to_string(&claude_md_path)
@@ -755,7 +755,7 @@ pub fn uninstall(
 
             working_content = clean_double_blanks(&new_content);
             claude_md_changed = true;
-            removed.push("CLAUDE.md: removed @RTK.md reference".to_string());
+            removed.push("CLAUDE.md: removed @Bushido.md reference".to_string());
         }
 
         if working_content.contains(BDO_BLOCK_START) {
@@ -882,15 +882,15 @@ fn uninstall_codex_at(codex_dir: &Path, ctx: InitContext) -> Result<Vec<String>>
     let rtk_md_path = codex_dir.join(BDO_MD);
     if rtk_md_path.exists() {
         if dry_run {
-            println!("[dry-run] would remove RTK.md: {}", rtk_md_path.display());
+            println!("[dry-run] would remove Bushido.md: {}", rtk_md_path.display());
         } else {
             fs::remove_file(&rtk_md_path)
-                .with_context(|| format!("Failed to remove RTK.md: {}", rtk_md_path.display()))?;
+                .with_context(|| format!("Failed to remove Bushido.md: {}", rtk_md_path.display()))?;
             if verbose > 0 {
-                eprintln!("Removed RTK.md: {}", rtk_md_path.display());
+                eprintln!("Removed Bushido.md: {}", rtk_md_path.display());
             }
         }
-        removed.push(format!("RTK.md: {}", rtk_md_path.display()));
+        removed.push(format!("Bushido.md: {}", rtk_md_path.display()));
     }
 
     let agents_md_path = codex_dir.join(AGENTS_MD);
@@ -922,7 +922,7 @@ fn uninstall_codex_at(codex_dir: &Path, ctx: InitContext) -> Result<Vec<String>>
         &[BDO_MD_REF, absolute_rtk_md_ref.as_str()],
         ctx,
     )? {
-        removed.push("AGENTS.md: removed @RTK.md reference".to_string());
+        removed.push("AGENTS.md: removed @Bushido.md reference".to_string());
     }
 
     Ok(removed)
@@ -1032,7 +1032,7 @@ fn patch_settings_json_command(
 }
 
 /// Clean up consecutive blank lines (collapse 3+ to 2)
-/// Used when removing @RTK.md line from CLAUDE.md
+/// Used when removing @Bushido.md line from CLAUDE.md
 fn clean_double_blanks(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut result = Vec::new();
@@ -1116,7 +1116,7 @@ fn hook_already_present(root: &serde_json::Value, hook_command: &str) -> bool {
         })
 }
 
-/// Default mode: hook + slim RTK.md + @RTK.md reference
+/// Default mode: hook + slim Bushido.md + @Bushido.md reference
 fn run_default_mode(
     global: bool,
     patch_mode: PatchMode,
@@ -1138,7 +1138,7 @@ fn run_default_mode(
     // 1. Migrate old hook script if present
     migrate_old_hook_script(ctx);
 
-    // 2. Write RTK.md
+    // 2. Write Bushido.md
     write_if_changed(&rtk_md_path, BDO_SLIM, BDO_MD, ctx)?;
 
     let opencode_plugin_path = if install_opencode {
@@ -1149,22 +1149,22 @@ fn run_default_mode(
         None
     };
 
-    // 3. Patch CLAUDE.md (add @RTK.md, migrate if needed)
+    // 3. Patch CLAUDE.md (add @Bushido.md, migrate if needed)
     let migrated = patch_claude_md(&claude_md_path, ctx)?;
 
     // 4. Print success message (skip in dry-run)
     if !dry_run {
         println!("\nRTK hook registered (global).\n");
         println!("  Command:   {}", CLAUDE_HOOK_COMMAND);
-        println!("  RTK.md:    {} (10 lines)", rtk_md_path.display());
+        println!("  Bushido.md:    {} (10 lines)", rtk_md_path.display());
         if let Some(path) = &opencode_plugin_path {
             println!("  OpenCode:  {}", path.display());
         }
-        println!("  CLAUDE.md: @RTK.md reference added");
+        println!("  CLAUDE.md: @Bushido.md reference added");
 
         if migrated {
             println!("\n  [ok] Migrated: removed 137-line RTK block from CLAUDE.md");
-            println!("              replaced with @RTK.md (10 lines)");
+            println!("              replaced with @Bushido.md (10 lines)");
         }
     }
 
@@ -1415,7 +1415,7 @@ fn generate_global_filters_template(ctx: InitContext) -> Result<()> {
     Ok(())
 }
 
-/// Hook-only mode: just the hook, no RTK.md
+/// Hook-only mode: just the hook, no Bushido.md
 fn run_hook_only_mode(
     global: bool,
     patch_mode: PatchMode,
@@ -1447,7 +1447,7 @@ fn run_hook_only_mode(
             println!("  OpenCode: {}", path.display());
         }
         println!(
-            "  Note: No RTK.md created. Claude won't know about meta commands (gain, discover, proxy)."
+            "  Note: No Bushido.md created. Claude won't know about meta commands (gain, discover, proxy)."
         );
     }
 
@@ -2285,14 +2285,14 @@ fn run_codex_mode_with_paths(
         }
     }
 
-    // ISSUE #892: In global mode, use absolute path so @RTK.md resolves
+    // ISSUE #892: In global mode, use absolute path so @Bushido.md resolves
     // from any CWD (worktrees, nested projects). Codex resolves @ references
     // relative to CWD, not the AGENTS.md file location.
     let rtk_md_ref = if global {
         codex_rtk_md_ref(
             rtk_md_path
                 .parent()
-                .context("RTK.md path missing parent directory")?,
+                .context("Bushido.md path missing parent directory")?,
         )
     } else {
         BDO_MD_REF.to_string()
@@ -2303,7 +2303,7 @@ fn run_codex_mode_with_paths(
 
     if !dry_run {
         println!("\nRTK configured for Codex CLI.\n");
-        println!("  RTK.md:    {}", rtk_md_path.display());
+        println!("  Bushido.md:    {}", rtk_md_path.display());
         if added_ref {
             println!("  AGENTS.md: {} reference added", rtk_md_ref);
         } else {
@@ -2467,7 +2467,7 @@ fn write_rtk_block(
     Ok(action)
 }
 
-/// Patch CLAUDE.md: add @RTK.md, migrate if old block exists
+/// Patch CLAUDE.md: add @Bushido.md, migrate if old block exists
 fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
     let InitContext { verbose, dry_run } = ctx;
     let mut content = if path.exists() {
@@ -2490,10 +2490,10 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
         }
     }
 
-    // Check if @RTK.md already present
+    // Check if @Bushido.md already present
     if content.contains(BDO_MD_REF) {
         if verbose > 0 {
-            eprintln!("@RTK.md reference already present in CLAUDE.md");
+            eprintln!("@Bushido.md reference already present in CLAUDE.md");
         }
         if migrated {
             if dry_run {
@@ -2508,16 +2508,16 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
         return Ok(migrated);
     }
 
-    // Add @RTK.md
+    // Add @Bushido.md
     let new_content = if content.is_empty() {
-        "@RTK.md\n".to_string()
+        "@Bushido.md\n".to_string()
     } else {
-        format!("{}\n\n@RTK.md\n", content.trim())
+        format!("{}\n\n@Bushido.md\n", content.trim())
     };
 
     if dry_run {
         println!(
-            "[dry-run] would add @RTK.md reference to CLAUDE.md: {}",
+            "[dry-run] would add @Bushido.md reference to CLAUDE.md: {}",
             path.display()
         );
         if verbose > 0 {
@@ -2527,14 +2527,14 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
         fs::write(path, new_content)?;
 
         if verbose > 0 {
-            eprintln!("Added @RTK.md reference to CLAUDE.md");
+            eprintln!("Added @Bushido.md reference to CLAUDE.md");
         }
     }
 
     Ok(migrated)
 }
 
-/// Patch AGENTS.md: add @RTK.md (or absolute path), migrate old inline block if present
+/// Patch AGENTS.md: add @Bushido.md (or absolute path), migrate old inline block if present
 fn patch_agents_md(path: &Path, rtk_md_ref: &str, ctx: InitContext) -> Result<bool> {
     let InitContext { verbose, dry_run } = ctx;
     let mut content = if path.exists() {
@@ -2556,12 +2556,12 @@ fn patch_agents_md(path: &Path, rtk_md_ref: &str, ctx: InitContext) -> Result<bo
         }
     }
 
-    // ISSUE #892: Check for both relative and absolute @RTK.md references
+    // ISSUE #892: Check for both relative and absolute @Bushido.md references
     if content.contains(BDO_MD_REF) || content.contains(rtk_md_ref) {
         if verbose > 0 {
             eprintln!("{} reference already present in AGENTS.md", rtk_md_ref);
         }
-        // ISSUE #892: Migrate old relative @RTK.md to absolute path if needed
+        // ISSUE #892: Migrate old relative @Bushido.md to absolute path if needed
         if rtk_md_ref != BDO_MD_REF && content.contains(BDO_MD_REF) && !content.contains(rtk_md_ref)
         {
             content = content.replace(BDO_MD_REF, rtk_md_ref);
@@ -2652,7 +2652,7 @@ fn remove_rtk_reference_from_agents(path: &Path, refs: &[&str], ctx: InitContext
 
     if dry_run {
         println!(
-            "[dry-run] would remove RTK.md reference from AGENTS.md: {}",
+            "[dry-run] would remove Bushido.md reference from AGENTS.md: {}",
             path.display()
         );
         if verbose > 0 {
@@ -2666,7 +2666,7 @@ fn remove_rtk_reference_from_agents(path: &Path, refs: &[&str], ctx: InitContext
 
     if verbose > 0 {
         eprintln!(
-            "Removed RTK.md reference from AGENTS.md: {}",
+            "Removed Bushido.md reference from AGENTS.md: {}",
             path.display()
         );
     }
@@ -3370,11 +3370,11 @@ fn show_claude_config() -> Result<()> {
         println!("[--] Hook: not found");
     }
 
-    // Check RTK.md
+    // Check Bushido.md
     if rtk_md_path.exists() {
-        println!("[ok] RTK.md: {} (slim mode)", rtk_md_path.display());
+        println!("[ok] Bushido.md: {} (slim mode)", rtk_md_path.display());
     } else {
-        println!("[--] RTK.md: not found");
+        println!("[--] Bushido.md: not found");
     }
 
     // Check hook integrity (only relevant for legacy script hooks)
@@ -3403,7 +3403,7 @@ fn show_claude_config() -> Result<()> {
     if global_claude_md.exists() {
         let content = fs::read_to_string(&global_claude_md)?;
         if content.contains(BDO_MD_REF) {
-            println!("[ok] Global (~/.claude/CLAUDE.md): @RTK.md reference");
+            println!("[ok] Global (~/.claude/CLAUDE.md): @Bushido.md reference");
         } else if content.contains(BDO_BLOCK_START) {
             println!(
                 "[warn] Global (~/.claude/CLAUDE.md): old RTK block (run: bdo init -g to migrate)"
@@ -3514,14 +3514,14 @@ fn show_claude_config() -> Result<()> {
 
     println!("\nUsage:");
     println!("  bdo init              # Full injection into local CLAUDE.md");
-    println!("  bdo init -g           # Hook + RTK.md + @RTK.md + settings.json (recommended)");
+    println!("  bdo init -g           # Hook + Bushido.md + @Bushido.md + settings.json (recommended)");
     println!("  bdo init -g --auto-patch    # Same as above but no prompt");
     println!("  bdo init -g --no-patch      # Skip settings.json (manual setup)");
     println!("  bdo init -g --uninstall     # Remove all RTK artifacts");
     println!("  bdo init -g --claude-md     # Legacy: full injection into ~/.claude/CLAUDE.md");
-    println!("  bdo init -g --hook-only     # Hook only, no RTK.md");
-    println!("  bdo init --codex            # Configure local AGENTS.md + RTK.md");
-    println!("  bdo init -g --codex         # Configure $CODEX_HOME/AGENTS.md + $CODEX_HOME/RTK.md (or ~/.codex/)");
+    println!("  bdo init -g --hook-only     # Hook only, no Bushido.md");
+    println!("  bdo init --codex            # Configure local AGENTS.md + Bushido.md");
+    println!("  bdo init -g --codex         # Configure $CODEX_HOME/AGENTS.md + $CODEX_HOME/Bushido.md (or ~/.codex/)");
     println!("  bdo init -g --opencode      # OpenCode plugin only");
     println!("  bdo init -g --agent cursor  # Install Cursor Agent hooks");
 
@@ -3539,15 +3539,15 @@ fn show_codex_config() -> Result<()> {
     println!("bdo Configuration (Codex CLI):\n");
 
     if global_rtk_md.exists() {
-        println!("[ok] Global RTK.md: {}", global_rtk_md.display());
+        println!("[ok] Global Bushido.md: {}", global_rtk_md.display());
     } else {
-        println!("[--] Global RTK.md: not found");
+        println!("[--] Global Bushido.md: not found");
     }
 
     if global_agents_md.exists() {
         let content = fs::read_to_string(&global_agents_md)?;
         if has_rtk_reference(&content, &[BDO_MD_REF, global_rtk_md_ref.as_str()]) {
-            println!("[ok] Global AGENTS.md: RTK.md reference");
+            println!("[ok] Global AGENTS.md: Bushido.md reference");
         } else if content.contains(BDO_BLOCK_START) {
             println!("[!!] Global AGENTS.md: old inline RTK block");
         } else {
@@ -3558,15 +3558,15 @@ fn show_codex_config() -> Result<()> {
     }
 
     if local_rtk_md.exists() {
-        println!("[ok] Local RTK.md: {}", local_rtk_md.display());
+        println!("[ok] Local Bushido.md: {}", local_rtk_md.display());
     } else {
-        println!("[--] Local RTK.md: not found");
+        println!("[--] Local Bushido.md: not found");
     }
 
     if local_agents_md.exists() {
         let content = fs::read_to_string(&local_agents_md)?;
         if has_rtk_reference(&content, &[BDO_MD_REF]) {
-            println!("[ok] Local AGENTS.md: @RTK.md reference");
+            println!("[ok] Local AGENTS.md: @Bushido.md reference");
         } else if content.contains(BDO_BLOCK_START) {
             println!("[!!] Local AGENTS.md: old inline RTK block");
         } else {
@@ -3577,8 +3577,8 @@ fn show_codex_config() -> Result<()> {
     }
 
     println!("\nUsage:");
-    println!("  bdo init --codex              # Configure local AGENTS.md + RTK.md");
-    println!("  bdo init -g --codex           # Configure $CODEX_HOME/AGENTS.md + $CODEX_HOME/RTK.md (or ~/.codex/)");
+    println!("  bdo init --codex              # Configure local AGENTS.md + Bushido.md");
+    println!("  bdo init -g --codex           # Configure $CODEX_HOME/AGENTS.md + $CODEX_HOME/Bushido.md (or ~/.codex/)");
     println!("  bdo init -g --codex --uninstall  # Remove global Codex RTK artifacts");
 
     Ok(())
@@ -4282,7 +4282,7 @@ mod tests {
     #[test]
     fn test_default_mode_creates_rtk_md() {
         let temp = TempDir::new().unwrap();
-        let rtk_md_path = temp.path().join("RTK.md");
+        let rtk_md_path = temp.path().join("Bushido.md");
 
         fs::write(&rtk_md_path, BDO_SLIM).unwrap();
         assert!(rtk_md_path.exists());
@@ -4350,10 +4350,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let claude_md = temp.path().join("CLAUDE.md");
 
-        fs::write(&claude_md, "# My stuff\n\n@RTK.md\n").unwrap();
+        fs::write(&claude_md, "# My stuff\n\n@Bushido.md\n").unwrap();
 
         let content = fs::read_to_string(&claude_md).unwrap();
-        let count = content.matches("@RTK.md").count();
+        let count = content.matches("@Bushido.md").count();
         assert_eq!(count, 1);
     }
 
@@ -4370,7 +4370,7 @@ mod tests {
         assert!(!second_added);
 
         let content = fs::read_to_string(&agents_md).unwrap();
-        assert_eq!(content.matches("@RTK.md").count(), 1);
+        assert_eq!(content.matches("@Bushido.md").count(), 1);
     }
 
     #[test]
@@ -4476,7 +4476,7 @@ mod tests {
 
         assert!(added);
         let content = fs::read_to_string(&agents_md).unwrap();
-        assert_eq!(content, "@RTK.md\n");
+        assert_eq!(content, "@Bushido.md\n");
     }
 
     #[test]
@@ -4497,7 +4497,7 @@ mod tests {
         assert!(added);
         let content = fs::read_to_string(&agents_md).unwrap();
         assert!(!content.contains("old"));
-        assert_eq!(content.matches("@RTK.md").count(), 1);
+        assert_eq!(content.matches("@Bushido.md").count(), 1);
     }
 
     #[test]
@@ -4988,7 +4988,7 @@ mod tests {
     fn test_run_codex_mode_global_writes_absolute_reference_to_codex_dir() {
         let temp = TempDir::new().unwrap();
         let agents_md = temp.path().join("AGENTS.md");
-        let rtk_md = temp.path().join("RTK.md");
+        let rtk_md = temp.path().join("Bushido.md");
 
         run_codex_mode_with_paths(
             agents_md.clone(),
@@ -5091,9 +5091,9 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let codex_dir = temp.path();
         let agents_md = codex_dir.join("AGENTS.md");
-        let rtk_md = codex_dir.join("RTK.md");
+        let rtk_md = codex_dir.join("Bushido.md");
 
-        fs::write(&agents_md, "# Team rules\n\n@RTK.md\n").unwrap();
+        fs::write(&agents_md, "# Team rules\n\n@Bushido.md\n").unwrap();
         fs::write(&rtk_md, "codex config").unwrap();
 
         let removed_first = uninstall_codex_at(codex_dir, InitContext::default()).unwrap();
@@ -5104,7 +5104,7 @@ mod tests {
         assert!(!rtk_md.exists());
 
         let content = fs::read_to_string(&agents_md).unwrap();
-        assert!(!content.contains("@RTK.md"));
+        assert!(!content.contains("@Bushido.md"));
         assert!(content.contains("# Team rules"));
     }
 
@@ -5113,7 +5113,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let codex_dir = temp.path();
         let agents_md = codex_dir.join("AGENTS.md");
-        let rtk_md = codex_dir.join("RTK.md");
+        let rtk_md = codex_dir.join("Bushido.md");
         let absolute_ref = codex_rtk_md_ref(codex_dir);
 
         fs::write(&agents_md, format!("# Team rules\n\n{}\n", absolute_ref)).unwrap();
@@ -5183,7 +5183,7 @@ mod tests {
     fn test_run_codex_mode_dry_run_writes_nothing() {
         let temp = TempDir::new().unwrap();
         let agents_md = temp.path().join("AGENTS.md");
-        let rtk_md = temp.path().join("RTK.md");
+        let rtk_md = temp.path().join("Bushido.md");
 
         run_codex_mode_with_paths(
             agents_md.clone(),
@@ -5198,7 +5198,7 @@ mod tests {
 
         assert!(
             !rtk_md.exists(),
-            "dry-run must not create RTK.md: {}",
+            "dry-run must not create Bushido.md: {}",
             rtk_md.display()
         );
         assert!(
@@ -5213,7 +5213,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let codex_dir = temp.path();
         let agents_md = codex_dir.join("AGENTS.md");
-        let rtk_md = codex_dir.join("RTK.md");
+        let rtk_md = codex_dir.join("Bushido.md");
 
         fs::write(
             &agents_md,
@@ -5903,7 +5903,7 @@ mod tests {
         with_claude_dir_override(&tmp, |claude_dir| {
             run_default_mode(true, PatchMode::Auto, false, InitContext::default()).unwrap();
 
-            assert!(claude_dir.join(BDO_MD).exists(), "RTK.md must be created");
+            assert!(claude_dir.join(BDO_MD).exists(), "Bushido.md must be created");
             assert!(
                 claude_dir.join(CLAUDE_MD).exists(),
                 "CLAUDE.md must be created"
@@ -5926,7 +5926,7 @@ mod tests {
             run_default_mode(true, PatchMode::Auto, false, InitContext::default()).unwrap();
             uninstall(true, false, false, false, false, InitContext::default()).unwrap();
 
-            assert!(!claude_dir.join(BDO_MD).exists(), "RTK.md must be removed");
+            assert!(!claude_dir.join(BDO_MD).exists(), "Bushido.md must be removed");
             let settings_content =
                 fs::read_to_string(claude_dir.join(SETTINGS_JSON)).unwrap_or_default();
             assert!(
@@ -5962,7 +5962,7 @@ mod tests {
 
             run_default_mode(true, PatchMode::Auto, false, InitContext::default()).unwrap();
 
-            assert!(claude_dir.join(BDO_MD).exists(), "RTK.md must be created");
+            assert!(claude_dir.join(BDO_MD).exists(), "Bushido.md must be created");
             let settings = fs::read_to_string(claude_dir.join(SETTINGS_JSON)).unwrap();
             assert!(
                 settings.contains(CLAUDE_HOOK_COMMAND),
@@ -6000,7 +6000,7 @@ mod tests {
 
             assert!(
                 !claude_dir.join(BDO_MD).exists(),
-                "RTK.md must NOT be created in hook-only mode"
+                "Bushido.md must NOT be created in hook-only mode"
             );
             let settings = fs::read_to_string(claude_dir.join(SETTINGS_JSON)).unwrap();
             assert!(
@@ -6022,7 +6022,7 @@ mod tests {
 
             assert!(
                 !claude_dir.join(BDO_MD).exists(),
-                "dry-run must not create RTK.md"
+                "dry-run must not create Bushido.md"
             );
             assert!(
                 !claude_dir.join(CLAUDE_MD).exists(),
@@ -6057,7 +6057,7 @@ mod tests {
             // Files must still exist with identical content
             assert!(
                 claude_dir.join(BDO_MD).exists(),
-                "dry-run uninstall must not remove RTK.md"
+                "dry-run uninstall must not remove Bushido.md"
             );
             assert!(
                 claude_dir.join(SETTINGS_JSON).exists(),
@@ -6066,7 +6066,7 @@ mod tests {
             assert_eq!(
                 fs::read_to_string(claude_dir.join(BDO_MD)).unwrap(),
                 rtk_md_before,
-                "dry-run uninstall must not modify RTK.md"
+                "dry-run uninstall must not modify Bushido.md"
             );
             assert_eq!(
                 fs::read_to_string(claude_dir.join(SETTINGS_JSON)).unwrap(),
@@ -6112,15 +6112,15 @@ mod tests {
 
     #[test]
     fn test_uninstall_handles_both_artifacts() {
-        let content = format!("# Config\n\n@RTK.md\n\n{}\n\nMore stuff", BDO_INSTRUCTIONS);
+        let content = format!("# Config\n\n@Bushido.md\n\n{}\n\nMore stuff", BDO_INSTRUCTIONS);
 
         let after_at_removal: String = content
             .lines()
-            .filter(|line| !line.trim().starts_with("@RTK.md"))
+            .filter(|line| !line.trim().starts_with("@Bushido.md"))
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(!after_at_removal.contains("@RTK.md"));
+        assert!(!after_at_removal.contains("@Bushido.md"));
         assert!(after_at_removal.contains(BDO_BLOCK_START));
 
         let (final_content, did_remove) = remove_rtk_block(&after_at_removal);

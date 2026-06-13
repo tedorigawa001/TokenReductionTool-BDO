@@ -1,0 +1,170 @@
+# Bushido Maintenance Plan
+
+この文書は、Bushido を武士道チームで保守・改造していくための開始台帳です。
+上流の設計思想を尊重しつつ、武士道環境で安全に使い続けられる状態を目指します。
+
+## 現状
+
+- プロジェクト本体は Rust 製 CLI です。
+- 中核は `src/main.rs`, `src/cmds/`, `src/core/`, `src/hooks/` です。
+- 現在の作業ディレクトリには `.git` ディレクトリがなく、Git履歴は確認できません。
+- 現在のシェルでは `cargo`, `rustc`, `rustup` が見つからないため、Rustのビルド検証は未実行です。
+
+## 保守方針
+
+1. まずは武士道版の目的を「LLM作業時の出力圧縮・自動フック・利用状況分析」に絞ります。
+2. 上流 rtk の原則である correctness, transparency, never block, zero overhead は維持します。
+3. 変更は小さく分け、各変更ごとにテストまたは手動確認コマンドを残します。
+4. ブランド変更、デフォルト設定変更、フック挙動変更は、コード修正より先に影響範囲を記録します。
+5. ローカル運用で必要な機能を優先し、上流追従しやすい形で差分を抑えます。
+
+## 最初に固めること
+
+### 1. ビルド環境
+
+Rust toolchain を入れて、最低限この3つが通る状態にします。
+
+```bash
+cargo check
+cargo test
+cargo fmt --all --check
+```
+
+その後、変更前ベースラインとして以下を記録します。
+
+```bash
+cargo test --all
+cargo clippy --all-targets
+bash scripts/check-test-presence.sh
+```
+
+### 2. Git 管理
+
+このコピーには `.git` がないため、武士道版として保守するなら最初にGit管理を開始します。
+上流追従を考える場合は、上流URLと取得元のバージョンをこの文書に追記します。
+
+記録する項目:
+
+- 上流リポジトリ
+- 取得日
+- 取得バージョン
+- 武士道版の初期タグ
+- 上流追従方針
+
+### 3. 武士道版の差分
+
+初期改造候補:
+
+- README / install 文言を武士道運用向けに調整する
+- デフォルトのフック対象エージェントを武士道で使うものに寄せる
+- `bdo gain` など分析出力に、武士道向けの簡易サマリを追加する
+- プロジェクトローカルの推奨設定 `.rtk/` を整える
+- 日本語ドキュメントを最新構成に合わせて修正する
+
+## 優先ロードマップ
+
+### Phase 0: 検証できる状態にする
+
+- Rust toolchain を導入する
+- `cargo check` を通す
+- `cargo test` の失敗有無を確認する
+- `.git` 管理を開始するか、上流からcloneし直すかを決める
+
+### Phase 1: 保守しやすい武士道版にする
+
+- READMEのリンク切れや古い説明を直す
+- `docs/bushido/` に運用メモを集約する
+- よく使う確認コマンドを `scripts/bushido-check.sh` として用意する
+
+### Phase 2: 使うエージェントに寄せる
+
+- Codex / Claude / Cursor / Copilot のうち、実際に使うフックだけ重点検証する
+- `bdo rewrite` の対象コマンドを武士道の作業パターンに合わせて調整する
+- 除外コマンドや危険コマンドの扱いを明文化する
+
+### Phase 3: 武士道独自機能を足す
+
+- 日本語ログや日本語エラーの圧縮品質を上げる
+- よく使うツール向けの TOML フィルタを追加する
+- 分析コマンドに日次・週次の武士道運用サマリを追加する
+
+## 変更時のチェックリスト
+
+- 変更範囲は1テーマに絞ったか
+- 既存の `cmds/`, `core/`, `hooks/` の境界を崩していないか
+- 失敗時に元コマンドの実行を妨げないか
+- verbose指定時に必要な詳細を見られるか
+- トークン削減より正しさを優先しているか
+- テストまたは手動確認コマンドを記録したか
+
+## 実施記録
+
+### 2026-06-13 — fail-safe 修正 + bdo リネーム（フェーズ1: コマンド層）
+
+ブランチ: `bushido/rebrand-and-failsafe`。検証: `cargo build` / `cargo test`（2154 passed, 0 failed, 8 ignored）+ 実バイナリのスモークテスト。
+
+**A. fail-safe 修正（設計原則 #4 の実効化）**
+- `Cargo.toml`: release profile を `panic = "abort"` → `panic = "unwind"`。abort 下では `catch_unwind` が無効で、フィルタの panic がプロセスごと出力を巻き込んでいた。
+- `src/core/runner.rs`: 捕捉フィルタ呼び出しを `catch_unwind` で包み、panic 時は raw 出力にフォールバック（50/54 のコマンドが該当）。
+- `src/core/stream.rs`: ストリーミングフィルタ（cargo/tsc/gradlew 等の重いパーサ4種）の `feed_line` / `flush` / `on_exit` を `catch_unwind` で保護。panic 後は raw パススルーへ degrade し、exit code を保持。
+- 回帰テスト `test_run_streaming_filter_panic_falls_back_to_raw` を追加。
+
+**B. コマンド名リネーム（crate `bushido` / バイナリ `bdo` / 表示名 Bushido）**
+- `Cargo.toml`: `name = "bushido"`、`[[bin]] name = "bdo"`、deb/rpm のアセットパスを `bdo` に。
+- clap の `name`/`about`/`long_about` を Bushido に（上流帰属「fork of rtk (Rust Token Killer)」は保持）。
+- コマンド生成・検出（`discover/rules.rs` の `rtk_cmd`、`registry.rs` の検出/生成）、tracking ラベル、`[rtk]`→`[bdo]` ログ接頭辞を更新。
+- バイナリに同梱（`include_str!`）されるエージェント連携テンプレートのコマンド/バイナリ呼び出しを `bdo` に（pi/opencode の `exec("bdo", ...)`、hermes の `which("bdo")` / `["bdo","rewrite",...]` 等）。
+
+### 2026-06-13 — フェーズ2: 完全リネーム（RTK 残さない方針）
+
+検証: `cargo build` / `cargo test`（2154 passed, 0 failed, 8 ignored）。RTK_ 互換は残さない（保守工数削減）。
+
+- **env 変数**: `RTK_*` → `BDO_*` を全面置換（実 env 読取り12箇所 + 子プロセス用マーカー + `BDO_DISABLED=` 接頭辞検出 + `option_env!("BDO_TELEMETRY_URL/TOKEN")`）。互換フォールバックなし。
+- **データ/設定ディレクトリ**: `~/.local/share/rtk` → `~/.local/share/bdo`（`BDO_DATA_DIR` 定数値 + ハードコードの `.join("rtk")` を統一）。プロジェクトローカル設定 `.rtk/` → `.bdo/`。旧データはクリーン切替で非参照（移行フォールバックなし）。
+- **フックのファイル名・マーカー**: `rtk.ts`→`bdo.ts`、`rtk-awareness.md`→`bdo-awareness.md`、hermes プラグイン `rtk-rewrite`→`bdo-rewrite`、copilot `rtk-rewrite.json`→`bdo-rewrite.json`、`rtk-hook-gemini.sh`→`bdo-hook-gemini.sh`、`rtk-rules.md`→`bdo-rules.md`、CLAUDE.md/AGENTS.md の `rtk-instructions` マーカー→`bdo-instructions`。同梱ファイル実体も `mv` 済み・`include_str!` パス更新済み。
+- **非 src 資材**: `Formula/rtk.rb`→`bdo.rb`（class `Bdo`、`bin.install "bdo"`）、`install.sh`（`BINARY_NAME=bdo`、`BDO_*` env）、`scripts/rtk-economics.sh`→`bdo-economics.sh`、docs/README/各 README のコマンド・env・製品名（`RTK`→`Bushido`）を一括変換。
+
+### 2026-06-13 — リポジトリURL差し替え
+
+フォークの GitHub を `https://github.com/tedorigawa001/TokenReductionTool` に確定。`github.com/rtk-ai/rtk` / `rtk-ai/tap/rtk` / star-history 等の**機能的URL**を全面差し替え（Cargo.toml の homepage/repository、`install.sh` の REPO、`Formula/bdo.rb` の url/homepage/tap=`tedorigawa001/tap`、README×2・INSTALL・docs・openclaw・src 内 issues リンク）。Homebrew tap は `tedorigawa001/homebrew-tap` を前提（Formula にコメント）。
+
+**意図的に残した rtk（レガシー処理 / 上流帰属 / 連絡先）**
+- 旧フック `rtk-rewrite.sh` の**アンインストール/検出コード**（`REWRITE_HOOK_FILE` 定数等）— 上流由来の実在ファイルを掃除する処理のため。
+- 連絡先メール `contact@rtk-ai.app` / `security@rtk-ai.app`（docs/TELEMETRY, SECURITY, INSTALL）— フォークの連絡先未確定のため保持（テレメトリは既定 off）。
+- `LICENSE` の著作権表記、`CONTRIBUTING.md` の CLA（rtk-ai への権利付与）— 法務。フォークの方針が決まれば見直し。
+- src 内の小文字内部識別子（`rtk_cmd`, `rtk_disabled_count`, `RtkStatus` 等）— 出力・env に出ないため churn 回避。
+- `tests/fixtures/`・`CHANGELOG.md` の `rtk` — テスト入力データ / 上流履歴のため不変更。
+
+### 2026-06-13 — 残課題対応（メール削除 / CLA / LICENSE / 名称衝突）
+
+- **連絡先メール削除**: `contact@rtk-ai.app` / `security@rtk-ai.app` を全廃し、GitHub issues / security advisory URL に置換（src のテレメトリ consent/erasure 表示 `telemetry_cmd.rs`・`init.rs` 含む）。連絡は GitHub で行う方針。
+- **CLA 削除**: `CONTRIBUTING.md` の CLA セクション（rtk-ai 社への権利付与・`bdo Pro`・CLA Assistant・存在しない `CLA.md` リンク）をセクションごと削除。
+- **LICENSE**: 上流 `Copyright 2024 rtk-ai and rtk-ai Labs` を保持し、`Copyright 2026 tedorigawa001 (Bushido fork)` を追記（Apache-2.0 準拠）。
+- **名称衝突警告の撤去**: バイナリが `rtk`→`bdo` になり reachingforthejack/rtk（Rust Type Kit, binary `rtk`）との衝突が解消したため、陳腐化した「2つの bdo がある / Type Kit と間違えるな」記述を8ファイル（README, INSTALL, CLAUDE, docs/troubleshooting, docs/installation, 同梱 bdo-awareness.md, copilot awareness, check-installation.sh）から削除/簡素化。stale バイナリパス `target/release/rtk`→`bdo`、`cargo install bdo`→`bushido`、リリース成果物名 `rtk-*`→`bdo-*` も修正。
+
+**意図的に残した rtk**
+- 旧フック `rtk-rewrite.sh` の**アンインストール/検出コード**（`REWRITE_HOOK_FILE` 定数等）。
+- src 内の小文字内部識別子（`rtk_cmd`, `rtk_disabled_count`, `RtkStatus` 等）。
+- `tests/fixtures/`・`CHANGELOG.md`・src のテスト入力データ（`install_method_from_path` のサンプルパス、cargo 置換フィクスチャ等）。
+- `LICENSE` の上流著作権行（Apache-2.0 が保持を要求）。
+
+### 2026-06-13 — scripts 監査（バイナリ名バグ修正 + dir/ラベル整合）
+
+レビュー指摘を機に scripts/ を横断監査:
+- **バグ修正①** `scripts/install-local.sh`: `bdo` をビルドして `${INSTALL_DIR}/rtk` に install していた（PATH 上のコマンド名が rtk になる実害）→ `${INSTALL_DIR}/bdo` に修正。
+- **バグ修正②** `scripts/test-install.sh`: 偽バイナリを `safe_src/rtk` で作成後に `tar ... bdo`（不在ファイル）→ tar 失敗。`safe_src/bdo` に修正。
+- **データ/出力ラベル整合**: `bushido-token-benchmark.sh`・`bushido-check.sh` の `$TEST_HOME/rtk/*`（DB/tee/data dir）→ `/bdo/`、temp dir `rtk-test-home`/`rtk-target-new` → `bdo-*`、`benchmark.sh` の出力サブディレクトリ `$BENCH_DIR/rtk` → `/bdo`、出力文言「install rtk」「data from rtk」→ bdo、ベンチVM の clone dir `/home/ubuntu/rtk` → `/home/ubuntu/bushido`・VM名 `rtk-test`→`bushido-test` 等。`bushido-token-benchmark.sh:9` の `debug/rtk`→`debug/bdo` は既修正を確認。
+- **据え置き（出力/ディレクトリではない）**: 内部シェル/TS変数（`rtk_cmd`, `rtk_out`, `TOTAL_RTK`, `rtkMean`, `rtk_db` 等）、サンプル/フィクスチャ（`rtk-bench` crate、`test@rtk.dev`、path-traversal テストの `rtk/..`）、レガシー `rtk-rewrite.sh` 検出（`validate-docs.sh`, `check-installation.sh`）。
+- `benchmark-sessions/lib/runner.py` が参照する `setup-rtk.sh` は非同梱（既存 dangling 参照）。
+
+**残課題**
+- GitHub に `bdo-<target>.tar.gz` リリース成果物と Homebrew tap (`tedorigawa001/homebrew-tap`) を用意。
+- 上流追従が不要なら、レガシー `rtk-rewrite.sh` 掃除コードの削除を検討。
+- `check-installation.sh` のフック検出が legacy `rtk-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
+- 標準 python/bash プラグインテストの実行確認（`hooks/hermes/tests/`, `hooks/*/test-*.sh`）。
+
+## 次の作業候補
+
+1. `git add` してコミット（現状ブランチ `bushido/rebrand-and-failsafe`、未コミット）。
+2. GitHub リリース成果物 / Homebrew tap の整備。
+3. `scripts/bushido-check.sh` 等の `bdo` バイナリ前提での動作確認。

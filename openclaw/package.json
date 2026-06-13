@@ -1,0 +1,26 @@
+{
+  "name": "@tedorigawa001/bdo-rewrite",
+  "version": "1.0.0",
+  "description": "Bushido plugin for OpenClaw — rewrites shell commands for 60-90% LLM token savings",
+  "main": "index.ts",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tedorigawa001/TokenReductionTool",
+    "directory": "openclaw"
+  },
+  "homepage": "https://github.com/tedorigawa001/TokenReductionTool",
+  "keywords": [
+    "bdo",
+    "openclaw",
+    "openclaw-plugin",
+    "token-savings",
+    "llm",
+    "cli-proxy"
+  ],
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "README.md"
+  ]
+}

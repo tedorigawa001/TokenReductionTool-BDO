@@ -1,0 +1,28 @@
+{
+  "id": "bdo-rewrite",
+  "name": "Bushido Token Optimizer",
+  "version": "1.0.0",
+  "description": "Transparently rewrites shell commands to their Bushido equivalents for 60-90% LLM token savings",
+  "homepage": "https://github.com/tedorigawa001/TokenReductionTool",
+  "license": "Apache-2.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable automatic command rewriting to Bushido equivalents"
+      },
+      "verbose": {
+        "type": "boolean",
+        "default": false,
+        "description": "Log rewrite decisions to console for debugging"
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": { "label": "Enable Bushido rewriting" },
+    "verbose": { "label": "Verbose logging" }
+  }
+}

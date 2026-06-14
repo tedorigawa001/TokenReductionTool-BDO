@@ -10,15 +10,13 @@
   <a href="https://github.com/tedorigawa001/TokenReductionTool/actions"><img src="https://github.com/tedorigawa001/TokenReductionTool/workflows/Security%20Check/badge.svg" alt="CI"></a>
   <a href="https://github.com/tedorigawa001/TokenReductionTool/releases"><img src="https://img.shields.io/github/v/release/tedorigawa001/TokenReductionTool" alt="Release"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
-  <a href="https://discord.gg/RySmvNF5kF"><img src="https://img.shields.io/discord/1478373640461488159?label=Discord&logo=discord" alt="Discord"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/tedorigawa001/TokenReductionTool">ウェブサイト</a> &bull;
   <a href="#インストール">インストール</a> &bull;
   <a href="docs/guide/resources/troubleshooting.md">トラブルシューティング</a> &bull;
-  <a href="docs/contributing/ARCHITECTURE.md">アーキテクチャ</a> &bull;
-  <a href="https://discord.gg/RySmvNF5kF">Discord</a>
+  <a href="docs/contributing/ARCHITECTURE.md">アーキテクチャ</a>
 </p>
 
 <p align="center">

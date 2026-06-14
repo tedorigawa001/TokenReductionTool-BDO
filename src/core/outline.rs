@@ -22,7 +22,21 @@
 use crate::core::filter::Language;
 
 /// Produce an outline of `content`, or `None` if the language is unsupported.
+///
+/// Keeps every signature: top-level items, struct/enum fields, and the method
+/// signatures inside `impl`/`trait`/`class` blocks (their bodies elided).
 pub fn outline(content: &str, lang: &Language) -> Option<String> {
+    render(content, lang, false)
+}
+
+/// Like [`outline`] but collapses *every* block (including struct/impl/trait/
+/// class) to `{ … }`, leaving only top-level declarations — the compact form
+/// used by `bdo map` for a bird's-eye view across many files.
+pub fn signatures(content: &str, lang: &Language) -> Option<String> {
+    render(content, lang, true)
+}
+
+fn render(content: &str, lang: &Language, collapse_all: bool) -> Option<String> {
     match lang {
         Language::Rust
         | Language::Go
@@ -30,8 +44,12 @@ pub fn outline(content: &str, lang: &Language) -> Option<String> {
         | Language::TypeScript
         | Language::C
         | Language::Cpp
-        | Language::Java => Some(outline_braces(content, matches!(lang, Language::Rust))),
-        Language::Python => Some(outline_python(content)),
+        | Language::Java => Some(outline_braces(
+            content,
+            matches!(lang, Language::Rust),
+            collapse_all,
+        )),
+        Language::Python => Some(outline_python(content, collapse_all)),
         Language::Ruby | Language::Shell | Language::Data | Language::Unknown => None,
     }
 }
@@ -149,7 +167,7 @@ fn first_code_brace(line: &str, rust: bool) -> Option<usize> {
     None
 }
 
-fn outline_braces(content: &str, rust: bool) -> String {
+fn outline_braces(content: &str, rust: bool, collapse_all: bool) -> String {
     let mut out = String::new();
     let mut in_block_comment = false;
 
@@ -178,8 +196,12 @@ fn outline_braces(content: &str, rust: bool) -> String {
             continue;
         }
         if is_annotation(trimmed) {
-            out.push_str(line);
-            out.push('\n');
+            // The per-file outline keeps doc comments and attributes; the map
+            // (`collapse_all`) drops them to stay a terse bird's-eye view.
+            if !collapse_all {
+                out.push_str(line);
+                out.push('\n');
+            }
             // block-doc lines never change brace depth meaningfully
             continue;
         }
@@ -194,7 +216,9 @@ fn outline_braces(content: &str, rust: bool) -> String {
             header.push_str(trimmed);
             header.push(' ');
             // A block whose header carries a parameter list is a function/method.
-            let is_fn = header.contains('(') && header.contains(')');
+            // In `collapse_all` (map) mode, every block is collapsed to `{ … }`
+            // so only top-level declarations survive.
+            let is_fn = collapse_all || (header.contains('(') && header.contains(')'));
             let brace_at = first_code_brace(line, rust).unwrap_or(line.len());
 
             if is_fn {
@@ -239,7 +263,7 @@ fn outline_braces(content: &str, rust: bool) -> String {
     collapse_blank_runs(&out)
 }
 
-fn outline_python(content: &str) -> String {
+fn outline_python(content: &str, collapse_all: bool) -> String {
     let mut out = String::new();
     // When `Some(n)`, we are inside the body of a `def`/`class` whose header was
     // at indent `n`; its body is everything indented deeper than `n`.
@@ -267,6 +291,11 @@ fn outline_python(content: &str) -> String {
         }
 
         if trimmed.starts_with("def ") || trimmed.starts_with("class ") {
+            // In `collapse_all` (map) mode, drop nested defs/methods — keep only
+            // the outermost def/class so the map stays a bird's-eye view.
+            if collapse_all && body_indent.is_some() {
+                continue;
+            }
             // Keep the header (top-level or nested method/class); flush decorators.
             for d in pending_decorators.drain(..) {
                 out.push_str(&d);
@@ -280,8 +309,9 @@ fn outline_python(content: &str) -> String {
 
         // Not a decorator or def/class header.
         pending_decorators.clear();
-        if body_indent.is_none() {
-            // Module top level: keep imports, constants, assignments.
+        if body_indent.is_none() && !collapse_all {
+            // Module top level: keep imports, constants, assignments. The map
+            // form omits these to stay structural (def/class only).
             out.push_str(line);
             out.push('\n');
         }
@@ -311,6 +341,69 @@ fn collapse_blank_runs(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- signatures() / map mode (collapse_all) ---
+
+    #[test]
+    fn test_signatures_collapses_all_blocks_to_top_level() {
+        let src = "\
+/// a doc comment
+#[derive(Debug)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+impl Point {
+    pub fn norm(&self) -> f64 {
+        0.0
+    }
+}
+pub fn free() -> u32 {
+    1
+}
+";
+        let o = signatures(src, &Language::Rust).unwrap();
+        // Every block collapses to `{ … }`; only top-level declarations remain.
+        assert!(o.contains("pub struct Point { … }"), "{o}");
+        assert!(o.contains("impl Point { … }"), "{o}");
+        assert!(o.contains("pub fn free() -> u32 { … }"), "{o}");
+        // Struct fields and impl methods are NOT shown in the map.
+        assert!(!o.contains("pub x: i32"), "fields hidden in map: {o}");
+        assert!(!o.contains("fn norm"), "methods hidden in map: {o}");
+        // Doc comments and attributes are dropped in map mode.
+        assert!(!o.contains("a doc comment"), "docs dropped: {o}");
+        assert!(!o.contains("#[derive"), "attrs dropped: {o}");
+    }
+
+    #[test]
+    fn test_signatures_python_top_level_only() {
+        let src = "\
+import os
+
+@dataclass
+class Config:
+    timeout: int = 30
+
+    def ready(self):
+        return True
+
+def top():
+    return 1
+";
+        let o = signatures(src, &Language::Python).unwrap();
+        assert!(o.contains("class Config:"), "{o}");
+        assert!(o.contains("def top():"), "{o}");
+        // Nested method and module-level import are dropped in map mode.
+        assert!(!o.contains("def ready"), "nested method hidden: {o}");
+        assert!(!o.contains("import os"), "imports dropped in map: {o}");
+    }
+
+    #[test]
+    fn test_signatures_unsupported_language_none() {
+        assert!(signatures("a: 1\n", &Language::Data).is_none());
+    }
+
+    // --- outline() (per-file detail) is unaffected by the map mode ---
 
     #[test]
     fn test_rust_fn_body_elided() {

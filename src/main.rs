@@ -20,7 +20,7 @@ use cmds::python::{mypy_cmd, pip_cmd, pytest_cmd, ruff_cmd};
 use cmds::ruby::{rake_cmd, rspec_cmd, rubocop_cmd};
 use cmds::rust::{cargo_cmd, runner};
 use cmds::system::{
-    deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, pipe_cmd,
+    deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, map, pipe_cmd,
     read, summary, tree, wc_cmd,
 };
 
@@ -240,6 +240,13 @@ enum Commands {
     /// Summarize project dependencies
     Deps {
         /// Project path
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+
+    /// Code map: top-level signatures of every source file under a directory
+    Map {
+        /// Directory to map
         #[arg(default_value = ".")]
         path: PathBuf,
     },
@@ -1695,6 +1702,11 @@ fn run_cli() -> Result<i32> {
             0
         }
 
+        Commands::Map { path } => {
+            map::run(&path, cli.verbose)?;
+            0
+        }
+
         Commands::Env { filter, show_all } => {
             env_cmd::run(filter.as_deref(), show_all, cli.verbose)?;
             0
@@ -2510,6 +2522,7 @@ fn is_operational_command(cmd: &Commands) -> bool {
             | Commands::Test { .. }
             | Commands::Json { .. }
             | Commands::Deps { .. }
+            | Commands::Map { .. }
             | Commands::Env { .. }
             | Commands::Find { .. }
             | Commands::Diff { .. }

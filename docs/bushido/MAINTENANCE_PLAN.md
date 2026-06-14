@@ -163,8 +163,26 @@ bash scripts/check-test-presence.sh
 - `check-installation.sh` のフック検出が legacy `rtk-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
 - 標準 python/bash プラグインテストの実行確認（`hooks/hermes/tests/`, `hooks/*/test-*.sh`）。
 
-## 次の作業候補
+### 2026-06-14 — 機能追加 + レビュー駆動の修正（main 集約後）
 
-1. `git add` してコミット（現状ブランチ `bushido/rebrand-and-failsafe`、未コミット）。
-2. GitHub リリース成果物 / Homebrew tap の整備。
-3. `scripts/bushido-check.sh` 等の `bdo` バイナリ前提での動作確認。
+作業は `main` に集約済み（fast-forward）。以降 `main` で開発。追加・修正:
+- `feat(read)`: `-l outline`（シグネチャのみ・本体省略）、`feat(map)`: `bdo map`（リポジトリ地図、`outline::signatures` 再利用、`.gitignore` 尊重、多言語）。`feat(curl)`: JSON minify（**端末時のみ**、pipe/redirect は byte 完全 passthrough=#1282 維持）。
+- レビュー修正: `map` を `RUST_HANDLED_COMMANDS` 登録、複数行シグネチャの1行正規化（`code_part` で行末コメント誤合体も修正）。
+- README / README_ja: 事実誤り一掃（旧 `rtk` パス・データディレクトリ `~/.config/rtk`→`bdo`・`rtk-rules.md`→`bdo-rules.md`・hermes `rtk-rewrite/`→`bdo-rewrite/`・成果物名 `rtk-*`→`bdo-*`・version `0.2x`→`0.42.2`・壊れた `/guide/` リンク→相対 docs・ロゴ `assets/logo.svg`→root `logo.svg`・Homebrew バッジ削除）。`-l outline` と `bdo map`(専用セクション)を追記。
+
+**リリースは現在ペンディング**（未実施）。以下のリリース依存タスクは保留:
+- GitHub リリース成果物 `bdo-<target>.tar.gz` / Homebrew tap (`tedorigawa001/homebrew-tap`) の整備。
+- README/install.sh/Formula の install 手順（Homebrew tap・releases・install.sh URL）はリリース後に有効。
+- push / PR もリリース方針確定まで保留。
+
+**残課題（リリースと独立）**
+- `check-installation.sh` のフック検出が legacy `rtk-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
+- 標準 python/bash プラグインテストの実行確認（`hooks/hermes/tests/`, `hooks/*/test-*.sh`）。
+- `bdo grep -h` がフックで `--help` 化（grep `-h`=--no-filename と衝突）— 未知/衝突フラグの扱いを要検討。
+- Python の outline/map に本体省略マーカーが無い（`def foo():` で終わる）— `def foo(): …` 化の検討。
+
+## 次の作業候補（リリースはペンディング）
+
+1. レビュー・ドッグフーディング継続、必要な改善の実装。
+2. 上記「残課題」の対応。
+3. リリース方針が決まり次第: GitHub リリース成果物 / Homebrew tap 整備 → push / PR。

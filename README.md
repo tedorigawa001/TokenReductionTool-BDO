@@ -148,6 +148,29 @@ bdo grep "pattern" .            # Grouped search results
 bdo diff file1 file2            # Condensed diff
 ```
 
+#### Code map (`bdo map`)
+
+Get the API surface of an entire directory in one shot — every file's top-level
+declarations, function bodies elided. Ideal for onboarding an agent to a new
+codebase without reading (and paying for) every file.
+
+```console
+$ bdo map src/core
+runner.rs
+  pub fn run(cmd: Command, tool_name: &str, args_display: &str, mode: RunMode<'_>, opts: RunOptions<'_>) -> Result<i32> { … }
+  pub struct RunOptions<'a> { … }
+  pub enum RunMode<'a> { … }
+stream.rs
+  pub trait StreamFilter { … }
+  pub fn run_streaming(cmd: &mut Command, stdin_mode: StdinMode, stdout_mode: FilterMode<'_>) -> Result<StreamResult> { … }
+…
+— 16 files, 245 signatures (full source: 9,188 lines)
+```
+
+On this repo that's **~74,000 tokens of source rendered in ~3,500** (≈95%
+reduction) with the complete top-level API intact. Supports Rust, Go, JS/TS, C,
+C++, Java, and Python; respects `.gitignore`.
+
 ### Git
 ```bash
 bdo git status                  # Compact status

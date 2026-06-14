@@ -111,6 +111,25 @@ bdo find "*.rs" .               # コンパクトな検索結果
 bdo grep "pattern" .            # ファイル別グループ化検索
 ```
 
+#### コードマップ（`bdo map`）
+
+ディレクトリ全体の API 全体像を一発で取得します。各ファイルのトップレベル宣言だけを示し、関数本体は省略。全ファイルを読む（=トークンを払う）ことなく、エージェントに新しいコードベースを把握させるのに最適です。
+
+```console
+$ bdo map src/core
+runner.rs
+  pub fn run(cmd: Command, tool_name: &str, args_display: &str, mode: RunMode<'_>, opts: RunOptions<'_>) -> Result<i32> { … }
+  pub struct RunOptions<'a> { … }
+  pub enum RunMode<'a> { … }
+stream.rs
+  pub trait StreamFilter { … }
+  pub fn run_streaming(cmd: &mut Command, stdin_mode: StdinMode, stdout_mode: FilterMode<'_>) -> Result<StreamResult> { … }
+…
+— 16 files, 245 signatures (full source: 9,188 lines)
+```
+
+このリポジトリでは **約74,000トークンのソースを約3,500トークンで表現**（約95%削減）し、トップレベル API は完全に保持します。Rust / Go / JS・TS / C / C++ / Java / Python に対応、`.gitignore` を尊重します。
+
 ### Git
 ```bash
 bdo git status                  # コンパクトなステータス

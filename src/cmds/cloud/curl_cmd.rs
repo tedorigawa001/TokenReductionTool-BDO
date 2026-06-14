@@ -112,21 +112,25 @@ fn filter_curl_output(raw: &str, is_tty: bool) -> FilterResult<'_> {
         || (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2);
 
     // JSON bodies are never truncated (a mid-stream cut produces invalid JSON,
-    // #1536) — but a pretty-printed response carries a lot of insignificant
-    // whitespace. Minify it: parse and re-serialize compact, which is lossless
-    // and keeps the body valid for downstream parsers while dropping the
-    // indentation/newlines that APIs commonly emit. On any parse failure
-    // (truncated or non-standard JSON) fall back to passing the body through.
+    // #1536). On a terminal we minify them — parse and re-serialize compact,
+    // which is lossless, keeps the body valid, and drops the indentation/newlines
+    // APIs commonly emit. But pipes / redirects must receive the body *unchanged*
+    // (#1282): reformatting the byte stream would break consumers that depend on
+    // the exact bytes — `curl URL | shasum`, `curl URL > file`, `curl URL | diff`.
+    // So minify only when `is_tty`; otherwise pass through. On any parse failure
+    // (truncated or non-standard JSON) we also pass through.
     if looks_like_json {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if let Ok(minified) = serde_json::to_string(&value) {
-                // Only adopt the minified form when it actually saves bytes; an
-                // already-compact body stays borrowed to avoid a needless alloc.
-                if minified.len() < trimmed.len() {
-                    return FilterResult {
-                        content: Cow::Owned(minified),
-                        tee_hint: None,
-                    };
+        if is_tty {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                if let Ok(minified) = serde_json::to_string(&value) {
+                    // Only adopt the minified form when it actually saves bytes; an
+                    // already-compact body stays borrowed to avoid a needless alloc.
+                    if minified.len() < trimmed.len() {
+                        return FilterResult {
+                            content: Cow::Owned(minified),
+                            tee_hint: None,
+                        };
+                    }
                 }
             }
         }
@@ -242,11 +246,14 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_curl_pretty_json_minified_even_when_piped() {
-        // Non-TTY consumers (pipes) also get the minified — still valid — body.
+    fn test_filter_curl_pretty_json_passthrough_when_piped() {
+        // Pipes / redirects must receive the body unchanged — never minified
+        // (#1282) — so byte-sensitive consumers (shasum, diff, saved files) see
+        // exactly what the server sent.
         let pretty = "[\n  {\n    \"a\": 1\n  }\n]";
         let result = filter_curl_output(pretty, false);
-        assert_eq!(&*result.content, r#"[{"a":1}]"#);
+        assert_eq!(&*result.content, pretty, "piped JSON must not be reformatted");
+        assert!(result.tee_hint.is_none());
     }
 
     #[test]

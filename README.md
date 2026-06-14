@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://avatars.githubusercontent.com/u/258253854?v=4" alt="Bushido - Rust Token Killer" width="500">
+  <img src="assets/logo.svg" alt="BDO (Bushido) Logo" width="600">
 </p>
 
 <p align="center">
@@ -11,13 +11,12 @@
   <a href="https://github.com/tedorigawa001/TokenReductionTool/releases"><img src="https://img.shields.io/github/v/release/tedorigawa001/TokenReductionTool" alt="Release"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
   <a href="https://discord.gg/RySmvNF5kF"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord" alt="Discord"></a>
-  <a href="https://formulae.brew.sh/formula/rtk"><img src="https://img.shields.io/homebrew/v/rtk" alt="Homebrew"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/tedorigawa001/TokenReductionTool">Website</a> &bull;
   <a href="#installation">Install</a> &bull;
-  <a href="https://github.com/tedorigawa001/TokenReductionTool/guide/troubleshooting">Troubleshooting</a> &bull;
+  <a href="docs/guide/resources/troubleshooting.md">Troubleshooting</a> &bull;
   <a href="docs/contributing/ARCHITECTURE.md">Architecture</a> &bull;
   <a href="https://discord.gg/RySmvNF5kF">Discord</a>
 </p>
@@ -53,10 +52,10 @@ bdo filters and compresses command outputs before they reach your LLM context. S
 
 ## Installation
 
-### Homebrew (recommended)
+### Homebrew
 
 ```bash
-brew install bdo
+brew tap tedorigawa001/tap && brew install bdo
 ```
 
 ### Quick Install (Linux/macOS)
@@ -79,16 +78,16 @@ cargo install --git https://github.com/tedorigawa001/TokenReductionTool
 ### Pre-built Binaries
 
 Download from [releases](https://github.com/tedorigawa001/TokenReductionTool/releases):
-- macOS: `rtk-x86_64-apple-darwin.tar.gz` / `rtk-aarch64-apple-darwin.tar.gz`
-- Linux: `rtk-x86_64-unknown-linux-musl.tar.gz` / `rtk-aarch64-unknown-linux-gnu.tar.gz`
-- Windows: `rtk-x86_64-pc-windows-msvc.zip`
+- macOS: `bdo-x86_64-apple-darwin.tar.gz` / `bdo-aarch64-apple-darwin.tar.gz`
+- Linux: `bdo-x86_64-unknown-linux-musl.tar.gz` / `bdo-aarch64-unknown-linux-gnu.tar.gz`
+- Windows: `bdo-x86_64-pc-windows-msvc.zip`
 
-> **Windows users**: Extract the zip and place `rtk.exe` somewhere in your PATH (e.g. `C:\Users\<you>\.local\bin`). Run Bushido from **Command Prompt**, **PowerShell**, or **Windows Terminal** — do not double-click the `.exe` (it will flash and close). For the best experience, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) where the full hook system works natively. See [Windows setup](#windows) below for details.
+> **Windows users**: Extract the zip and place `bdo.exe` somewhere in your PATH (e.g. `C:\Users\<you>\.local\bin`). Run Bushido from **Command Prompt**, **PowerShell**, or **Windows Terminal** — do not double-click the `.exe` (it will flash and close). For the best experience, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) where the full hook system works natively. See [Windows setup](#windows) below for details.
 
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.28.2"
+bdo --version   # Should show "bdo 0.42.2"
 bdo gain        # Should show token savings stats
 ```
 
@@ -140,7 +139,9 @@ Four strategies applied per command type:
 bdo ls .                        # Token-optimized directory tree
 bdo read file.rs                # Auto: light cleanup, smart truncation for large source files
 bdo read file.rs -l none        # Full content when exact text matters
-bdo read file.rs -l aggressive  # Signatures only (strips bodies)
+bdo read file.rs -l aggressive  # Heavier cleanup (drops more boilerplate)
+bdo read file.rs -l outline     # Signatures only — every fn/struct/trait, bodies elided
+bdo map src/                    # Repo map: top-level signatures of every file under a dir
 bdo smart file.rs               # 2-line heuristic code summary
 bdo find "*.rs" .               # Compact find results
 bdo grep "pattern" .            # Grouped search results
@@ -290,7 +291,7 @@ test utils::test_format ... ok              test_overflow: panic at utils.rs:18
 
 ## Auto-Rewrite Hook
 
-The most effective way to use rtk. The hook transparently intercepts Bash commands and rewrites them to bdo equivalents before execution.
+The most effective way to use Bushido. The hook transparently intercepts Bash commands and rewrites them to bdo equivalents before execution.
 
 **Result**: 100% bdo adoption across all conversations and subagents, zero token overhead.
 
@@ -310,7 +311,7 @@ After install, **restart Claude Code**.
 
 ## Windows
 
-Bushido works on Windows with some limitations. The auto-rewrite hook (`rtk-rewrite.sh`) requires a Unix shell, so on native Windows Bushido falls back to **CLAUDE.md injection mode** — your AI assistant receives Bushido instructions but commands are not rewritten automatically.
+Bushido works on Windows with some limitations. The auto-rewrite hook (`bdo hook`) requires a Unix shell, so on native Windows Bushido falls back to **CLAUDE.md injection mode** — your AI assistant receives Bushido instructions but commands are not rewritten automatically.
 
 ### Recommended: WSL (full support)
 
@@ -327,8 +328,8 @@ bdo init -g
 On native Windows (cmd.exe / PowerShell), Bushido filters work but the hook does not auto-rewrite commands:
 
 ```powershell
-# 1. Download and extract rtk-x86_64-pc-windows-msvc.zip from releases
-# 2. Add rtk.exe to your PATH
+# 1. Download and extract bdo-x86_64-pc-windows-msvc.zip from releases
+# 2. Add bdo.exe to your PATH
 # 3. Initialize (falls back to CLAUDE.md injection)
 bdo init -g
 # 4. Use bdo explicitly
@@ -336,7 +337,7 @@ bdo cargo test
 bdo git status
 ```
 
-**Important**: Do not double-click `rtk.exe` — it is a CLI tool that prints usage and exits immediately. Always run it from a terminal (Command Prompt, PowerShell, or Windows Terminal).
+**Important**: Do not double-click `bdo.exe` — it is a CLI tool that prints usage and exits immediately. Always run it from a terminal (Command Prompt, PowerShell, or Windows Terminal).
 
 | Feature | WSL | Native Windows |
 |---------|-----|----------------|
@@ -364,14 +365,14 @@ Bushido supports 14 AI coding tools. Each integration rewrites shell commands to
 | **Pi** | `bdo init -g --agent pi` (global) | TypeScript extension (tool_call) |
 | **Hermes** | `bdo init --agent hermes` | Python plugin adapter (terminal command mutation via `bdo rewrite`) |
 | **Mistral Vibe** | Planned ([#800](https://github.com/tedorigawa001/TokenReductionTool/issues/800)) | Blocked on upstream |
-| **Kilo Code** | `bdo init --agent kilocode` | .kilocode/rules/rtk-rules.md (project-scoped) |
-| **Google Antigravity** | `bdo init --agent antigravity` | .agents/rules/antigravity-rtk-rules.md (project-scoped) |
+| **Kilo Code** | `bdo init --agent kilocode` | .kilocode/rules/bdo-rules.md (project-scoped) |
+| **Google Antigravity** | `bdo init --agent antigravity` | .agents/rules/antigravity-bdo-rules.md (project-scoped) |
 
-For per-agent setup details, override controls, and graceful degradation, see the [Supported Agents guide](https://github.com/tedorigawa001/TokenReductionTool/guide/getting-started/supported-agents). The Hermes plugin source and tests live in `hooks/hermes/`; installed Hermes runtime files still live under `~/.hermes/plugins/rtk-rewrite/`.
+For per-agent setup details, override controls, and graceful degradation, see the [Supported Agents guide](docs/guide/getting-started/supported-agents.md). The Hermes plugin source and tests live in `hooks/hermes/`; installed Hermes runtime files still live under `~/.hermes/plugins/bdo-rewrite/`.
 
 ## Configuration
 
-`~/.config/rtk/config.toml` (macOS: `~/Library/Application Support/rtk/config.toml`):
+`~/.config/bdo/config.toml` (macOS: `~/Library/Application Support/bdo/config.toml`):
 
 ```toml
 [hooks]
@@ -386,10 +387,10 @@ When a command fails, Bushido saves the full unfiltered output so the LLM can re
 
 ```
 FAILED: 2/15 tests
-[full output: ~/.local/share/rtk/tee/1707753600_cargo_test.log]
+[full output: ~/.local/share/bdo/tee/1707753600_cargo_test.log]
 ```
 
-For the full config reference (all sections, env vars, per-project filters), see the [Configuration guide](https://github.com/tedorigawa001/TokenReductionTool/guide/getting-started/configuration).
+For the full config reference (all sections, env vars, per-project filters), see the [Configuration guide](docs/guide/getting-started/configuration.md).
 
 ### Uninstall
 

@@ -1,4 +1,4 @@
-//! Sets up RTK hooks so AI coding agents automatically route commands through RTK.
+//! Sets up Bushido hooks so AI coding agents automatically route commands through Bushido.
 
 use anyhow::{Context, Result};
 use std::ffi::OsString;
@@ -27,12 +27,12 @@ const OPENCODE_PLUGIN: &str = include_str!("../../hooks/opencode/bdo.ts");
 // Embedded Pi extension (auto-rewrite)
 const PI_PLUGIN: &str = include_str!("../../hooks/pi/bdo.ts");
 
-// Embedded slim RTK awareness instructions
+// Embedded slim Bushido awareness instructions
 const BDO_SLIM: &str = include_str!("../../hooks/claude/bdo-awareness.md");
 const BDO_SLIM_CODEX: &str = include_str!("../../hooks/codex/bdo-awareness.md");
 
 /// Template written by `bdo init` when no filters.toml exists yet.
-const FILTERS_TEMPLATE: &str = r#"# Project-local RTK filters — commit this file with your repo.
+const FILTERS_TEMPLATE: &str = r#"# Project-local Bushido filters — commit this file with your repo.
 # Filters here override user-global and built-in filters.
 # Docs: https://github.com/tedorigawa001/TokenReductionTool#custom-filters
 schema_version = 1
@@ -48,7 +48,7 @@ schema_version = 1
 "#;
 
 /// Template for user-global filters (~/.config/rtk/filters.toml).
-const FILTERS_GLOBAL_TEMPLATE: &str = r#"# User-global RTK filters — apply to all your projects.
+const FILTERS_GLOBAL_TEMPLATE: &str = r#"# User-global Bushido filters — apply to all your projects.
 # Project-local .bdo/filters.toml takes precedence over these.
 # Docs: https://github.com/tedorigawa001/TokenReductionTool#custom-filters
 schema_version = 1
@@ -107,11 +107,11 @@ fn print_dry_run_footer() {
 
 // Legacy full instructions for backward compatibility (--claude-md mode)
 const BDO_INSTRUCTIONS: &str = r##"<!-- bdo-instructions v2 -->
-# RTK (Rust Token Killer) - Token-Optimized Commands
+# Bushido (Rust Token Killer) - Token-Optimized Commands
 
 ## Golden Rule
 
-**Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
+**Always prefix commands with `rtk`**. If Bushido has a dedicated filter, it uses it. If not, it passes through unchanged. This means Bushido is always safe to use.
 
 **Important**: Even in command chains with `&&`, use `rtk`:
 ```bash
@@ -122,7 +122,7 @@ git add . && git commit -m "msg" && git push
 bdo git add . && bdo git commit -m "msg" && bdo git push
 ```
 
-## RTK Commands by Workflow
+## Bushido Commands by Workflow
 
 ### Build & Compile (80-90% savings)
 ```bash
@@ -223,10 +223,10 @@ bdo wget <url>          # Compact download output (65%)
 ```bash
 bdo gain                # View token savings statistics
 bdo gain --history      # View command history with savings
-bdo discover            # Analyze Claude Code sessions for missed RTK usage
+bdo discover            # Analyze Claude Code sessions for missed Bushido usage
 bdo proxy <cmd>         # Run command without filtering (for debugging)
-bdo init                # Add RTK instructions to CLAUDE.md
-bdo init --global       # Add RTK to ~/.claude/CLAUDE.md
+bdo init                # Add Bushido instructions to CLAUDE.md
+bdo init --global       # Add Bushido to ~/.claude/CLAUDE.md
 ```
 
 ## Token Savings Overview
@@ -472,7 +472,7 @@ fn prompt_telemetry_consent() -> Result<()> {
 
     eprintln!();
     eprintln!("--- Telemetry ---");
-    eprintln!("RTK collects anonymous usage metrics once per day to improve filters.");
+    eprintln!("Bushido collects anonymous usage metrics once per day to improve filters.");
     eprintln!();
     eprintln!("  What:    command names (not arguments), token savings, OS, version");
     eprintln!("  Why:     prioritize filter development for the most-used commands");
@@ -558,7 +558,7 @@ fn remove_hook_from_json(root: &mut serde_json::Value) -> bool {
     pre_tool_use_array.len() < original_len
 }
 
-/// Remove RTK hook from settings.json file
+/// Remove Bushido hook from settings.json file
 /// Backs up before modification, returns true if hook was found and removed
 fn remove_hook_from_settings(ctx: InitContext) -> Result<bool> {
     let InitContext { verbose, dry_run } = ctx;
@@ -587,7 +587,7 @@ fn remove_hook_from_settings(ctx: InitContext) -> Result<bool> {
     if removed {
         if dry_run {
             println!(
-                "[dry-run] would remove RTK hook entry from {}",
+                "[dry-run] would remove Bushido hook entry from {}",
                 settings_path.display()
             );
             if verbose > 0 {
@@ -609,7 +609,7 @@ fn remove_hook_from_settings(ctx: InitContext) -> Result<bool> {
         atomic_write(&settings_path, &serialized)?;
 
         if verbose > 0 {
-            eprintln!("Removed RTK hook from settings.json");
+            eprintln!("Removed Bushido hook from settings.json");
         }
     }
 
@@ -641,9 +641,9 @@ pub fn uninstall(
         let cursor_removed = remove_cursor_hooks(ctx).context("Failed to remove Cursor hooks")?;
         if !cursor_removed.is_empty() {
             let header = if dry_run {
-                "[dry-run] would uninstall RTK (Cursor):"
+                "[dry-run] would uninstall Bushido (Cursor):"
             } else {
-                "RTK uninstalled (Cursor):"
+                "Bushido uninstalled (Cursor):"
             };
             println!("{}", header);
             for item in &cursor_removed {
@@ -653,7 +653,7 @@ pub fn uninstall(
                 println!("\nRestart Cursor to apply changes.");
             }
         } else {
-            println!("RTK Cursor support was not installed (nothing to remove)");
+            println!("Bushido Cursor support was not installed (nothing to remove)");
         }
         if dry_run {
             print_dry_run_footer();
@@ -667,7 +667,7 @@ pub fn uninstall(
     }
 
     if !global {
-        anyhow::bail!("Uninstall only works with --global flag. For local projects, manually remove RTK from CLAUDE.md");
+        anyhow::bail!("Uninstall only works with --global flag. For local projects, manually remove Bushido from CLAUDE.md");
     }
 
     let claude_dir = resolve_claude_dir()?;
@@ -679,9 +679,9 @@ pub fn uninstall(
         removed.extend(gemini_removed);
         if !removed.is_empty() {
             let header = if dry_run {
-                "[dry-run] would uninstall RTK (Gemini):"
+                "[dry-run] would uninstall Bushido (Gemini):"
             } else {
-                "RTK uninstalled (Gemini):"
+                "Bushido uninstalled (Gemini):"
             };
             println!("{}", header);
             for item in &removed {
@@ -691,7 +691,7 @@ pub fn uninstall(
                 println!("\nRestart Gemini CLI to apply changes.");
             }
         } else {
-            println!("RTK Gemini support was not installed (nothing to remove)");
+            println!("Bushido Gemini support was not installed (nothing to remove)");
         }
         if dry_run {
             print_dry_run_footer();
@@ -804,7 +804,7 @@ pub fn uninstall(
 
     // 4. Remove hook entry from settings.json
     if remove_hook_from_settings(ctx)? {
-        removed.push("settings.json: removed RTK hook entry".to_string());
+        removed.push("settings.json: removed Bushido hook entry".to_string());
     }
 
     // 5. Remove OpenCode plugin
@@ -819,16 +819,16 @@ pub fn uninstall(
 
     // Report results
     if removed.is_empty() {
-        println!("RTK was not installed (nothing to remove)");
+        println!("Bushido was not installed (nothing to remove)");
         println!("  Checked: {}", hook_path.display());
         println!("  Checked: {}", claude_dir.join(BDO_MD).display());
         println!("  Checked: {}", claude_md_path.display());
         println!("  Checked: {}", claude_dir.join(SETTINGS_JSON).display());
     } else {
         let header = if dry_run {
-            "[dry-run] would uninstall RTK:"
+            "[dry-run] would uninstall Bushido:"
         } else {
-            "RTK uninstalled:"
+            "Bushido uninstalled:"
         };
         println!("{}", header);
         for item in removed {
@@ -850,7 +850,7 @@ fn uninstall_codex(global: bool, ctx: InitContext) -> Result<()> {
     let InitContext { dry_run, .. } = ctx;
     if !global {
         anyhow::bail!(
-            "Uninstall only works with --global flag. For local projects, manually remove RTK from AGENTS.md"
+            "Uninstall only works with --global flag. For local projects, manually remove Bushido from AGENTS.md"
         );
     }
 
@@ -858,12 +858,12 @@ fn uninstall_codex(global: bool, ctx: InitContext) -> Result<()> {
     let removed = uninstall_codex_at(&codex_dir, ctx)?;
 
     if removed.is_empty() {
-        println!("RTK was not installed for Codex CLI (nothing to remove)");
+        println!("Bushido was not installed for Codex CLI (nothing to remove)");
     } else {
         let header = if dry_run {
-            "[dry-run] would uninstall RTK for Codex CLI:"
+            "[dry-run] would uninstall Bushido for Codex CLI:"
         } else {
-            "RTK uninstalled for Codex CLI:"
+            "Bushido uninstalled for Codex CLI:"
         };
         println!("{}", header);
         for item in removed {
@@ -928,7 +928,7 @@ fn uninstall_codex_at(codex_dir: &Path, ctx: InitContext) -> Result<Vec<String>>
     Ok(removed)
 }
 
-/// Orchestrator: patch settings.json with RTK hook (binary command variant)
+/// Orchestrator: patch settings.json with Bushido hook (binary command variant)
 /// Handles reading, checking, prompting, merging, backing up, and atomic writing
 fn patch_settings_json_command(
     hook_command: &str,
@@ -1061,7 +1061,7 @@ fn clean_double_blanks(content: &str) -> String {
     result.join("\n")
 }
 
-/// Deep-merge RTK hook entry into settings.json
+/// Deep-merge Bushido hook entry into settings.json
 /// Creates hooks.PreToolUse structure if missing, preserves existing hooks
 fn insert_hook_entry(root: &mut serde_json::Value, hook_command: &str) -> Result<()> {
     let root_obj = match root.as_object_mut() {
@@ -1094,7 +1094,7 @@ fn insert_hook_entry(root: &mut serde_json::Value, hook_command: &str) -> Result
     Ok(())
 }
 
-/// Check if RTK hook is already present in settings.json
+/// Check if Bushido hook is already present in settings.json
 /// Matches on legacy rtk-rewrite.sh path OR new `bdo hook claude` command
 fn hook_already_present(root: &serde_json::Value, hook_command: &str) -> bool {
     let pre_tool_use_array = match root
@@ -1163,7 +1163,7 @@ fn run_default_mode(
         println!("  CLAUDE.md: @Bushido.md reference added");
 
         if migrated {
-            println!("\n  [ok] Migrated: removed 137-line RTK block from CLAUDE.md");
+            println!("\n  [ok] Migrated: removed 137-line Bushido block from CLAUDE.md");
             println!("              replaced with @Bushido.md (10 lines)");
         }
     }
@@ -1545,10 +1545,10 @@ fn run_claude_md_mode(global: bool, install_opencode: bool, ctx: InitContext) ->
 
 // ─── Windsurf support ─────────────────────────────────────────
 
-/// Embedded Windsurf RTK rules
+/// Embedded Windsurf Bushido rules
 const WINDSURF_RULES: &str = include_str!("../../hooks/windsurf/rules.md");
 
-/// Embedded Cline RTK rules
+/// Embedded Cline Bushido rules
 const CLINE_RULES: &str = include_str!("../../hooks/cline/rules.md");
 
 // ─── Cline / Roo Code support ─────────────────────────────────
@@ -1824,12 +1824,12 @@ pub fn uninstall_hermes(ctx: InitContext) -> Result<()> {
     let removed = uninstall_hermes_at(&hermes_home, ctx)?;
 
     if removed.is_empty() {
-        println!("RTK Hermes support was not installed (nothing to remove)");
+        println!("Bushido Hermes support was not installed (nothing to remove)");
     } else {
         let header = if dry_run {
-            "[dry-run] would uninstall RTK for Hermes CLI:"
+            "[dry-run] would uninstall Bushido for Hermes CLI:"
         } else {
-            "RTK uninstalled for Hermes CLI:"
+            "Bushido uninstalled for Hermes CLI:"
         };
         println!("{}", header);
         for item in removed {
@@ -1856,7 +1856,7 @@ fn uninstall_hermes_at(hermes_home: &Path, ctx: InitContext) -> Result<Vec<Strin
                 plugin_dir.display()
             );
         } else {
-            // nosemgrep: filesystem-deletion -- uninstall intentionally removes only RTK's Hermes plugin directory.
+            // nosemgrep: filesystem-deletion -- uninstall intentionally removes only Bushido's Hermes plugin directory.
             fs::remove_dir_all(&plugin_dir).with_context(|| {
                 format!(
                     "Failed to remove Hermes plugin directory: {}",
@@ -1893,7 +1893,7 @@ fn uninstall_hermes_at(hermes_home: &Path, ctx: InitContext) -> Result<Vec<Strin
                     eprintln!("Updated Hermes config: {}", config_path.display());
                 }
             }
-            removed.push("Hermes config: removed RTK plugin entry".to_string());
+            removed.push("Hermes config: removed Bushido plugin entry".to_string());
         }
     }
 
@@ -2325,7 +2325,7 @@ fn run_codex_mode_with_paths(
     Ok(())
 }
 
-// --- upsert_rtk_block: idempotent RTK block management ---
+// --- upsert_rtk_block: idempotent Bushido block management ---
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RtkBlockUpsert {
@@ -2339,7 +2339,7 @@ enum RtkBlockUpsert {
     Malformed,
 }
 
-/// Insert or replace the RTK instructions block in `content`.
+/// Insert or replace the Bushido instructions block in `content`.
 ///
 /// Returns `(new_content, action)` describing what happened.
 /// The caller decides whether to write `new_content` based on `action`.
@@ -2388,7 +2388,7 @@ fn upsert_rtk_block(content: &str, block: &str) -> (String, RtkBlockUpsert) {
     }
 }
 
-/// Idempotently write an RTK-owned marker block into `path`, preserving user content.
+/// Idempotently write an Bushido-owned marker block into `path`, preserving user content.
 ///
 /// Reads the file (if any), passes it through [`upsert_rtk_block`], and writes the
 /// result back via [`atomic_write`]. Refuses to modify files containing an opening
@@ -2485,7 +2485,7 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
             content = new_content;
             migrated = true;
             if verbose > 0 {
-                eprintln!("Migrated: removed old RTK block from CLAUDE.md");
+                eprintln!("Migrated: removed old Bushido block from CLAUDE.md");
             }
         }
     }
@@ -2498,7 +2498,7 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
         if migrated {
             if dry_run {
                 println!(
-                    "[dry-run] would migrate old RTK block in CLAUDE.md: {}",
+                    "[dry-run] would migrate old Bushido block in CLAUDE.md: {}",
                     path.display()
                 );
             } else {
@@ -2551,7 +2551,7 @@ fn patch_agents_md(path: &Path, rtk_md_ref: &str, ctx: InitContext) -> Result<bo
             content = new_content;
             migrated = true;
             if verbose > 0 {
-                eprintln!("Migrated: removed old RTK block from AGENTS.md");
+                eprintln!("Migrated: removed old Bushido block from AGENTS.md");
             }
         }
     }
@@ -2674,7 +2674,7 @@ fn remove_rtk_reference_from_agents(path: &Path, refs: &[&str], ctx: InitContext
     Ok(true)
 }
 
-/// Remove old RTK block from CLAUDE.md (migration helper)
+/// Remove old Bushido block from CLAUDE.md (migration helper)
 fn remove_rtk_block(content: &str) -> (String, bool) {
     if let (Some(start), Some(end)) = (content.find(BDO_BLOCK_START), content.find(BDO_BLOCK_END)) {
         let end_pos = end + BDO_BLOCK_END.len();
@@ -2850,7 +2850,7 @@ fn uninstall_pi(global: bool, ctx: InitContext) -> Result<()> {
                 plugin_path.display()
             );
         } else {
-            // nosemgrep: filesystem-deletion -- Pi uninstall removes only the RTK-managed extension file.
+            // nosemgrep: filesystem-deletion -- Pi uninstall removes only the Bushido-managed extension file.
             fs::remove_file(&plugin_path).with_context(|| {
                 format!("Failed to remove Pi extension: {}", plugin_path.display())
             })?;
@@ -2864,13 +2864,13 @@ fn uninstall_pi(global: bool, ctx: InitContext) -> Result<()> {
     if dry_run {
         print_dry_run_footer();
     } else if !removed.is_empty() {
-        println!("RTK uninstalled (Pi):");
+        println!("Bushido uninstalled (Pi):");
         for item in &removed {
             println!("  - {}", item);
         }
         println!("\nRestart pi to apply changes.");
     } else {
-        println!("RTK Pi extension was not installed (nothing to remove)");
+        println!("Bushido Pi extension was not installed (nothing to remove)");
     }
     Ok(())
 }
@@ -2916,7 +2916,7 @@ fn print_pi_result(plugin_path: &Path, installed: bool) {
     } else {
         "already up to date"
     };
-    println!("RTK Pi extension {}:", status);
+    println!("Bushido Pi extension {}:", status);
     println!("  Extension: {}", plugin_path.display());
     println!();
     println!("Pi will load the extension automatically on next start.");
@@ -3024,9 +3024,9 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
         println!("  hooks.json: {}", hooks_json_path.display());
 
         if patched {
-            println!("  hooks.json: RTK preToolUse entry added");
+            println!("  hooks.json: Bushido preToolUse entry added");
         } else {
-            println!("  hooks.json: RTK preToolUse entry already present");
+            println!("  hooks.json: Bushido preToolUse entry already present");
         }
 
         println!("  Cursor reloads hooks.json automatically. Test with: git status\n");
@@ -3035,7 +3035,7 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
     Ok(())
 }
 
-/// Patch ~/.cursor/hooks.json to add RTK preToolUse hook.
+/// Patch ~/.cursor/hooks.json to add Bushido preToolUse hook.
 /// Returns true if the file was modified.
 fn patch_cursor_hooks_json(path: &Path, ctx: InitContext) -> Result<bool> {
     let InitContext { verbose, dry_run } = ctx;
@@ -3055,7 +3055,7 @@ fn patch_cursor_hooks_json(path: &Path, ctx: InitContext) -> Result<bool> {
     // Check idempotency
     if cursor_hook_already_present(&root) {
         if verbose > 0 {
-            eprintln!("Cursor hooks.json: RTK hook already present");
+            eprintln!("Cursor hooks.json: Bushido hook already present");
         }
         return Ok(false);
     }
@@ -3092,7 +3092,7 @@ fn patch_cursor_hooks_json(path: &Path, ctx: InitContext) -> Result<bool> {
     Ok(true)
 }
 
-/// Check if RTK preToolUse hook is already present in Cursor hooks.json
+/// Check if Bushido preToolUse hook is already present in Cursor hooks.json
 /// Matches on legacy rtk-rewrite.sh path OR new `bdo hook cursor` command
 fn cursor_hook_already_present(root: &serde_json::Value) -> bool {
     let hooks = match root
@@ -3112,7 +3112,7 @@ fn cursor_hook_already_present(root: &serde_json::Value) -> bool {
     })
 }
 
-/// Insert RTK preToolUse entry into Cursor hooks.json
+/// Insert Bushido preToolUse entry into Cursor hooks.json
 fn insert_cursor_hook_entry(root: &mut serde_json::Value) -> Result<()> {
     let root_obj = match root.as_object_mut() {
         Some(obj) => obj,
@@ -3206,7 +3206,7 @@ fn remove_legacy_cursor_hook_entries_from_json(root: &mut serde_json::Value) -> 
     pre_tool_use.len() < original_len
 }
 
-/// Remove Cursor RTK artifacts: hook script + hooks.json entry
+/// Remove Cursor Bushido artifacts: hook script + hooks.json entry
 fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
     let InitContext { verbose, dry_run } = ctx;
     let cursor_dir = resolve_cursor_dir()?;
@@ -3229,7 +3229,7 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
         removed.push(format!("Cursor hook: {}", hook_path.display()));
     }
 
-    // 2. Remove RTK entry from hooks.json
+    // 2. Remove Bushido entry from hooks.json
     let hooks_json_path = cursor_dir.join(HOOKS_JSON);
     if hooks_json_path.exists() {
         let content = fs::read_to_string(&hooks_json_path)
@@ -3240,7 +3240,7 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
                 if remove_cursor_hook_from_json(&mut root) {
                     if dry_run {
                         println!(
-                            "[dry-run] would remove RTK entry from Cursor hooks.json: {}",
+                            "[dry-run] would remove Bushido entry from Cursor hooks.json: {}",
                             hooks_json_path.display()
                         );
                     } else {
@@ -3252,10 +3252,10 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
                         atomic_write(&hooks_json_path, &serialized)?;
 
                         if verbose > 0 {
-                            eprintln!("Removed RTK hook from Cursor hooks.json");
+                            eprintln!("Removed Bushido hook from Cursor hooks.json");
                         }
                     }
-                    removed.push("Cursor hooks.json: removed RTK entry".to_string());
+                    removed.push("Cursor hooks.json: removed Bushido entry".to_string());
                 }
             }
         }
@@ -3264,7 +3264,7 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
     Ok(removed)
 }
 
-/// Remove RTK preToolUse entry from Cursor hooks.json
+/// Remove Bushido preToolUse entry from Cursor hooks.json
 /// Returns true if entry was found and removed
 /// Matches both legacy script path and new binary command
 fn remove_cursor_hook_from_json(root: &mut serde_json::Value) -> bool {
@@ -3406,7 +3406,7 @@ fn show_claude_config() -> Result<()> {
             println!("[ok] Global (~/.claude/CLAUDE.md): @Bushido.md reference");
         } else if content.contains(BDO_BLOCK_START) {
             println!(
-                "[warn] Global (~/.claude/CLAUDE.md): old RTK block (run: bdo init -g to migrate)"
+                "[warn] Global (~/.claude/CLAUDE.md): old Bushido block (run: bdo init -g to migrate)"
             );
         } else {
             println!("[--] Global (~/.claude/CLAUDE.md): exists but bdo not configured");
@@ -3433,9 +3433,9 @@ fn show_claude_config() -> Result<()> {
         if !content.trim().is_empty() {
             if let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) {
                 if hook_already_present(&root, CLAUDE_HOOK_COMMAND) {
-                    println!("[ok] settings.json: RTK hook configured");
+                    println!("[ok] settings.json: Bushido hook configured");
                 } else {
-                    println!("[warn] settings.json: exists but RTK hook not configured");
+                    println!("[warn] settings.json: exists but Bushido hook not configured");
                     println!("    Run: bdo init -g --auto-patch");
                 }
             } else {
@@ -3517,7 +3517,7 @@ fn show_claude_config() -> Result<()> {
     println!("  bdo init -g           # Hook + Bushido.md + @Bushido.md + settings.json (recommended)");
     println!("  bdo init -g --auto-patch    # Same as above but no prompt");
     println!("  bdo init -g --no-patch      # Skip settings.json (manual setup)");
-    println!("  bdo init -g --uninstall     # Remove all RTK artifacts");
+    println!("  bdo init -g --uninstall     # Remove all Bushido artifacts");
     println!("  bdo init -g --claude-md     # Legacy: full injection into ~/.claude/CLAUDE.md");
     println!("  bdo init -g --hook-only     # Hook only, no Bushido.md");
     println!("  bdo init --codex            # Configure local AGENTS.md + Bushido.md");
@@ -3549,7 +3549,7 @@ fn show_codex_config() -> Result<()> {
         if has_rtk_reference(&content, &[BDO_MD_REF, global_rtk_md_ref.as_str()]) {
             println!("[ok] Global AGENTS.md: Bushido.md reference");
         } else if content.contains(BDO_BLOCK_START) {
-            println!("[!!] Global AGENTS.md: old inline RTK block");
+            println!("[!!] Global AGENTS.md: old inline Bushido block");
         } else {
             println!("[--] Global AGENTS.md: exists but bdo not configured");
         }
@@ -3568,7 +3568,7 @@ fn show_codex_config() -> Result<()> {
         if has_rtk_reference(&content, &[BDO_MD_REF]) {
             println!("[ok] Local AGENTS.md: @Bushido.md reference");
         } else if content.contains(BDO_BLOCK_START) {
-            println!("[!!] Local AGENTS.md: old inline RTK block");
+            println!("[!!] Local AGENTS.md: old inline Bushido block");
         } else {
             println!("[--] Local AGENTS.md: exists but bdo not configured");
         }
@@ -3579,7 +3579,7 @@ fn show_codex_config() -> Result<()> {
     println!("\nUsage:");
     println!("  bdo init --codex              # Configure local AGENTS.md + Bushido.md");
     println!("  bdo init -g --codex           # Configure $CODEX_HOME/AGENTS.md + $CODEX_HOME/Bushido.md (or ~/.codex/)");
-    println!("  bdo init -g --codex --uninstall  # Remove global Codex RTK artifacts");
+    println!("  bdo init -g --codex --uninstall  # Remove global Codex Bushido artifacts");
 
     Ok(())
 }
@@ -3652,10 +3652,10 @@ pub fn run_gemini(
         })?;
     }
 
-    // 2. Install GEMINI.md (RTK awareness for Gemini)
+    // 2. Install GEMINI.md (Bushido awareness for Gemini)
     if !hook_only {
         let gemini_md_path = gemini_dir.join(GEMINI_MD);
-        // Reuse the same slim RTK awareness content
+        // Reuse the same slim Bushido awareness content
         write_if_changed(&gemini_md_path, BDO_SLIM, GEMINI_MD, ctx)?;
     }
 
@@ -3704,7 +3704,7 @@ fn patch_gemini_settings(
                     .is_some_and(|c| c.contains("bdo"))
             }) {
                 if verbose > 0 {
-                    eprintln!("Gemini settings.json already has RTK hook");
+                    eprintln!("Gemini settings.json already has Bushido hook");
                 }
                 return Ok(());
             }
@@ -3714,7 +3714,7 @@ fn patch_gemini_settings(
     // Ask user before patching
     if patch_mode == PatchMode::Skip {
         println!(
-            "\nManual setup needed: add RTK hook to {}\n\
+            "\nManual setup needed: add Bushido hook to {}\n\
              See: https://github.com/tedorigawa001/TokenReductionTool#gemini-cli",
             settings_path.display()
         );
@@ -3728,7 +3728,7 @@ fn patch_gemini_settings(
                 settings_path.display()
             );
         } else {
-            print!("Patch {} with RTK hook? [y/N] ", settings_path.display());
+            print!("Patch {} with Bushido hook? [y/N] ", settings_path.display());
             std::io::Write::flush(&mut std::io::stdout())?;
             let mut answer = String::new();
             std::io::stdin().read_line(&mut answer)?;
@@ -3847,14 +3847,14 @@ fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
                 if arr.len() < before {
                     if dry_run {
                         println!(
-                            "[dry-run] would remove RTK hook from Gemini settings.json: {}",
+                            "[dry-run] would remove Bushido hook from Gemini settings.json: {}",
                             settings_path.display()
                         );
                     } else {
                         let new_content = serde_json::to_string_pretty(&settings)?;
                         fs::write(&settings_path, new_content)?;
                     }
-                    removed.push("Gemini settings.json: removed RTK hook entry".to_string());
+                    removed.push("Gemini settings.json: removed Bushido hook entry".to_string());
                 }
             }
         }
@@ -3895,7 +3895,7 @@ const COPILOT_HOOK_JSON: &str = r#"{
 "#;
 
 const COPILOT_INSTRUCTIONS: &str = r#"<!-- bdo-instructions v2 -->
-# RTK — Token-Optimized CLI
+# Bushido — Token-Optimized CLI
 
 **rtk** is a CLI proxy that filters and compresses command outputs, saving 60-90% tokens.
 
@@ -3944,7 +3944,7 @@ fn run_copilot_at(base: &Path, ctx: InitContext) -> Result<()> {
             .with_context(|| format!("Failed to create {} directory", hooks_dir.display()))?;
     }
 
-    // 1. Upsert RTK marker block in copilot-instructions.md (preserves user content).
+    // 1. Upsert Bushido marker block in copilot-instructions.md (preserves user content).
     //    Done BEFORE writing the hook config so a malformed file aborts the install
     //    without leaving a stale hook on disk.
     let instructions_path = github_dir.join(COPILOT_INSTRUCTIONS_FILE);
@@ -3980,12 +3980,12 @@ pub fn uninstall_copilot(ctx: InitContext) -> Result<()> {
     let removed = uninstall_copilot_at(Path::new("."), ctx)?;
 
     if removed.is_empty() {
-        println!("RTK Copilot support was not installed (nothing to remove)");
+        println!("Bushido Copilot support was not installed (nothing to remove)");
     } else {
         let header = if dry_run {
-            "[dry-run] would uninstall RTK (GitHub Copilot):"
+            "[dry-run] would uninstall Bushido (GitHub Copilot):"
         } else {
-            "RTK uninstalled (GitHub Copilot):"
+            "Bushido uninstalled (GitHub Copilot):"
         };
         println!("{}", header);
         for item in &removed {
@@ -4016,7 +4016,7 @@ fn uninstall_copilot_at(base: &Path, ctx: InitContext) -> Result<Vec<String>> {
                 hook_path.display()
             );
         } else {
-            // nosemgrep: filesystem-deletion -- Copilot uninstall removes only the RTK-managed hook config.
+            // nosemgrep: filesystem-deletion -- Copilot uninstall removes only the Bushido-managed hook config.
             fs::remove_file(&hook_path)
                 .with_context(|| format!("Failed to remove hook: {}", hook_path.display()))?;
         }
@@ -4109,12 +4109,12 @@ pub fn uninstall_copilot_global(ctx: InitContext) -> Result<()> {
     let removed = uninstall_copilot_global_at(&copilot_dir, ctx)?;
 
     if removed.is_empty() {
-        println!("RTK global Copilot support was not installed (nothing to remove)");
+        println!("Bushido global Copilot support was not installed (nothing to remove)");
     } else {
         let header = if dry_run {
-            "[dry-run] would uninstall RTK (global GitHub Copilot):"
+            "[dry-run] would uninstall Bushido (global GitHub Copilot):"
         } else {
-            "RTK uninstalled (global GitHub Copilot):"
+            "Bushido uninstalled (global GitHub Copilot):"
         };
         println!("{}", header);
         for item in &removed {
@@ -4143,7 +4143,7 @@ fn uninstall_copilot_global_at(copilot_dir: &Path, ctx: InitContext) -> Result<V
                 hook_path.display()
             );
         } else {
-            // nosemgrep: filesystem-deletion -- Copilot global uninstall removes only the RTK-managed hook config.
+            // nosemgrep: filesystem-deletion -- Copilot global uninstall removes only the Bushido-managed hook config.
             fs::remove_file(&hook_path)
                 .with_context(|| format!("Failed to remove hook: {}", hook_path.display()))?;
         }
@@ -4224,13 +4224,13 @@ mod tests {
     #[test]
     fn test_migration_removes_old_block() {
         let input = format!(
-            "# My Config\n\n{} v2 -->\nOLD RTK STUFF\n{}\n\nMore content",
+            "# My Config\n\n{} v2 -->\nOLD Bushido STUFF\n{}\n\nMore content",
             BDO_BLOCK_START, BDO_BLOCK_END
         );
 
         let (result, migrated) = remove_rtk_block(&input);
         assert!(migrated);
-        assert!(!result.contains("OLD RTK STUFF"));
+        assert!(!result.contains("OLD Bushido STUFF"));
         assert!(result.contains("# My Config"));
         assert!(result.contains("More content"));
     }
@@ -4314,13 +4314,13 @@ mod tests {
     #[test]
     fn test_upsert_rtk_block_updates_stale_block() {
         let input = format!(
-            "# Team instructions\n\n{} v1 -->\nOLD RTK CONTENT\n{}\n\nMore notes\n",
+            "# Team instructions\n\n{} v1 -->\nOLD Bushido CONTENT\n{}\n\nMore notes\n",
             BDO_BLOCK_START, BDO_BLOCK_END
         );
 
         let (content, action) = upsert_rtk_block(&input, BDO_INSTRUCTIONS);
         assert_eq!(action, RtkBlockUpsert::Updated);
-        assert!(!content.contains("OLD RTK CONTENT"));
+        assert!(!content.contains("OLD Bushido CONTENT"));
         assert!(content.contains("bdo cargo test")); // from current BDO_INSTRUCTIONS
         assert!(content.contains("# Team instructions"));
         assert!(content.contains("More notes"));
@@ -5218,7 +5218,7 @@ mod tests {
         fs::write(
             &agents_md,
             format!(
-                "# Team rules\n\n{} v2 -->\nOLD RTK STUFF\n{}\n\nMore content",
+                "# Team rules\n\n{} v2 -->\nOLD Bushido STUFF\n{}\n\nMore content",
                 BDO_BLOCK_START, BDO_BLOCK_END
             ),
         )
@@ -5228,7 +5228,7 @@ mod tests {
         let removed = uninstall_codex_at(codex_dir, InitContext::default()).unwrap();
 
         let content = fs::read_to_string(&agents_md).unwrap();
-        assert!(!content.contains("OLD RTK STUFF"));
+        assert!(!content.contains("OLD Bushido STUFF"));
         assert!(content.contains("# Team rules"));
         assert!(content.contains("More content"));
         assert!(removed.iter().any(|r| r.contains("bdo-instructions block")));
@@ -5373,7 +5373,7 @@ mod tests {
         let first_command = pre_tool_use[0]["hooks"][0]["command"].as_str().unwrap();
         assert_eq!(first_command, "/some/other/hook.sh");
 
-        // Check second hook is RTK
+        // Check second hook is Bushido
         let second_command = pre_tool_use[1]["hooks"][0]["command"].as_str().unwrap();
         assert_eq!(second_command, hook_command);
     }
@@ -6136,7 +6136,7 @@ mod tests {
         assert!(did_remove, "remove_rtk_block must succeed for valid block");
         assert!(
             cleaned.trim().is_empty(),
-            "CLAUDE.md with only RTK content should be empty after removal"
+            "CLAUDE.md with only Bushido content should be empty after removal"
         );
     }
 
@@ -6158,11 +6158,11 @@ mod tests {
         );
         assert!(
             !cleaned.contains(BDO_BLOCK_START),
-            "RTK block must be fully removed"
+            "Bushido block must be fully removed"
         );
         assert!(
             !cleaned.contains(BDO_BLOCK_END),
-            "RTK end marker must be removed"
+            "Bushido end marker must be removed"
         );
     }
 
@@ -6176,7 +6176,7 @@ mod tests {
         with_claude_dir_override(&tmp, |claude_dir| {
             let claude_md = claude_dir.join(CLAUDE_MD);
             let malformed = format!(
-                "# Existing notes\n\n{}\nincomplete RTK block\n",
+                "# Existing notes\n\n{}\nincomplete Bushido block\n",
                 BDO_BLOCK_START
             );
             fs::write(&claude_md, &malformed).unwrap();
@@ -6471,11 +6471,11 @@ mod tests {
         );
         assert!(
             final_content.contains(BDO_BLOCK_START),
-            "RTK block start marker missing"
+            "Bushido block start marker missing"
         );
         assert!(
             final_content.contains(BDO_BLOCK_END),
-            "RTK block end marker missing"
+            "Bushido block end marker missing"
         );
     }
 
@@ -6516,7 +6516,7 @@ mod tests {
 
         let instructions_path = github_dir.join("copilot-instructions.md");
         let stale = format!(
-            "# Project rules\n\nUse rg.\n\n{}\n# OLD RTK CONTENT\nrtk foo\n{}\n",
+            "# Project rules\n\nUse rg.\n\n{}\n# OLD Bushido CONTENT\nrtk foo\n{}\n",
             BDO_BLOCK_START, BDO_BLOCK_END
         );
         fs::write(&instructions_path, &stale).unwrap();
@@ -6530,8 +6530,8 @@ mod tests {
             "User content outside the block must be preserved"
         );
         assert!(
-            !updated.contains("# OLD RTK CONTENT"),
-            "Stale RTK block content must be removed"
+            !updated.contains("# OLD Bushido CONTENT"),
+            "Stale Bushido block content must be removed"
         );
         assert!(
             updated.contains("bdo cargo test"),
@@ -6631,7 +6631,7 @@ mod tests {
         let instructions = fs::read_to_string(&instructions_path).unwrap();
         assert!(
             !instructions.contains(BDO_BLOCK_START),
-            "RTK block must be removed"
+            "Bushido block must be removed"
         );
     }
 
@@ -6648,7 +6648,7 @@ mod tests {
 
         let after = fs::read_to_string(&instructions_path).unwrap();
         assert!(after.contains("Always use pnpm."), "user content preserved");
-        assert!(!after.contains(BDO_BLOCK_START), "RTK block removed");
+        assert!(!after.contains(BDO_BLOCK_START), "Bushido block removed");
     }
 
     #[test]
@@ -6780,7 +6780,7 @@ mod tests {
 
         let content = fs::read_to_string(&instructions).unwrap();
         assert!(content.contains("Always use pnpm."));
-        assert!(!content.contains(BDO_BLOCK_START), "RTK block removed");
+        assert!(!content.contains(BDO_BLOCK_START), "Bushido block removed");
     }
 
     #[test]
@@ -6850,7 +6850,7 @@ mod tests {
         fs::create_dir_all(&github_dir).unwrap();
 
         let instructions_path = github_dir.join("copilot-instructions.md");
-        let malformed = format!("# My rules\n\n{}\nincomplete RTK block\n", BDO_BLOCK_START);
+        let malformed = format!("# My rules\n\n{}\nincomplete Bushido block\n", BDO_BLOCK_START);
         fs::write(&instructions_path, &malformed).unwrap();
 
         let result = run_copilot_at(temp.path(), InitContext::default());
@@ -6875,7 +6875,7 @@ mod tests {
         fs::create_dir_all(&github_dir).unwrap();
 
         let instructions_path = github_dir.join("copilot-instructions.md");
-        let malformed = format!("# My rules\n\n{}\nincomplete RTK block\n", BDO_BLOCK_START);
+        let malformed = format!("# My rules\n\n{}\nincomplete Bushido block\n", BDO_BLOCK_START);
         fs::write(&instructions_path, &malformed).unwrap();
 
         let hook_path = github_dir.join("hooks").join("bdo-rewrite.json");

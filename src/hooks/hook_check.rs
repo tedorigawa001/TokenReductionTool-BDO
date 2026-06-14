@@ -1,4 +1,4 @@
-//! Detects whether RTK hooks are installed and warns if they are outdated.
+//! Detects whether Bushido hooks are installed and warns if they are outdated.
 
 use super::constants::{
     CLAUDE_HOOK_COMMAND, HOOKS_SUBDIR, PRE_TOOL_USE_KEY, REWRITE_HOOK_FILE, SETTINGS_JSON,

@@ -85,7 +85,7 @@ pub fn run(
 
     // Always filter: truncate long lines, apply per-file and global caps.
     // Output in standard file:line:content format that AI agents can parse.
-    // (A passthrough approach yields 0% savings — no reason for RTK to exist on that path.)
+    // (A passthrough approach yields 0% savings — no reason for Bushido to exist on that path.)
     let total_matches = result.stdout.lines().count();
 
     let context_re = if context_only {

@@ -69,7 +69,7 @@ fn run_enable() -> Result<()> {
         );
     }
 
-    eprintln!("RTK collects anonymous usage metrics once per day to improve filters.");
+    eprintln!("Bushido collects anonymous usage metrics once per day to improve filters.");
     eprintln!();
     eprintln!("  What:    command names (not arguments), token savings, OS, version");
     eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool)");
@@ -173,7 +173,7 @@ fn send_erasure_request(device_hash: &str) -> Result<()> {
     let mut req = ureq::post(&url).set("Content-Type", "application/json");
 
     if let Some(token) = option_env!("BDO_TELEMETRY_TOKEN") {
-        req = req.set("X-RTK-Token", token);
+        req = req.set("X-Bushido-Token", token);
     }
 
     req.timeout(std::time::Duration::from_secs(5))

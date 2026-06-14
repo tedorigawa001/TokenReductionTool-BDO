@@ -108,7 +108,7 @@ fn filter_markdown_segment(text: &str) -> String {
     s
 }
 
-/// Check if args contain --json flag (user wants specific JSON fields, not RTK filtering)
+/// Check if args contain --json flag (user wants specific JSON fields, not Bushido filtering)
 fn has_json_flag(args: &[String]) -> bool {
     args.iter().any(|a| a == "--json")
 }
@@ -191,7 +191,7 @@ where
 }
 
 pub fn run(subcommand: &str, args: &[String], verbose: u8, ultra_compact: bool) -> Result<i32> {
-    // When user explicitly passes --json, they want raw gh JSON output, not RTK filtering
+    // When user explicitly passes --json, they want raw gh JSON output, not Bushido filtering
     if has_json_flag(args) {
         return run_passthrough("gh", subcommand, args);
     }

@@ -40,7 +40,7 @@ fn git_cmd(global_args: &[String]) -> Command {
 
 /// Create a git Command for internal parsing that must be locale-stable.
 ///
-/// We only use this for non-user-facing parses where RTK depends on git's
+/// We only use this for non-user-facing parses where Bushido depends on git's
 /// English status phrases. User-visible passthrough output keeps the user's
 /// locale.
 fn git_cmd_c_locale(global_args: &[String]) -> Command {
@@ -119,7 +119,7 @@ fn run_diff(
         .iter()
         .any(|arg| arg == "--stat" || arg == "--numstat" || arg == "--shortstat");
 
-    // Check if user wants compact diff (default RTK behavior)
+    // Check if user wants compact diff (default Bushido behavior)
     let wants_compact = !args.iter().any(|arg| arg == "--no-compact");
 
     if wants_stat || !wants_compact {
@@ -128,7 +128,7 @@ fn run_diff(
         cmd.arg("diff");
         for arg in args {
             if arg == "--no-compact" {
-                continue; // RTK flag, not a git flag
+                continue; // Bushido flag, not a git flag
             }
             cmd.arg(arg);
         }
@@ -152,7 +152,7 @@ fn run_diff(
         return Ok(0);
     }
 
-    // Default RTK behavior: stat first, then compacted diff
+    // Default Bushido behavior: stat first, then compacted diff
     let mut cmd = git_cmd(global_args);
     cmd.arg("diff").arg("--stat");
 
@@ -440,7 +440,7 @@ fn run_log(
             || arg.starts_with("--max-count")
     });
 
-    // Apply RTK defaults only if user didn't specify them
+    // Apply Bushido defaults only if user didn't specify them
     // Use %b (body) to preserve first line of commit body for agent context
     // (BREAKING CHANGE, Closes #xxx, design notes)
     if !has_format_flag {
@@ -487,7 +487,7 @@ fn run_log(
         eprintln!("Git log output:");
     }
 
-    // Post-process: truncate long messages, cap lines only if RTK set the default
+    // Post-process: truncate long messages, cap lines only if Bushido set the default
     let filtered = filter_log_output(&result.stdout, limit, user_set_limit, has_format_flag);
     println!("{}", filtered);
 
@@ -555,7 +555,7 @@ pub(crate) fn filter_log_output(
     let truncate_width = if user_set_limit { 120 } else { 80 };
 
     // When user specified their own format (--oneline, --pretty, --format),
-    // RTK did not inject ---END--- markers. Use simple line-based truncation.
+    // Bushido did not inject ---END--- markers. Use simple line-based truncation.
     if user_format {
         let lines: Vec<&str> = output.lines().collect();
         let max_lines = if user_set_limit { lines.len() } else { limit };
@@ -567,7 +567,7 @@ pub(crate) fn filter_log_output(
             .join("\n");
     }
 
-    // RTK injected format: split output into commit blocks separated by ---END---
+    // Bushido injected format: split output into commit blocks separated by ---END---
     let commits: Vec<&str> = output.split("---END---").collect();
     let max_commits = if user_set_limit { commits.len() } else { limit };
 
@@ -731,7 +731,7 @@ fn detect_status_state(line: &str) -> Option<GitStatusState> {
 /// editing a commit while rebasing ...".
 ///
 /// This helper walks the plain-status output we already capture for tracking
-/// and emits a compact, RTK-style summary rather than dumping git's full prose.
+/// and emits a compact, Bushido-style summary rather than dumping git's full prose.
 /// Returns `None` when no state is in progress.
 fn extract_state_header(raw: &str) -> Option<String> {
     // Headers of the file-change blocks — everything relevant to state appears

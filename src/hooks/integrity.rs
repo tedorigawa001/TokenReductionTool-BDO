@@ -1,6 +1,6 @@
 //! Detects if someone tampered with the installed hook file.
 //!
-//! RTK installs a PreToolUse hook (`rtk-rewrite.sh`) that auto-approves
+//! Bushido installs a PreToolUse hook (`rtk-rewrite.sh`) that auto-approves
 //! rewritten commands with `permissionDecision: "allow"`. Because this
 //! hook bypasses Claude Code's permission prompts, any unauthorized
 //! modification represents a command injection vector.
@@ -10,7 +10,7 @@
 //! - Runtime verification before command execution
 //! - Manual verification via `rtk verify`
 //!
-//! Reference: SA-2025-RTK-001 (Finding F-01)
+//! Reference: SA-2025-Bushido-001 (Finding F-01)
 
 use super::constants::{HOOKS_SUBDIR, REWRITE_HOOK_FILE};
 use super::init::resolve_claude_dir;
@@ -31,7 +31,7 @@ pub enum IntegrityStatus {
     Tampered { expected: String, actual: String },
     /// Hook exists but no stored hash (installed before integrity checks)
     NoBaseline,
-    /// Neither hook nor hash file exist (RTK not installed)
+    /// Neither hook nor hash file exist (Bushido not installed)
     NotInstalled,
     /// Hash file exists but hook was deleted
     OrphanedHash,
@@ -216,7 +216,7 @@ pub fn run_verify(verbose: u8) -> Result<()> {
                 return Ok(());
             }
         }
-        println!("SKIP  RTK hook not installed");
+        println!("SKIP  Bushido hook not installed");
         println!("      Run `bdo init -g` to install.");
         return Ok(());
     }
@@ -247,7 +247,7 @@ pub fn run_verify(verbose: u8) -> Result<()> {
             println!("      Run `bdo init -g` to establish baseline.");
         }
         IntegrityStatus::NotInstalled => {
-            println!("SKIP  RTK hook not installed");
+            println!("SKIP  Bushido hook not installed");
             println!("      Run `bdo init -g` to install.");
         }
         IntegrityStatus::OrphanedHash => {
@@ -266,7 +266,7 @@ pub fn run_verify(verbose: u8) -> Result<()> {
 /// - `Tampered`: print warning to stderr, exit 1
 /// - `OrphanedHash`: warn to stderr, continue
 ///
-/// When RTK uses native binary commands (no script file), integrity
+/// When Bushido uses native binary commands (no script file), integrity
 /// checking is a no-op — there is no script to tamper with.
 ///
 /// No env-var bypass is provided — if the hook is legitimately modified,
@@ -300,7 +300,7 @@ pub fn runtime_check() -> Result<()> {
             );
             eprintln!();
             eprintln!("  The hook at ~/.claude/hooks/rtk-rewrite.sh has been modified.");
-            eprintln!("  This may indicate tampering. RTK will not execute.");
+            eprintln!("  This may indicate tampering. Bushido will not execute.");
             eprintln!();
             eprintln!("  To restore:  bdo init -g --auto-patch");
             eprintln!("  To inspect:  bdo verify");

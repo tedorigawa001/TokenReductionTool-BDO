@@ -203,7 +203,7 @@ fn has_golangci_format_flag(args: &[OsString]) -> bool {
     })
 }
 
-/// Known `go tool` subcommands that RTK provides filtered output for.
+/// Known `go tool` subcommands that Bushido provides filtered output for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum GoTool {
     GolangciLint,

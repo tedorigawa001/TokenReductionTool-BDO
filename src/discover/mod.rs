@@ -1,4 +1,4 @@
-//! Scans AI coding sessions to find commands that could benefit from RTK filtering.
+//! Scans AI coding sessions to find commands that could benefit from Bushido filtering.
 
 pub mod lexer;
 pub mod provider;
@@ -100,7 +100,7 @@ pub fn run(
                 // Detect BDO_DISABLED= bypass before classification
                 let (env_prefix, actual_cmd) = strip_disabled_prefix(part);
                 if prefix_contains_rtk_disabled(env_prefix) {
-                    // Only count if the underlying command is one RTK supports
+                    // Only count if the underlying command is one Bushido supports
                     match classify_command(actual_cmd) {
                         Classification::Supported { .. } => {
                             rtk_disabled_count += 1;

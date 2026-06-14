@@ -1,6 +1,6 @@
 //! Token savings tracking and analytics system.
 //!
-//! This module provides comprehensive tracking of RTK command executions,
+//! This module provides comprehensive tracking of Bushido command executions,
 //! recording token savings, execution times, and providing aggregation APIs
 //! for daily/weekly/monthly statistics.
 //!
@@ -99,7 +99,7 @@ pub struct Tracker {
 pub struct CommandRecord {
     /// UTC timestamp when command was executed
     pub timestamp: DateTime<Utc>,
-    /// RTK command that was executed (e.g., "bdo ls")
+    /// Bushido command that was executed (e.g., "bdo ls")
     pub rtk_cmd: String,
     /// Number of tokens saved (input - output)
     pub saved_tokens: usize,
@@ -385,9 +385,9 @@ impl Tracker {
     /// # Arguments
     ///
     /// - `original_cmd`: The standard command (e.g., "ls -la")
-    /// - `rtk_cmd`: The RTK command used (e.g., "bdo ls")
+    /// - `rtk_cmd`: The Bushido command used (e.g., "bdo ls")
     /// - `input_tokens`: Estimated tokens from standard command output
-    /// - `output_tokens`: Actual tokens from RTK output
+    /// - `output_tokens`: Actual tokens from Bushido output
     /// - `exec_time_ms`: Execution time in milliseconds
     ///
     /// # Examples
@@ -1339,9 +1339,9 @@ impl TimedExecution {
     /// # Arguments
     ///
     /// - `original_cmd`: Standard command (e.g., "ls -la")
-    /// - `rtk_cmd`: RTK command used (e.g., "bdo ls")
+    /// - `rtk_cmd`: Bushido command used (e.g., "bdo ls")
     /// - `input`: Standard command output (for token estimation)
-    /// - `output`: RTK command output (for token estimation)
+    /// - `output`: Bushido command output (for token estimation)
     ///
     /// # Examples
     ///
@@ -1378,7 +1378,7 @@ impl TimedExecution {
     /// # Arguments
     ///
     /// - `original_cmd`: Standard command (e.g., "git tag --list")
-    /// - `rtk_cmd`: RTK command used (e.g., "bdo git tag --list")
+    /// - `rtk_cmd`: Bushido command used (e.g., "bdo git tag --list")
     ///
     /// # Examples
     ///

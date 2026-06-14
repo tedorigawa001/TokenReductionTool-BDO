@@ -1,4 +1,4 @@
-//! Building blocks shared across all RTK modules.
+//! Building blocks shared across all Bushido modules.
 
 pub mod args_utils;
 pub mod config;

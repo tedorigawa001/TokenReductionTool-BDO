@@ -1,4 +1,4 @@
-//! Translates a raw shell command into its RTK-optimized equivalent.
+//! Translates a raw shell command into its Bushido-optimized equivalent.
 
 use super::permissions::{check_command, PermissionVerdict};
 use crate::discover::registry;
@@ -6,13 +6,13 @@ use std::io::Write;
 
 /// Run the `rtk rewrite` command.
 ///
-/// Prints the RTK-rewritten command to stdout and exits with a code that tells
+/// Prints the Bushido-rewritten command to stdout and exits with a code that tells
 /// the caller how to handle permissions:
 ///
 /// | Exit | Stdout   | Meaning                                                      |
 /// |------|----------|--------------------------------------------------------------|
 /// | 0    | rewritten| Rewrite allowed — hook may auto-allow the rewritten command. |
-/// | 1    | (none)   | No RTK equivalent — hook passes through unchanged.           |
+/// | 1    | (none)   | No Bushido equivalent — hook passes through unchanged.           |
 /// | 2    | (none)   | Deny rule matched — hook defers to Claude Code native deny.  |
 /// | 3    | rewritten| Ask rule matched — hook rewrites but lets Claude Code prompt.|
 pub fn run(cmd: &str) -> anyhow::Result<()> {
@@ -146,7 +146,7 @@ mod tests {
     ///
     /// The bash hook (.claude/hooks/rtk-rewrite.sh) interprets exit codes as:
     ///   0 → auto-allow (sets permissionDecision: "allow")
-    ///   1 → passthrough (no RTK equivalent)
+    ///   1 → passthrough (no Bushido equivalent)
     ///   2 → deny (let Claude Code handle natively)
     ///   3 → ask (rewrite but omit permissionDecision, forcing user prompt)
     ///

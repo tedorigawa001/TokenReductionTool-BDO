@@ -216,9 +216,9 @@ fn append_wrapped_rules(rules_value: Option<&Value>, prefixes: &[&str], target: 
     }
 }
 
-// Global config only. RTK auto-allows only the globally-trusted subset; anything
+// Global config only. Bushido auto-allows only the globally-trusted subset; anything
 // else defers to the host, which applies its own project config and folder-trust.
-// This keeps RTK's allow set a subset of the host's — never more permissive.
+// This keeps Bushido's allow set a subset of the host's — never more permissive.
 fn global_config(dir: &str, file: &str) -> Option<Value> {
     read_json(&dirs::home_dir()?.join(dir).join(file))
 }

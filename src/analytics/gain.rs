@@ -1,4 +1,4 @@
-//! Shows users how many tokens RTK has saved them over time.
+//! Shows users how many tokens Bushido has saved them over time.
 
 use crate::core::display_helpers::{format_duration, print_period_table};
 use crate::core::tracking::{DayStats, MonthStats, Tracker, WeekStats};
@@ -86,9 +86,9 @@ pub fn run(
     if !daily && !weekly && !monthly && !all {
         // added: scope-aware styled header // changed: merged upstream styled + project scope
         let title = if project_scope.is_some() {
-            "RTK Token Savings (Project Scope)"
+            "Bushido Token Savings (Project Scope)"
         } else {
-            "RTK Token Savings (Global Scope)"
+            "Bushido Token Savings (Global Scope)"
         };
         println!("{}", styled(title, true));
         println!("{}", "═".repeat(60));
@@ -695,7 +695,7 @@ fn show_failures(tracker: &Tracker) -> Result<()> {
         return Ok(());
     }
 
-    println!("{}", styled("RTK Parse Failures", true));
+    println!("{}", styled("Bushido Parse Failures", true));
     println!("{}", "═".repeat(60));
     println!();
 

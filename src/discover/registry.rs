@@ -1,4 +1,4 @@
-//! Matches shell commands against known RTK rewrite rules to decide how to handle them.
+//! Matches shell commands against known Bushido rewrite rules to decide how to handle them.
 
 use lazy_static::lazy_static;
 use regex::{Regex, RegexSet};
@@ -500,7 +500,7 @@ pub fn rewrite_command(
     let compiled = compile_exclude_patterns(excluded);
     let normalized_prefixes = normalize_transparent_prefixes(transparent_prefixes);
 
-    // Simple (non-compound) already-RTK command — return as-is.
+    // Simple (non-compound) already-Bushido command — return as-is.
     // For compound commands that start with "rtk" (e.g. "bdo git add . && cargo test"),
     // fall through to rewrite_compound so the remaining segments get rewritten.
     let has_compound = trimmed.contains("&&")
@@ -778,7 +778,7 @@ fn rewrite_segment_inner(
     // e.g. "git status 2>&1" → match "git status", re-append " 2>&1"
     let (cmd_part, redirect_suffix) = strip_trailing_redirects(trimmed);
 
-    // Already RTK — pass through unchanged
+    // Already Bushido — pass through unchanged
     if cmd_part.starts_with("bdo ") || cmd_part == "bdo" {
         return Some(trimmed.to_string());
     }
@@ -1531,7 +1531,7 @@ mod tests {
 
     #[test]
     fn test_rewrite_mixed_compound_partial() {
-        // First segment already RTK, second gets rewritten
+        // First segment already Bushido, second gets rewritten
         assert_eq!(
             rewrite_command_no_prefixes("bdo git add . && cargo test", &[]),
             Some("bdo git add . && bdo cargo test".into())

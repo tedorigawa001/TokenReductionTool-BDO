@@ -167,7 +167,7 @@ fn handle_vscode(cmd: &str) -> Result<()> {
         "hookSpecificOutput": {
             "hookEventName": PRE_TOOL_USE_KEY,
             "permissionDecision": decision,
-            "permissionDecisionReason": "RTK auto-rewrite",
+            "permissionDecisionReason": "Bushido auto-rewrite",
             "updatedInput": { "command": rewritten }
         }
     });
@@ -213,7 +213,7 @@ fn copilot_cli_response_from_decision(
     }
 
     let mut response = json!({
-        "permissionDecisionReason": "RTK auto-rewrite",
+        "permissionDecisionReason": "Bushido auto-rewrite",
         "modifiedArgs": modified,
     });
     if allow {
@@ -251,7 +251,7 @@ pub fn run_gemini() -> Result<()> {
         HookDecision::Deny => {
             let _ = writeln!(
                 io::stdout(),
-                r#"{{"decision":"deny","reason":"Blocked by RTK permission rule"}}"#
+                r#"{{"decision":"deny","reason":"Blocked by Bushido permission rule"}}"#
             );
         }
         HookDecision::AllowRewrite(ref rewritten) => {
@@ -376,7 +376,7 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
 
     let mut hook_output = json!({
         "hookEventName": PRE_TOOL_USE_KEY,
-        "permissionDecisionReason": "RTK auto-rewrite",
+        "permissionDecisionReason": "Bushido auto-rewrite",
         "updatedInput": updated_input
     });
 
@@ -934,7 +934,7 @@ mod tests {
     #[test]
     fn test_claude_substitution_not_rewritten() {
         // A substitution payload must never be rewritten into updatedInput;
-        // RTK skips so Claude Code evaluates the original command natively.
+        // Bushido skips so Claude Code evaluates the original command natively.
         assert!(run_claude_inner(&claude_input("git status `rm -rf /tmp/x`")).is_none());
         assert!(run_claude_inner(&claude_input("git status $(rm -rf /tmp/x)")).is_none());
         assert!(run_claude_inner(&claude_input("git log --pretty=\"$(rm -rf /tmp/x)\"")).is_none());
@@ -1007,7 +1007,7 @@ mod tests {
         assert_eq!(hook["hookEventName"], PRE_TOOL_USE_KEY);
         // permissionDecision is only set when an explicit allow rule matches;
         // with default-to-ask semantics (no rules configured), it is absent.
-        assert_eq!(hook["permissionDecisionReason"], "RTK auto-rewrite");
+        assert_eq!(hook["permissionDecisionReason"], "Bushido auto-rewrite");
         assert!(hook["updatedInput"].is_object());
         assert!(hook["updatedInput"]["command"].is_string());
     }
@@ -1342,7 +1342,7 @@ mod tests {
     fn gemini_render(cmd: &str, deny: &[String], ask: &[String], allow: &[String]) -> String {
         match decide_with_rules(cmd, deny, ask, allow) {
             HookDecision::Deny => {
-                r#"{"decision":"deny","reason":"Blocked by RTK permission rule"}"#.to_string()
+                r#"{"decision":"deny","reason":"Blocked by Bushido permission rule"}"#.to_string()
             }
             HookDecision::AllowRewrite(r) => gemini_json("allow", Some(&r)),
             HookDecision::AskRewrite(r) => gemini_json("ask_user", Some(&r)),

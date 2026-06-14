@@ -1,4 +1,4 @@
-//! Data types for reporting which commands RTK can and cannot optimize.
+//! Data types for reporting which commands Bushido can and cannot optimize.
 
 use crate::hooks::constants::{
     COPILOT_HOOK_FILE, CURSOR_DIR, GITHUB_DIR, HERMES_DIR, HERMES_PLUGINS_SUBDIR,
@@ -7,14 +7,14 @@ use crate::hooks::constants::{
 use serde::Serialize;
 use std::path::Path;
 
-/// RTK support status for a command.
+/// Bushido support status for a command.
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum RtkStatus {
     /// Dedicated handler with filtering (e.g., git status → git.rs:run_status())
     Existing,
     /// Works via external_subcommand passthrough, no filtering (e.g., cargo fmt → Other)
     Passthrough,
-    /// RTK doesn't handle this command at all
+    /// Bushido doesn't handle this command at all
     NotSupported,
 }
 
@@ -28,7 +28,7 @@ impl RtkStatus {
     }
 }
 
-/// A supported command that RTK already handles.
+/// A supported command that Bushido already handles.
 #[derive(Debug, Serialize)]
 pub struct SupportedEntry {
     pub command: String,
@@ -40,7 +40,7 @@ pub struct SupportedEntry {
     pub rtk_status: RtkStatus,
 }
 
-/// An unsupported command not yet handled by RTK.
+/// An unsupported command not yet handled by Bushido.
 #[derive(Debug, Serialize)]
 pub struct UnsupportedEntry {
     pub base_command: String,
@@ -124,7 +124,7 @@ impl DiscoverReport {
 pub fn format_text(report: &DiscoverReport, limit: usize, verbose: bool) -> String {
     let mut out = String::with_capacity(2048);
 
-    out.push_str("RTK Discover -- Savings Opportunities\n");
+    out.push_str("Bushido Discover -- Savings Opportunities\n");
     out.push_str(&"=".repeat(52));
     out.push('\n');
     out.push_str(&format!(
@@ -132,7 +132,7 @@ pub fn format_text(report: &DiscoverReport, limit: usize, verbose: bool) -> Stri
         report.sessions_scanned, report.since_days, report.total_commands
     ));
     out.push_str(&format!(
-        "Already using RTK: {} commands ({:.1}%)\n",
+        "Already using Bushido: {} commands ({:.1}%)\n",
         report.already_rtk,
         if report.total_commands > 0 {
             report.already_rtk as f64 * 100.0 / report.total_commands as f64
@@ -142,19 +142,19 @@ pub fn format_text(report: &DiscoverReport, limit: usize, verbose: bool) -> Stri
     ));
 
     if report.supported.is_empty() && report.unsupported.is_empty() {
-        out.push_str("\nNo missed savings found. RTK usage looks good!\n");
+        out.push_str("\nNo missed savings found. Bushido usage looks good!\n");
         append_agent_notes(&mut out, report.agent_status);
         return out;
     }
 
     // Missed savings
     if !report.supported.is_empty() {
-        out.push_str("\nMISSED SAVINGS -- Commands RTK already handles\n");
+        out.push_str("\nMISSED SAVINGS -- Commands Bushido already handles\n");
         out.push_str(&"-".repeat(72));
         out.push('\n');
         out.push_str(&format!(
             "{:<24} {:>5}    {:<18} {:<13} {:>12}\n",
-            "Command", "Count", "RTK Equivalent", "Status", "Est. Savings"
+            "Command", "Count", "Bushido Equivalent", "Status", "Est. Savings"
         ));
 
         for entry in report.supported.iter().take(limit) {

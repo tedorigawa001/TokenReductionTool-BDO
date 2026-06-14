@@ -1,4 +1,4 @@
-//! Compares RTK-routed vs raw commands in a coding session.
+//! Compares Bushido-routed vs raw commands in a coding session.
 
 use crate::core::utils::format_tokens;
 use crate::discover::provider::{ClaudeProvider, ExtractedCommand, SessionProvider};
@@ -25,7 +25,7 @@ impl SessionSummary {
     }
 }
 
-/// Count RTK-covered commands from extracted commands.
+/// Count Bushido-covered commands from extracted commands.
 /// A command is "covered" if it either:
 /// - starts with "bdo " (explicit bdo invocation), or
 /// - would be rewritten by the hook (classify_command returns Supported)
@@ -145,12 +145,12 @@ pub fn run(_verbose: u8) -> Result<()> {
     }
 
     // Display table
-    let header = "RTK Session Overview (last 10)";
+    let header = "Bushido Session Overview (last 10)";
     println!("{}", header);
     println!("{}", "-".repeat(70));
     println!(
         "{:<12} {:<12} {:>5} {:>5} {:>9} {:<7} {:>8}",
-        "Session", "Date", "Cmds", "RTK", "Adoption", "", "Output"
+        "Session", "Date", "Cmds", "Bushido", "Adoption", "", "Output"
     );
     println!("{}", "-".repeat(70));
 
@@ -183,7 +183,7 @@ pub fn run(_verbose: u8) -> Result<()> {
         0.0
     };
     println!("Average adoption: {:.0}%", avg_adoption);
-    println!("Tip: Run `bdo discover` to find missed RTK opportunities");
+    println!("Tip: Run `bdo discover` to find missed Bushido opportunities");
 
     Ok(())
 }
@@ -241,7 +241,7 @@ mod tests {
         ];
         let (total, rtk, output) = count_rtk_commands(&cmds);
         assert_eq!(total, 3);
-        // git status + cargo test are supported by RTK, echo is not
+        // git status + cargo test are supported by Bushido, echo is not
         assert_eq!(rtk, 2);
         assert_eq!(output, 3600);
     }
@@ -290,16 +290,16 @@ mod tests {
         let cmds = vec![make_cmd("cd ./your/app/path && bdo ls", Some(200))];
         let (total, rtk, _) = count_rtk_commands(&cmds);
         assert_eq!(total, 2, "chain should split into 2 commands");
-        assert_eq!(rtk, 1, "only 'bdo ls' is RTK-covered");
+        assert_eq!(rtk, 1, "only 'bdo ls' is Bushido-covered");
     }
 
     #[test]
     fn test_count_chained_all_supported() {
-        // Both parts are RTK-supported
+        // Both parts are Bushido-supported
         let cmds = vec![make_cmd("git status && git log -5", Some(500))];
         let (total, rtk, _) = count_rtk_commands(&cmds);
         assert_eq!(total, 2, "chain should split into 2 commands");
-        assert_eq!(rtk, 2, "both git commands are RTK-covered");
+        assert_eq!(rtk, 2, "both git commands are Bushido-covered");
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
         let cmds = vec![make_cmd("cd /tmp; git status; echo done", Some(100))];
         let (total, rtk, _) = count_rtk_commands(&cmds);
         assert_eq!(total, 3, "semicolon chain splits into 3 commands");
-        assert_eq!(rtk, 1, "only git status is RTK-covered");
+        assert_eq!(rtk, 1, "only git status is Bushido-covered");
     }
 
     #[test]
@@ -369,8 +369,8 @@ mod tests {
 
         let (total, rtk, _output) = count_rtk_commands(&cmds);
         assert_eq!(total, 3, "should find 3 Bash commands");
-        // All 3 are RTK-covered: 2 explicit "bdo ..." + 1 hook-rewritten "git log"
-        assert_eq!(rtk, 3, "all 3 commands should be RTK-covered");
+        // All 3 are Bushido-covered: 2 explicit "bdo ..." + 1 hook-rewritten "git log"
+        assert_eq!(rtk, 3, "all 3 commands should be Bushido-covered");
     }
 
     #[test]

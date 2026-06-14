@@ -466,7 +466,7 @@ fn display_summary(tracker: &Tracker, verbose: u8) -> Result<()> {
     );
     println!();
 
-    println!("  RTK commands:                 {}", totals.rtk_commands);
+    println!("  Bushido commands:                 {}", totals.rtk_commands);
     println!(
         "  Tokens saved:                 {}",
         format_tokens(totals.rtk_saved_tokens)
@@ -501,7 +501,7 @@ fn display_summary(tracker: &Tracker, verbose: u8) -> Result<()> {
     println!();
 
     println!("  How it works:");
-    println!("  RTK compresses CLI outputs before they enter Claude's context.");
+    println!("  Bushido compresses CLI outputs before they enter Claude's context.");
     println!("  Savings derived using API price ratios (out=5x, cache_w=1.25x, cache_r=0.1x).");
     println!();
 
@@ -588,7 +588,7 @@ fn print_period_table(periods: &[PeriodEconomics], verbose: u8) {
         // Verbose: include legacy metrics
         println!(
             "{:<12} {:>10} {:>10} {:>10} {:>10} {:>12} {:>12}",
-            "Period", "Spent", "Saved", "Savings", "Active$", "Blended$", "RTK Cmds"
+            "Period", "Spent", "Saved", "Savings", "Active$", "Blended$", "Bushido Cmds"
         );
         println!(
             "{:-<12} {:-<10} {:-<10} {:-<10} {:-<10} {:-<12} {:-<12}",
@@ -627,7 +627,7 @@ fn print_period_table(periods: &[PeriodEconomics], verbose: u8) {
         // Default: single Savings column
         println!(
             "{:<12} {:>10} {:>10} {:>10} {:>12}",
-            "Period", "Spent", "Saved", "Savings", "RTK Cmds"
+            "Period", "Spent", "Saved", "Savings", "Bushido Cmds"
         );
         println!(
             "{:-<12} {:-<10} {:-<10} {:-<10} {:-<12}",

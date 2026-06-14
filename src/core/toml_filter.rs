@@ -556,7 +556,7 @@ pub fn run_filter_tests(filter_name_opt: Option<&str>) -> VerifyResults {
         &mut tested_filter_names,
     );
 
-    // Trust-gated: only verify project-local filters if trusted (SA-2025-RTK-002)
+    // Trust-gated: only verify project-local filters if trusted (SA-2025-Bushido-002)
     let project_path = std::path::Path::new(".bdo/filters.toml");
     if project_path.exists() {
         let trust_status = crate::hooks::trust::check_trust(project_path)

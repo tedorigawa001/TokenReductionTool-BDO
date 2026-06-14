@@ -15,7 +15,7 @@ pub fn format_console_report(
     let mut output = String::new();
 
     output.push_str(&format!(
-        "RTK Learn -- {} rules from {} corrections ({} sessions, {} days)\n",
+        "Bushido Learn -- {} rules from {} corrections ({} sessions, {} days)\n",
         rules.len(),
         total_corrections,
         sessions,

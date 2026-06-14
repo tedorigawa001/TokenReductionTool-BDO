@@ -1160,7 +1160,7 @@ fn run_fallback(parse_error: clap::Error) -> Result<i32> {
         parse_error.exit();
     }
 
-    // RTK meta-commands should never fall back to raw execution.
+    // Bushido meta-commands should never fall back to raw execution.
     // e.g. `rtk gain --badtypo` should show Clap's error, not try to run `gain` from $PATH.
     if BDO_META_COMMANDS.contains(&args[0].as_str()) {
         parse_error.exit();
@@ -2821,7 +2821,7 @@ mod tests {
 
     #[test]
     fn test_meta_commands_reject_bad_flags() {
-        // RTK meta-commands should produce parse errors (not fall through to raw execution).
+        // Bushido meta-commands should produce parse errors (not fall through to raw execution).
         // Skip "proxy" because it uses trailing_var_arg (accepts any args by design).
         for cmd in BDO_META_COMMANDS {
             if matches!(*cmd, "proxy" | "run" | "rewrite" | "session") {

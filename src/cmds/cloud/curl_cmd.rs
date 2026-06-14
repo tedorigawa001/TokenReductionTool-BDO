@@ -111,15 +111,39 @@ fn filter_curl_output(raw: &str, is_tty: bool) -> FilterResult<'_> {
         || (trimmed.starts_with('[') && trimmed.ends_with(']'))
         || (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2);
 
+    // JSON bodies are never truncated (a mid-stream cut produces invalid JSON,
+    // #1536) — but a pretty-printed response carries a lot of insignificant
+    // whitespace. Minify it: parse and re-serialize compact, which is lossless
+    // and keeps the body valid for downstream parsers while dropping the
+    // indentation/newlines that APIs commonly emit. On any parse failure
+    // (truncated or non-standard JSON) fall back to passing the body through.
+    if looks_like_json {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Ok(minified) = serde_json::to_string(&value) {
+                // Only adopt the minified form when it actually saves bytes; an
+                // already-compact body stays borrowed to avoid a needless alloc.
+                if minified.len() < trimmed.len() {
+                    return FilterResult {
+                        content: Cow::Owned(minified),
+                        tee_hint: None,
+                    };
+                }
+            }
+        }
+        return FilterResult {
+            content: Cow::Borrowed(trimmed),
+            tee_hint: None,
+        };
+    }
+
     // Pass through unchanged when:
-    // - body looks like JSON (mid-stream truncation produces invalid JSON, #1536)
     // - stdout is not a terminal (pipes / redirects need the full body, #1282)
     // - body fits under the truncation threshold
     //
     // Critically, do NOT call `force_tee_hint` on this path — it has a side effect
     // (writes the raw body to a tee log file) and we don't need a recovery file
     // when the consumer already receives the full body.
-    if !is_tty || looks_like_json || trimmed.len() < MAX_RESPONSE_SIZE {
+    if !is_tty || trimmed.len() < MAX_RESPONSE_SIZE {
         return FilterResult {
             content: Cow::Borrowed(trimmed),
             tee_hint: None,
@@ -201,6 +225,46 @@ mod tests {
         let content = "a".repeat(500);
         let result = filter_curl_output(&content, true);
         assert!(result.content.contains("bytes total"));
+    }
+
+    // --- pretty-printed JSON is minified (lossless), saving tokens ---
+
+    #[test]
+    fn test_filter_curl_pretty_json_minified() {
+        let pretty = "{\n  \"status\": \"ok\",\n  \"items\": [\n    1,\n    2,\n    3\n  ]\n}";
+        let result = filter_curl_output(pretty, true);
+        // Minified: valid JSON, no insignificant whitespace, smaller, no tee hint.
+        assert_eq!(&*result.content, r#"{"status":"ok","items":[1,2,3]}"#);
+        assert!(result.content.len() < pretty.len(), "should be smaller");
+        assert!(result.tee_hint.is_none());
+        // Still parses as JSON.
+        assert!(serde_json::from_str::<serde_json::Value>(&result.content).is_ok());
+    }
+
+    #[test]
+    fn test_filter_curl_pretty_json_minified_even_when_piped() {
+        // Non-TTY consumers (pipes) also get the minified — still valid — body.
+        let pretty = "[\n  {\n    \"a\": 1\n  }\n]";
+        let result = filter_curl_output(pretty, false);
+        assert_eq!(&*result.content, r#"[{"a":1}]"#);
+    }
+
+    #[test]
+    fn test_filter_curl_json_preserves_key_order() {
+        // `preserve_order` keeps the original field order through minification.
+        let pretty = "{\n  \"z\": 1,\n  \"a\": 2,\n  \"m\": 3\n}";
+        let result = filter_curl_output(pretty, true);
+        assert_eq!(&*result.content, r#"{"z":1,"a":2,"m":3}"#);
+    }
+
+    #[test]
+    fn test_filter_curl_invalid_json_passthrough() {
+        // Looks like JSON (starts `{` ends `}`) but doesn't parse — must pass
+        // through unchanged rather than be dropped or mangled.
+        let broken = "{ this is not, valid json }";
+        let result = filter_curl_output(broken, true);
+        assert_eq!(&*result.content, broken);
+        assert!(result.tee_hint.is_none());
     }
 
     // --- #1536: large JSON must remain parseable for downstream tools ---

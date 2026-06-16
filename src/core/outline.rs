@@ -435,9 +435,13 @@ fn outline_python(content: &str, collapse_all: bool) -> String {
             }
         }
 
-        // Decorators annotate the next def/class at any nesting level.
+        // Decorators annotate the next def/class at any nesting level. The map
+        // (`collapse_all`) form drops them to stay a terse bird's-eye view —
+        // mirroring how brace languages drop attributes/annotations there.
         if trimmed.starts_with('@') {
-            pending_decorators.push(line.to_string());
+            if !collapse_all {
+                pending_decorators.push(line.to_string());
+            }
             continue;
         }
 
@@ -602,11 +606,15 @@ def top():
     return 1
 ";
         let o = signatures(src, &Language::Python).unwrap();
-        assert!(o.contains("class Config:"), "{o}");
-        assert!(o.contains("def top():"), "{o}");
-        // Nested method and module-level import are dropped in map mode.
+        assert!(o.contains("class Config: …"), "{o}");
+        assert!(o.contains("def top(): …"), "{o}");
+        // Nested method, module-level import, and decorators are dropped in map
+        // mode (decorators would otherwise inflate `bdo map`'s signature count).
         assert!(!o.contains("def ready"), "nested method hidden: {o}");
         assert!(!o.contains("import os"), "imports dropped in map: {o}");
+        assert!(!o.contains("@dataclass"), "decorators dropped in map: {o}");
+        // Exactly two declarations, one per line — no decorator padding.
+        assert_eq!(o.lines().count(), 2, "two declarations only: {o:?}");
     }
 
     #[test]

@@ -70,7 +70,7 @@ This is the full lifecycle of a command through Bushido, from LLM agent to filte
 
 The user runs `bdo init` to set up hooks for their LLM agent. This:
 
-1. Writes a thin shell hook script (e.g., `~/.claude/hooks/rtk-rewrite.sh`)
+1. Writes a thin shell hook script (e.g., `~/.claude/hooks/bdo-rewrite.sh`)
 2. Stores its SHA-256 hash for integrity verification
 3. Patches the agent's settings file (e.g., `settings.json`) to register the hook
 4. Writes Bushido awareness instructions (e.g., `Bushido.md`) for prompt-level guidance
@@ -107,7 +107,7 @@ Traced step by step for `cargo fmt --all && cargo test 2>&1 | tail -20`:
 ```
 LLM Agent: "cargo fmt --all && cargo test 2>&1 | tail -20"
   |
-  |  Hook shell (hooks/claude/rtk-rewrite.sh)
+  |  Hook shell (hooks/claude/bdo-rewrite.sh)
   |  Reads JSON from agent, extracts command, calls `bdo rewrite "$CMD"`
   |  On failure (jq missing, bdo missing, old version): exit 0 (passthrough)
   |

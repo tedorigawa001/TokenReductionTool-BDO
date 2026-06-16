@@ -359,7 +359,7 @@ fn detect_hook_type() -> String {
 
     // Check in order of popularity
     let checks = [
-        (claude_dir.join("hooks/rtk-rewrite.sh"), "claude"),
+        (claude_dir.join("hooks/bdo-rewrite.sh"), "claude"),
         (claude_dir.join("hooks/bdo-rewrite.json"), "claude"),
         (home.join(".gemini/hooks/rtk-hook.sh"), "gemini"),
         (home.join(".codex/AGENTS.md"), "codex"),
@@ -374,7 +374,7 @@ fn detect_hook_type() -> String {
 
     // Check project-level hooks (Claude script + project-scoped Copilot config)
     if let Ok(cwd) = std::env::current_dir() {
-        if cwd.join(".claude/hooks/rtk-rewrite.sh").exists() {
+        if cwd.join(".claude/hooks/bdo-rewrite.sh").exists() {
             return "claude".to_string();
         }
         if cwd.join(".github/hooks/bdo-rewrite.json").exists() {

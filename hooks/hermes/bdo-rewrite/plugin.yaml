@@ -1,4 +1,4 @@
-name: rtk-rewrite
+name: bdo-rewrite
 version: "0.1.0"
 description: Rewrite Hermes terminal commands through Bushido before execution.
 author: Bushido Contributors

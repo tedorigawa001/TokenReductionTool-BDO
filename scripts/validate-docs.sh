@@ -24,7 +24,7 @@ done
 echo "✅ Python/Go commands: documented in README.md"
 
 # 4. Hooks cohérents avec doc
-HOOK_FILE=".claude/hooks/rtk-rewrite.sh"
+HOOK_FILE=".claude/hooks/bdo-rewrite.sh"
 if [ -f "$HOOK_FILE" ]; then
   echo "🪝 Checking hook rewrites..."
   for cmd in "${PYTHON_GO_CMDS[@]}"; do

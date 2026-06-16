@@ -112,8 +112,7 @@ echo ""
 
 # Check 6: Auto-rewrite hook
 # `bdo init` registers a native PreToolUse hook in settings.json that runs
-# `bdo hook claude` (no separate shell script). Older installs used a
-# `rtk-rewrite.sh` script — we detect that too and recommend migrating.
+# `bdo hook claude` (no separate shell script).
 echo "6. Checking auto-rewrite hook (optional but recommended)..."
 HOOK_FOUND=false
 for settings in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json"; do
@@ -122,23 +121,12 @@ for settings in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json
         echo -e "   ${GREEN}✅${NC} Native hook enabled ($(basename "$settings"): bdo hook claude)"
         HOOK_FOUND=true
         break
-    elif grep -q "rtk-rewrite.sh" "$settings"; then
-        echo -e "   ${YELLOW}⚠️${NC}  Legacy rtk-rewrite.sh hook found in $(basename "$settings")"
-        echo "      Migrate to the native hook: bdo init --global"
-        HOOK_FOUND=true
-        break
     fi
 done
 
 if [ "$HOOK_FOUND" = false ]; then
-    # Legacy script left on disk but not wired into settings.json.
-    if [ -f "$HOME/.claude/hooks/rtk-rewrite.sh" ]; then
-        echo -e "   ${YELLOW}⚠️${NC}  Legacy hook script present but not enabled in settings.json"
-        echo "      Install the native hook: bdo init --global"
-    else
-        echo -e "   ${YELLOW}⚠️${NC}  Auto-rewrite hook not installed (optional)"
-        echo "      Install: bdo init --global"
-    fi
+    echo -e "   ${YELLOW}⚠️${NC}  Auto-rewrite hook not installed (optional)"
+    echo "      Install: bdo init --global"
 fi
 echo ""
 

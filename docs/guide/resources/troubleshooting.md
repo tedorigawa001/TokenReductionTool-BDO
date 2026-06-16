@@ -83,7 +83,7 @@ bdo --version
 
 **Symptom:** `bdo init -g` shows "Falling back to --claude-md mode" on Windows.
 
-**Cause:** The auto-rewrite hook (`rtk-rewrite.sh`) requires a Unix shell. Native Windows doesn't have one.
+**Cause:** The auto-rewrite hook (`bdo-rewrite.sh`) requires a Unix shell. Native Windows doesn't have one.
 
 **Fix:** Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) for full hook support:
 ```bash

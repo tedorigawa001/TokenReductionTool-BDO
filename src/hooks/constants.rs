@@ -1,4 +1,4 @@
-pub const REWRITE_HOOK_FILE: &str = "rtk-rewrite.sh";
+pub const REWRITE_HOOK_FILE: &str = "bdo-rewrite.sh";
 pub const GEMINI_HOOK_FILE: &str = "bdo-hook-gemini.sh";
 pub const CLAUDE_DIR: &str = ".claude";
 pub const HOOKS_SUBDIR: &str = "hooks";
@@ -8,9 +8,9 @@ pub const HOOKS_JSON: &str = "hooks.json";
 pub const PRE_TOOL_USE_KEY: &str = "PreToolUse";
 pub const BEFORE_TOOL_KEY: &str = "BeforeTool";
 
-/// Native Rust hook command for Claude Code (replaces rtk-rewrite.sh).
+/// Native Rust hook command for Claude Code (replaces the legacy shell hook).
 pub const CLAUDE_HOOK_COMMAND: &str = "bdo hook claude";
-/// Native Rust hook command for Cursor (replaces rtk-rewrite.sh).
+/// Native Rust hook command for Cursor (replaces the legacy shell hook).
 pub const CURSOR_HOOK_COMMAND: &str = "bdo hook cursor";
 
 pub const CONFIG_DIR: &str = ".config";

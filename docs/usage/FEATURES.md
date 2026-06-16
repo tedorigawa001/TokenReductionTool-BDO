@@ -1191,7 +1191,7 @@ Claude Code "git status"
 settings.json -> PreToolUse hook
     |
     v
-rtk-rewrite.sh (bash)
+bdo-rewrite.sh (bash)
     |
     v
 bdo rewrite "git status"  ->  "bdo git status"
@@ -1225,7 +1225,7 @@ bdo init -g --uninstall         # Desinstaller
 
 | Fichier | Description |
 |---------|-------------|
-| `~/.claude/hooks/rtk-rewrite.sh` | Script hook (delegue a `bdo rewrite`) |
+| `~/.claude/hooks/bdo-rewrite.sh` | Script hook (delegue a `bdo rewrite`) |
 | `~/.claude/Bushido.md` | Instructions minimales pour le LLM |
 | `~/.claude/settings.json` | Enregistrement du hook PreToolUse |
 

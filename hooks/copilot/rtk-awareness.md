@@ -7,7 +7,7 @@
 The `.github/copilot-instructions.md` file is loaded at session start by both Copilot CLI and VS Code Copilot Chat.
 It instructs Copilot to prefix commands with `bdo` automatically.
 
-The `.github/hooks/rtk-rewrite.json` hook adds a `PreToolUse` safety net via `bdo hook` —
+The `.github/hooks/bdo-rewrite.json` hook adds a `PreToolUse` safety net via `bdo hook` —
 a cross-platform Rust binary that intercepts raw bash tool calls and rewrites them.
 No shell scripts, no `jq` dependency, works on Windows natively.
 
@@ -50,8 +50,8 @@ When Copilot CLI adds `updatedInput` support, only `bdo hook` needs updating —
 
 | Tool                  | Mechanism                               | Hook output              | File                               |
 |-----------------------|-----------------------------------------|--------------------------|------------------------------------|
-| Claude Code           | `PreToolUse` hook with `updatedInput`   | Transparent rewrite      | `hooks/rtk-rewrite.sh`             |
-| VS Code Copilot Chat  | `PreToolUse` hook with `updatedInput`   | Transparent rewrite      | `.github/hooks/rtk-rewrite.json`   |
-| GitHub Copilot CLI    | `PreToolUse` deny-with-suggestion       | Denial + retry           | `.github/hooks/rtk-rewrite.json`   |
+| Claude Code           | `PreToolUse` hook with `updatedInput`   | Transparent rewrite      | `hooks/bdo-rewrite.sh`             |
+| VS Code Copilot Chat  | `PreToolUse` hook with `updatedInput`   | Transparent rewrite      | `.github/hooks/bdo-rewrite.json`   |
+| GitHub Copilot CLI    | `PreToolUse` deny-with-suggestion       | Denial + retry           | `.github/hooks/bdo-rewrite.json`   |
 | OpenCode              | Plugin `tool.execute.before`            | Transparent rewrite      | `hooks/opencode-rtk.ts`            |
 | (any)                 | Custom instructions                     | Prompt-level guidance    | `.github/copilot-instructions.md`  |

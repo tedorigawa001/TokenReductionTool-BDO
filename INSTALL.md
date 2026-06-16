@@ -71,7 +71,7 @@ bdo gain  # Should show token savings, not "command not found"
 
 ```bash
 bdo init -g
-# → Installs hook to ~/.claude/hooks/rtk-rewrite.sh
+# → Installs hook to ~/.claude/hooks/bdo-rewrite.sh
 # → Creates ~/.claude/Bushido.md (10 lines, meta commands only)
 # → Adds @Bushido.md reference to ~/.claude/CLAUDE.md
 # → Prompts: "Patch settings.json? [y/N]"
@@ -91,7 +91,7 @@ bdo init --show  # Check hook is installed and executable
 Claude Code's hook registry. Bushido adds a PreToolUse hook that rewrites commands transparently. Without this, Claude won't invoke the hook automatically.
 
 ```
-  Claude Code          settings.json        rtk-rewrite.sh        Bushido binary
+  Claude Code          settings.json        bdo-rewrite.sh        Bushido binary
        │                    │                     │                    │
        │  "git status"      │                     │                    │
        │ ──────────────────►│                     │                    │
@@ -225,7 +225,7 @@ bdo vitest
 bdo init -g --uninstall
 
 # What gets removed:
-#   - Hook: ~/.claude/hooks/rtk-rewrite.sh
+#   - Hook: ~/.claude/hooks/bdo-rewrite.sh
 #   - Context: ~/.claude/Bushido.md
 #   - Reference: @Bushido.md line from ~/.claude/CLAUDE.md
 #   - Registration: Bushido hook entry from settings.json

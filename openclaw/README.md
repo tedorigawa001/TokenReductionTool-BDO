@@ -2,7 +2,7 @@
 
 Transparently rewrites shell commands executed via OpenClaw's `exec` tool to their Bushido equivalents, achieving 60-90% LLM token savings.
 
-This is the OpenClaw equivalent of the Claude Code hooks in `hooks/rtk-rewrite.sh`.
+This is the OpenClaw equivalent of the Claude Code hooks in `hooks/bdo-rewrite.sh`.
 
 ## How it works
 
@@ -26,8 +26,8 @@ curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/re
 
 ```bash
 # Copy the plugin to OpenClaw's extensions directory
-mkdir -p ~/.openclaw/extensions/rtk-rewrite
-cp openclaw/index.ts openclaw/openclaw.plugin.json ~/.openclaw/extensions/rtk-rewrite/
+mkdir -p ~/.openclaw/extensions/bdo-rewrite
+cp openclaw/index.ts openclaw/openclaw.plugin.json ~/.openclaw/extensions/bdo-rewrite/
 
 # Restart the gateway
 openclaw gateway restart
@@ -47,7 +47,7 @@ In `openclaw.json`:
 {
   plugins: {
     entries: {
-      "rtk-rewrite": {
+      "bdo-rewrite": {
         enabled: true,
         config: {
           enabled: true,    // Toggle rewriting on/off

@@ -334,7 +334,7 @@ mod tests {
             .join(HERMES_PLUGIN_NAME)
             .join(HERMES_PLUGIN_MANIFEST_FILE);
         std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
-        std::fs::write(&manifest, "name: rtk-rewrite\n").unwrap();
+        std::fs::write(&manifest, "name: bdo-rewrite\n").unwrap();
 
         let status = AgentIntegrationStatus::detect_from_home(temp_home.path());
 

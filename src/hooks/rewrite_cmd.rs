@@ -144,7 +144,7 @@ mod tests {
 
     /// SECURITY: Verify the exit code protocol for permission verdicts.
     ///
-    /// The bash hook (.claude/hooks/rtk-rewrite.sh) interprets exit codes as:
+    /// The bash hook (.claude/hooks/bdo-rewrite.sh) interprets exit codes as:
     ///   0 → auto-allow (sets permissionDecision: "allow")
     ///   1 → passthrough (no Bushido equivalent)
     ///   2 → deny (let Claude Code handle natively)

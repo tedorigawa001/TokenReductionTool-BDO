@@ -31,14 +31,14 @@ LLM agent integration layer that installs, validates, and executes command-rewri
 | Codex | `bdo init --codex` | Bushido.md in `$CODEX_HOME` or `~/.codex` | AGENTS.md |
 | Cursor | `bdo init -g --agent cursor` | Cursor hook | hooks.json |
 | Pi | `bdo init --agent pi` | `.pi/extensions/rtk.ts` | -- |
-| Hermes | `bdo init --agent hermes` | Python plugin in `~/.hermes/plugins/rtk-rewrite/` | `config.yaml` `plugins.enabled` |
+| Hermes | `bdo init --agent hermes` | Python plugin in `~/.hermes/plugins/bdo-rewrite/` | `config.yaml` `plugins.enabled` |
 
 
 ## Integrity Verification
 
 The integrity system prevents unauthorized hook modifications:
 
-1. At install: `integrity::store_hash()` computes SHA-256 of the hook file, writes to `~/.claude/hooks/.rtk-hook.sha256` (read-only 0o444)
+1. At install: `integrity::store_hash()` computes SHA-256 of the hook file, writes to `~/.claude/hooks/.bdo-hook.sha256` (read-only 0o444)
 2. At runtime: `integrity::runtime_check()` re-computes hash and compares; blocks execution if tampered
 3. On demand: `bdo verify` prints detailed verification status (PASS/FAIL/WARN/SKIP)
 
@@ -84,7 +84,7 @@ Rules are loaded from all Claude Code `settings.json` files (project + global, i
 
 | Tool | ask support | Behavior on Default |
 |------|------------|-------------------|
-| Claude Code (rtk-rewrite.sh) | Yes | `permissionDecision: "ask"` — user prompted |
+| Claude Code (bdo-rewrite.sh) | Yes | `permissionDecision: "ask"` — user prompted |
 | Copilot VS Code (bdo hook copilot) | Yes | `permissionDecision: "ask"` — user prompted |
 | Gemini CLI (bdo hook gemini) | No (allow/deny only) | allow (limitation — no ask mode in Gemini) |
 | Copilot CLI (bdo hook copilot) | No updatedInput | deny-with-suggestion (unchanged) |

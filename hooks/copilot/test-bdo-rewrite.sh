@@ -2,7 +2,7 @@
 # Test suite for bdo hook (cross-platform preToolUse handler).
 # Feeds mock preToolUse JSON through `bdo hook` and verifies allow/deny decisions.
 #
-# Usage: bash hooks/test-copilot-rtk-rewrite.sh
+# Usage: bash hooks/test-copilot-bdo-rewrite.sh
 #
 # Copilot CLI input format:
 #   {"toolName":"bash","toolArgs":"{\"command\":\"...\"}"}

@@ -121,7 +121,7 @@ bash scripts/check-test-presence.sh
 
 - **env 変数**: `RTK_*` → `BDO_*` を全面置換（実 env 読取り12箇所 + 子プロセス用マーカー + `BDO_DISABLED=` 接頭辞検出 + `option_env!("BDO_TELEMETRY_URL/TOKEN")`）。互換フォールバックなし。
 - **データ/設定ディレクトリ**: `~/.local/share/rtk` → `~/.local/share/bdo`（`BDO_DATA_DIR` 定数値 + ハードコードの `.join("rtk")` を統一）。プロジェクトローカル設定 `.rtk/` → `.bdo/`。旧データはクリーン切替で非参照（移行フォールバックなし）。
-- **フックのファイル名・マーカー**: `rtk.ts`→`bdo.ts`、`rtk-awareness.md`→`bdo-awareness.md`、hermes プラグイン `rtk-rewrite`→`bdo-rewrite`、copilot `rtk-rewrite.json`→`bdo-rewrite.json`、`rtk-hook-gemini.sh`→`bdo-hook-gemini.sh`、`rtk-rules.md`→`bdo-rules.md`、CLAUDE.md/AGENTS.md の `rtk-instructions` マーカー→`bdo-instructions`。同梱ファイル実体も `mv` 済み・`include_str!` パス更新済み。
+- **フックのファイル名・マーカー**: `rtk.ts`→`bdo.ts`、`rtk-awareness.md`→`bdo-awareness.md`、hermes プラグイン `bdo-rewrite`→`bdo-rewrite`、copilot `bdo-rewrite.json`→`bdo-rewrite.json`、`rtk-hook-gemini.sh`→`bdo-hook-gemini.sh`、`rtk-rules.md`→`bdo-rules.md`、CLAUDE.md/AGENTS.md の `rtk-instructions` マーカー→`bdo-instructions`。同梱ファイル実体も `mv` 済み・`include_str!` パス更新済み。
 - **非 src 資材**: `Formula/rtk.rb`→`bdo.rb`（class `Bdo`、`bin.install "bdo"`）、`install.sh`（`BINARY_NAME=bdo`、`BDO_*` env）、`scripts/rtk-economics.sh`→`bdo-economics.sh`、docs/README/各 README のコマンド・env・製品名（`RTK`→`Bushido`）を一括変換。
 
 ### 2026-06-13 — リポジトリURL差し替え
@@ -129,7 +129,7 @@ bash scripts/check-test-presence.sh
 フォークの GitHub を `https://github.com/tedorigawa001/TokenReductionTool` に確定。`github.com/rtk-ai/rtk` / `rtk-ai/tap/rtk` / star-history 等の**機能的URL**を全面差し替え（Cargo.toml の homepage/repository、`install.sh` の REPO、`Formula/bdo.rb` の url/homepage/tap=`tedorigawa001/tap`、README×2・INSTALL・docs・openclaw・src 内 issues リンク）。Homebrew tap は `tedorigawa001/homebrew-tap` を前提（Formula にコメント）。
 
 **意図的に残した rtk（レガシー処理 / 上流帰属 / 連絡先）**
-- 旧フック `rtk-rewrite.sh` の**アンインストール/検出コード**（`REWRITE_HOOK_FILE` 定数等）— 上流由来の実在ファイルを掃除する処理のため。
+- 旧フック `bdo-rewrite.sh` の**アンインストール/検出コード**（`REWRITE_HOOK_FILE` 定数等）— 上流由来の実在ファイルを掃除する処理のため。
 - 連絡先メール `contact@rtk-ai.app` / `security@rtk-ai.app`（docs/TELEMETRY, SECURITY, INSTALL）— フォークの連絡先未確定のため保持（テレメトリは既定 off）。
 - `LICENSE` の著作権表記、`CONTRIBUTING.md` の CLA（rtk-ai への権利付与）— 法務。フォークの方針が決まれば見直し。
 - src 内の小文字内部識別子（`rtk_cmd`, `rtk_disabled_count`, `RtkStatus` 等）— 出力・env に出ないため churn 回避。
@@ -143,7 +143,7 @@ bash scripts/check-test-presence.sh
 - **名称衝突警告の撤去**: バイナリが `rtk`→`bdo` になり reachingforthejack/rtk（Rust Type Kit, binary `rtk`）との衝突が解消したため、陳腐化した「2つの bdo がある / Type Kit と間違えるな」記述を8ファイル（README, INSTALL, CLAUDE, docs/troubleshooting, docs/installation, 同梱 bdo-awareness.md, copilot awareness, check-installation.sh）から削除/簡素化。stale バイナリパス `target/release/rtk`→`bdo`、`cargo install bdo`→`bushido`、リリース成果物名 `rtk-*`→`bdo-*` も修正。
 
 **意図的に残した rtk**
-- 旧フック `rtk-rewrite.sh` の**アンインストール/検出コード**（`REWRITE_HOOK_FILE` 定数等）。
+- 旧フック `bdo-rewrite.sh` の**アンインストール/検出コード**（`REWRITE_HOOK_FILE` 定数等）。
 - src 内の小文字内部識別子（`rtk_cmd`, `rtk_disabled_count`, `RtkStatus` 等）。
 - `tests/fixtures/`・`CHANGELOG.md`・src のテスト入力データ（`install_method_from_path` のサンプルパス、cargo 置換フィクスチャ等）。
 - `LICENSE` の上流著作権行（Apache-2.0 が保持を要求）。
@@ -154,13 +154,13 @@ bash scripts/check-test-presence.sh
 - **バグ修正①** `scripts/install-local.sh`: `bdo` をビルドして `${INSTALL_DIR}/rtk` に install していた（PATH 上のコマンド名が rtk になる実害）→ `${INSTALL_DIR}/bdo` に修正。
 - **バグ修正②** `scripts/test-install.sh`: 偽バイナリを `safe_src/rtk` で作成後に `tar ... bdo`（不在ファイル）→ tar 失敗。`safe_src/bdo` に修正。
 - **データ/出力ラベル整合**: `bushido-token-benchmark.sh`・`bushido-check.sh` の `$TEST_HOME/rtk/*`（DB/tee/data dir）→ `/bdo/`、temp dir `rtk-test-home`/`rtk-target-new` → `bdo-*`、`benchmark.sh` の出力サブディレクトリ `$BENCH_DIR/rtk` → `/bdo`、出力文言「install rtk」「data from rtk」→ bdo、ベンチVM の clone dir `/home/ubuntu/rtk` → `/home/ubuntu/bushido`・VM名 `rtk-test`→`bushido-test` 等。`bushido-token-benchmark.sh:9` の `debug/rtk`→`debug/bdo` は既修正を確認。
-- **据え置き（出力/ディレクトリではない）**: 内部シェル/TS変数（`rtk_cmd`, `rtk_out`, `TOTAL_RTK`, `rtkMean`, `rtk_db` 等）、サンプル/フィクスチャ（`rtk-bench` crate、`test@rtk.dev`、path-traversal テストの `rtk/..`）、レガシー `rtk-rewrite.sh` 検出（`validate-docs.sh`, `check-installation.sh`）。
+- **据え置き（出力/ディレクトリではない）**: 内部シェル/TS変数（`rtk_cmd`, `rtk_out`, `TOTAL_RTK`, `rtkMean`, `rtk_db` 等）、サンプル/フィクスチャ（`rtk-bench` crate、`test@rtk.dev`、path-traversal テストの `rtk/..`）、レガシー `bdo-rewrite.sh` 検出（`validate-docs.sh`, `check-installation.sh`）。
 - `benchmark-sessions/lib/runner.py` が参照する `setup-rtk.sh` は非同梱（既存 dangling 参照）。
 
 **残課題**
 - GitHub に `bdo-<target>.tar.gz` リリース成果物と Homebrew tap (`tedorigawa001/homebrew-tap`) を用意。
-- 上流追従が不要なら、レガシー `rtk-rewrite.sh` 掃除コードの削除を検討。
-- `check-installation.sh` のフック検出が legacy `rtk-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
+- 上流追従が不要なら、レガシー `bdo-rewrite.sh` 掃除コードの削除を検討。
+- `check-installation.sh` のフック検出が legacy `bdo-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
 - 標準 python/bash プラグインテストの実行確認（`hooks/hermes/tests/`, `hooks/*/test-*.sh`）。
 
 ### 2026-06-14 — 機能追加 + レビュー駆動の修正（main 集約後）
@@ -168,7 +168,7 @@ bash scripts/check-test-presence.sh
 作業は `main` に集約済み（fast-forward）。以降 `main` で開発。追加・修正:
 - `feat(read)`: `-l outline`（シグネチャのみ・本体省略）、`feat(map)`: `bdo map`（リポジトリ地図、`outline::signatures` 再利用、`.gitignore` 尊重、多言語）。`feat(curl)`: JSON minify（**端末時のみ**、pipe/redirect は byte 完全 passthrough=#1282 維持）。
 - レビュー修正: `map` を `RUST_HANDLED_COMMANDS` 登録、複数行シグネチャの1行正規化（`code_part` で行末コメント誤合体も修正）。
-- README / README_ja: 事実誤り一掃（旧 `rtk` パス・データディレクトリ `~/.config/rtk`→`bdo`・`rtk-rules.md`→`bdo-rules.md`・hermes `rtk-rewrite/`→`bdo-rewrite/`・成果物名 `rtk-*`→`bdo-*`・version `0.2x`→`0.42.2`・壊れた `/guide/` リンク→相対 docs・ロゴ `assets/logo.svg`→root `logo.svg`・Homebrew バッジ削除）。`-l outline` と `bdo map`(専用セクション)を追記。
+- README / README_ja: 事実誤り一掃（旧 `rtk` パス・データディレクトリ `~/.config/rtk`→`bdo`・`rtk-rules.md`→`bdo-rules.md`・hermes `bdo-rewrite/`→`bdo-rewrite/`・成果物名 `rtk-*`→`bdo-*`・version `0.2x`→`0.42.2`・壊れた `/guide/` リンク→相対 docs・ロゴ `assets/logo.svg`→root `logo.svg`・Homebrew バッジ削除）。`-l outline` と `bdo map`(専用セクション)を追記。
 
 **リリースは現在ペンディング**（未実施）。以下のリリース依存タスクは保留:
 - GitHub リリース成果物 `bdo-<target>.tar.gz` / Homebrew tap (`tedorigawa001/homebrew-tap`) の整備。
@@ -176,7 +176,7 @@ bash scripts/check-test-presence.sh
 - push / PR もリリース方針確定まで保留。
 
 **残課題（リリースと独立）**
-- `check-installation.sh` のフック検出が legacy `rtk-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
+- `check-installation.sh` のフック検出が legacy `bdo-rewrite.sh` のみ＝ネイティブ `bdo hook` 方式を検出しない点の要否判断。
 - 標準 python/bash プラグインテストの実行確認（`hooks/hermes/tests/`, `hooks/*/test-*.sh`）。
 - `bdo grep -h` がフックで `--help` 化（grep `-h`=--no-filename と衝突）— 未知/衝突フラグの扱いを要検討。
 - Python の outline/map に本体省略マーカーが無い（`def foo():` で終わる）— `def foo(): …` 化の検討。

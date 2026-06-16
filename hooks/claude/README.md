@@ -14,11 +14,11 @@
 
 ```bash
 # Run the full test suite (60+ assertions)
-bash hooks/test-rtk-rewrite.sh
+bash hooks/test-bdo-rewrite.sh
 
 # Test against a specific hook path
-HOOK=/path/to/rtk-rewrite.sh bash hooks/test-rtk-rewrite.sh
+HOOK=/path/to/bdo-rewrite.sh bash hooks/test-bdo-rewrite.sh
 
 # Enable audit logging during testing
-BDO_HOOK_AUDIT=1 BDO_AUDIT_DIR=/tmp bash hooks/test-rtk-rewrite.sh
+BDO_HOOK_AUDIT=1 BDO_AUDIT_DIR=/tmp bash hooks/test-bdo-rewrite.sh
 ```

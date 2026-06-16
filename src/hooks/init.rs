@@ -1095,7 +1095,7 @@ fn insert_hook_entry(root: &mut serde_json::Value, hook_command: &str) -> Result
 }
 
 /// Check if Bushido hook is already present in settings.json
-/// Matches on legacy rtk-rewrite.sh path OR new `bdo hook claude` command
+/// Matches on legacy bdo-rewrite.sh path OR new `bdo hook claude` command
 fn hook_already_present(root: &serde_json::Value, hook_command: &str) -> bool {
     let pre_tool_use_array = match root
         .get("hooks")
@@ -1206,7 +1206,7 @@ fn run_default_mode(
 }
 
 /// Migrate old hook script to new binary command.
-/// Deletes `~/.claude/hooks/rtk-rewrite.sh` and `.bdo-hook.sha256` if present,
+/// Deletes `~/.claude/hooks/bdo-rewrite.sh` and `.bdo-hook.sha256` if present,
 /// and removes the stale settings.json entry so the new `bdo hook claude` entry
 /// can be registered.
 fn migrate_old_hook_script(ctx: InitContext) {
@@ -1269,7 +1269,7 @@ fn migrate_old_hook_script(ctx: InitContext) {
     }
 }
 
-/// Remove only legacy `rtk-rewrite.sh` entries from settings.json.
+/// Remove only legacy `bdo-rewrite.sh` entries from settings.json.
 /// Preserves any existing `bdo hook claude` entries (new format).
 fn remove_legacy_settings_entries(ctx: InitContext) -> Result<()> {
     let InitContext { verbose, dry_run } = ctx;
@@ -1295,7 +1295,7 @@ fn remove_legacy_settings_entries(ctx: InitContext) -> Result<()> {
 
     if dry_run {
         println!(
-            "[dry-run] would remove legacy rtk-rewrite.sh entry from {}",
+            "[dry-run] would remove legacy bdo-rewrite.sh entry from {}",
             settings_path.display()
         );
         return Ok(());
@@ -1311,12 +1311,12 @@ fn remove_legacy_settings_entries(ctx: InitContext) -> Result<()> {
     atomic_write(&settings_path, &serialized)?;
 
     if verbose > 0 {
-        eprintln!("  [ok] Removed legacy rtk-rewrite.sh entry from settings.json");
+        eprintln!("  [ok] Removed legacy bdo-rewrite.sh entry from settings.json");
     }
     Ok(())
 }
 
-/// Remove only legacy `rtk-rewrite.sh` hook entries from a parsed settings.json.
+/// Remove only legacy `bdo-rewrite.sh` hook entries from a parsed settings.json.
 /// Returns true if any entries were removed.
 /// Does NOT remove `bdo hook claude` entries — those are the new format.
 fn remove_legacy_hook_entries_from_json(root: &mut serde_json::Value) -> bool {
@@ -3093,7 +3093,7 @@ fn patch_cursor_hooks_json(path: &Path, ctx: InitContext) -> Result<bool> {
 }
 
 /// Check if Bushido preToolUse hook is already present in Cursor hooks.json
-/// Matches on legacy rtk-rewrite.sh path OR new `bdo hook cursor` command
+/// Matches on legacy bdo-rewrite.sh path OR new `bdo hook cursor` command
 fn cursor_hook_already_present(root: &serde_json::Value) -> bool {
     let hooks = match root
         .get("hooks")
@@ -3143,7 +3143,7 @@ fn insert_cursor_hook_entry(root: &mut serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-/// Remove only legacy `rtk-rewrite.sh` entries from Cursor hooks.json.
+/// Remove only legacy `bdo-rewrite.sh` entries from Cursor hooks.json.
 /// Preserves any existing `bdo hook cursor` entries (new format).
 fn remove_legacy_cursor_hooks_json_entries(path: &Path, ctx: InitContext) -> Result<()> {
     let InitContext { verbose, dry_run } = ctx;
@@ -3166,7 +3166,7 @@ fn remove_legacy_cursor_hooks_json_entries(path: &Path, ctx: InitContext) -> Res
 
     if dry_run {
         println!(
-            "[dry-run] would remove legacy rtk-rewrite.sh entry from Cursor hooks.json: {}",
+            "[dry-run] would remove legacy bdo-rewrite.sh entry from Cursor hooks.json: {}",
             path.display()
         );
         return Ok(());
@@ -3177,12 +3177,12 @@ fn remove_legacy_cursor_hooks_json_entries(path: &Path, ctx: InitContext) -> Res
     atomic_write(path, &serialized)?;
 
     if verbose > 0 {
-        eprintln!("  [ok] Removed legacy rtk-rewrite.sh entry from Cursor hooks.json");
+        eprintln!("  [ok] Removed legacy bdo-rewrite.sh entry from Cursor hooks.json");
     }
     Ok(())
 }
 
-/// Remove only legacy `rtk-rewrite.sh` entries from parsed Cursor hooks.json.
+/// Remove only legacy `bdo-rewrite.sh` entries from parsed Cursor hooks.json.
 /// Returns true if any entries were removed.
 /// Does NOT remove `bdo hook cursor` entries — those are the new format.
 fn remove_legacy_cursor_hook_entries_from_json(root: &mut serde_json::Value) -> bool {
@@ -5255,13 +5255,13 @@ mod tests {
                     "matcher": "Bash",
                     "hooks": [{
                         "type": "command",
-                        "command": "/Users/test/.claude/hooks/rtk-rewrite.sh"
+                        "command": "/Users/test/.claude/hooks/bdo-rewrite.sh"
                     }]
                 }]
             }
         });
 
-        let hook_command = "/Users/test/.claude/hooks/rtk-rewrite.sh";
+        let hook_command = "/Users/test/.claude/hooks/bdo-rewrite.sh";
         assert!(hook_already_present(&json_content, hook_command));
     }
 
@@ -5273,21 +5273,21 @@ mod tests {
                     "matcher": "Bash",
                     "hooks": [{
                         "type": "command",
-                        "command": "/home/user/.claude/hooks/rtk-rewrite.sh"
+                        "command": "/home/user/.claude/hooks/bdo-rewrite.sh"
                     }]
                 }]
             }
         });
 
-        let hook_command = "~/.claude/hooks/rtk-rewrite.sh";
-        // Should match on rtk-rewrite.sh substring
+        let hook_command = "~/.claude/hooks/bdo-rewrite.sh";
+        // Should match on bdo-rewrite.sh substring
         assert!(hook_already_present(&json_content, hook_command));
     }
 
     #[test]
     fn test_hook_not_present_empty() {
         let json_content = serde_json::json!({});
-        let hook_command = "/Users/test/.claude/hooks/rtk-rewrite.sh";
+        let hook_command = "/Users/test/.claude/hooks/bdo-rewrite.sh";
         assert!(!hook_already_present(&json_content, hook_command));
     }
 
@@ -5322,7 +5322,7 @@ mod tests {
             }
         });
 
-        let hook_command = "/Users/test/.claude/hooks/rtk-rewrite.sh";
+        let hook_command = "/Users/test/.claude/hooks/bdo-rewrite.sh";
         assert!(!hook_already_present(&json_content, hook_command));
     }
 
@@ -5330,7 +5330,7 @@ mod tests {
     #[test]
     fn test_insert_hook_entry_empty_root() {
         let mut json_content = serde_json::json!({});
-        let hook_command = "/Users/test/.claude/hooks/rtk-rewrite.sh";
+        let hook_command = "/Users/test/.claude/hooks/bdo-rewrite.sh";
 
         insert_hook_entry(&mut json_content, hook_command).unwrap();
 
@@ -5363,7 +5363,7 @@ mod tests {
             }
         });
 
-        let hook_command = "/Users/test/.claude/hooks/rtk-rewrite.sh";
+        let hook_command = "/Users/test/.claude/hooks/bdo-rewrite.sh";
         insert_hook_entry(&mut json_content, hook_command).unwrap();
 
         let pre_tool_use = json_content["hooks"]["PreToolUse"].as_array().unwrap();
@@ -5386,7 +5386,7 @@ mod tests {
             "model": "claude-sonnet-4"
         });
 
-        let hook_command = "/Users/test/.claude/hooks/rtk-rewrite.sh";
+        let hook_command = "/Users/test/.claude/hooks/bdo-rewrite.sh";
         insert_hook_entry(&mut json_content, hook_command).unwrap();
 
         // Should preserve all other keys
@@ -5508,7 +5508,7 @@ mod tests {
                         "matcher": "Bash",
                         "hooks": [{
                             "type": "command",
-                            "command": "/Users/test/.claude/hooks/rtk-rewrite.sh"
+                            "command": "/Users/test/.claude/hooks/bdo-rewrite.sh"
                         }]
                     }
                 ]
@@ -5587,7 +5587,7 @@ mod tests {
             "version": 1,
             "hooks": {
                 "preToolUse": [{
-                    "command": "./hooks/rtk-rewrite.sh",
+                    "command": "./hooks/bdo-rewrite.sh",
                     "matcher": "Shell"
                 }]
             }
@@ -5674,7 +5674,7 @@ mod tests {
             "hooks": {
                 "preToolUse": [
                     { "command": "./hooks/other.sh", "matcher": "Shell" },
-                    { "command": "./hooks/rtk-rewrite.sh", "matcher": "Shell" }
+                    { "command": "./hooks/bdo-rewrite.sh", "matcher": "Shell" }
                 ]
             }
         });
@@ -5732,7 +5732,7 @@ mod tests {
                     "matcher": "Bash",
                     "hooks": [{
                         "type": "command",
-                        "command": "/home/user/.claude/hooks/rtk-rewrite.sh"
+                        "command": "/home/user/.claude/hooks/bdo-rewrite.sh"
                     }]
                 }]
             }
@@ -5752,7 +5752,7 @@ mod tests {
                         "matcher": "Bash",
                         "hooks": [{
                             "type": "command",
-                            "command": "/home/user/.claude/hooks/rtk-rewrite.sh"
+                            "command": "/home/user/.claude/hooks/bdo-rewrite.sh"
                         }]
                     },
                     {
@@ -5801,7 +5801,7 @@ mod tests {
                         "matcher": "Bash",
                         "hooks": [{
                             "type": "command",
-                            "command": "/home/user/.claude/hooks/rtk-rewrite.sh"
+                            "command": "/home/user/.claude/hooks/bdo-rewrite.sh"
                         }]
                     },
                     {
@@ -5828,7 +5828,7 @@ mod tests {
             "version": 1,
             "hooks": {
                 "preToolUse": [{
-                    "command": "./hooks/rtk-rewrite.sh",
+                    "command": "./hooks/bdo-rewrite.sh",
                     "matcher": "Shell"
                 }]
             }
@@ -5846,7 +5846,7 @@ mod tests {
             "hooks": {
                 "preToolUse": [
                     {
-                        "command": "./hooks/rtk-rewrite.sh",
+                        "command": "./hooks/bdo-rewrite.sh",
                         "matcher": "Shell"
                     },
                     {

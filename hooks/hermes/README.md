@@ -8,7 +8,7 @@ Rewrites Hermes `terminal` tool commands to Bushido equivalents before execution
 bdo init --agent hermes
 ```
 
-The installer writes the plugin to `~/.hermes/plugins/rtk-rewrite/` and enables it through `plugins.enabled` in the Hermes config. The repository copy lives in `hooks/hermes/`; don't use that repo path as the runtime install path.
+The installer writes the plugin to `~/.hermes/plugins/bdo-rewrite/` and enables it through `plugins.enabled` in the Hermes config. The repository copy lives in `hooks/hermes/`; don't use that repo path as the runtime install path.
 
 ## Development
 

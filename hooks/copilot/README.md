@@ -12,5 +12,5 @@
 ## Testing
 
 ```bash
-bash hooks/test-copilot-rtk-rewrite.sh
+bash hooks/test-copilot-bdo-rewrite.sh
 ```

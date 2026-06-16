@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 
-PLUGIN_PATH = Path(__file__).resolve().parents[1] / "rtk-rewrite" / "__init__.py"
+PLUGIN_PATH = Path(__file__).resolve().parents[1] / "bdo-rewrite" / "__init__.py"
 
 
 class FakeContext:
@@ -330,7 +330,7 @@ class InstalledRtkRewritePluginTest(unittest.TestCase):
                 msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
             )
 
-            plugin_dir = home_path / ".hermes" / "plugins" / "rtk-rewrite"
+            plugin_dir = home_path / ".hermes" / "plugins" / "bdo-rewrite"
             init_path = plugin_dir / "__init__.py"
             manifest_path = plugin_dir / "plugin.yaml"
             self.assertTrue(init_path.exists(), "installed plugin __init__.py must exist")

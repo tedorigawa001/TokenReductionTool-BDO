@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Test suite for rtk-rewrite.sh
+# Test suite for bdo-rewrite.sh
 # Feeds mock JSON through the hook and verifies the rewritten commands.
 #
-# Usage: bash ~/.claude/hooks/test-rtk-rewrite.sh
+# Usage: bash ~/.claude/hooks/test-bdo-rewrite.sh
 
-HOOK="${HOOK:-$HOME/.claude/hooks/rtk-rewrite.sh}"
+HOOK="${HOOK:-$HOME/.claude/hooks/bdo-rewrite.sh}"
 PASS=0
 FAIL=0
 TOTAL=0

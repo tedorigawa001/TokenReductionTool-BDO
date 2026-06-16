@@ -73,7 +73,7 @@ bdo init --copilot            # project-scoped (.github/hooks/)
 bdo init --global --copilot   # user-scoped (~/.copilot/hooks/, respects $COPILOT_HOME)
 ```
 
-Project-scoped writes `.github/hooks/rtk-rewrite.json` (both hosts get transparent rewrite — VS Code Chat via `updatedInput`, Copilot CLI via `modifiedArgs`) plus the Bushido block in `.github/copilot-instructions.md`. User-scoped writes the same hook config to `~/.copilot/hooks/rtk-rewrite.json` and the Bushido block to `~/.copilot/copilot-instructions.md` (both respect `$COPILOT_HOME` if set).
+Project-scoped writes `.github/hooks/bdo-rewrite.json` (both hosts get transparent rewrite — VS Code Chat via `updatedInput`, Copilot CLI via `modifiedArgs`) plus the Bushido block in `.github/copilot-instructions.md`. User-scoped writes the same hook config to `~/.copilot/hooks/bdo-rewrite.json` and the Bushido block to `~/.copilot/copilot-instructions.md` (both respect `$COPILOT_HOME` if set).
 
 Uninstall:
 
@@ -133,7 +133,7 @@ Plugin in the `openclaw/` directory. Uses the `before_tool_call` hook, delegates
 bdo init --agent hermes
 ```
 
-Creates `~/.hermes/plugins/rtk-rewrite/` and enables it through `plugins.enabled` in the Hermes config. Hermes loads Python plugins, so the plugin entrypoint is Python, but it is only a thin adapter. It mutates the Hermes `terminal` tool `command` before execution and delegates all rewrite decisions to Rust through `bdo rewrite`. The repository source and tests for that adapter live in `hooks/hermes/`; only installed runtime files use the `~/.hermes/plugins/rtk-rewrite/` path.
+Creates `~/.hermes/plugins/bdo-rewrite/` and enables it through `plugins.enabled` in the Hermes config. Hermes loads Python plugins, so the plugin entrypoint is Python, but it is only a thin adapter. It mutates the Hermes `terminal` tool `command` before execution and delegates all rewrite decisions to Rust through `bdo rewrite`. The repository source and tests for that adapter live in `hooks/hermes/`; only installed runtime files use the `~/.hermes/plugins/bdo-rewrite/` path.
 
 The plugin fails open. If `bdo` is missing at load time, the hook is not registered. If `bdo rewrite` errors, the tool is not `terminal`, the payload has no string `command`, or the plugin raises an exception, Hermes runs the original command unchanged. The same `bdo rewrite` limitations apply: already-prefixed `bdo` commands, compound shell commands, heredocs, and commands without filters are not rewritten.
 
@@ -190,7 +190,7 @@ Rules file integrations (Cline, Windsurf, Codex, Kilo Code, Antigravity) rely on
 
 ## Windows support
 
-The shell hook (`rtk-rewrite.sh`) requires a Unix shell. On native Windows:
+The shell hook (`bdo-rewrite.sh`) requires a Unix shell. On native Windows:
 
 - `bdo init -g` automatically falls back to **CLAUDE.md injection mode** (prompt-level instructions)
 - Filters work normally (`bdo cargo test`, `bdo git status`)

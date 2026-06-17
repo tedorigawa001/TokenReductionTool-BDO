@@ -193,7 +193,7 @@ bash scripts/check-test-presence.sh
 - `docs`: `hooks/copilot/README.md` の Copilot CLI 挙動を実態（`modifiedArgs` 透過 rewrite）に修正。README/README_ja に Python outline/map の機能例（`async def … : …`・`class …: …`）を追記。→ [f02ced5]
 - `refactor(init)`: レガシー hook-script 移行サブシステムを撤去。`migrate_old_hook_script` / `remove_legacy_settings_entries` / `remove_legacy_hook_entries_from_json`（migrate からのみ到達）+ 専用テスト4件 + 呼び出し元2箇所（約246行）を削除。**script フックのライフサイクル（同梱 `bdo-rewrite.sh` / `integrity.rs` / `hook_check.rs` / install・uninstall 検知 `contains(REWRITE_HOOK_FILE)`）は手動インストール用に保持**（`hook_already_present` が script エントリを認識し二重登録を防止）。ついでに stale な `~/.config/rtk`→`bdo` コメントとステップ番号を修正。→ [b9e516c]
 
-**実態メモ**: 本セッションの全コミットは push 済み（HEAD = `f02ced5` 時点、`6c29ace` まで origin 同期確認済み）。release バイナリは `6c29ace` までの全修正を `cargo install --path .` で反映済み（`head`/`tail` 忠実化・`--max-lines 0`・audit `BDO_AUDIT_DIR`・`bdo-rewrite` リネーム等を実機確認）。Qiita 改善記事の下書きは `docs/bushido/qiita-improvements.md`（`.git/info/exclude` でローカル除外・非コミット）。
+**実態メモ**: push は随時運用（同期状況は固定ハッシュを書かず `git rev-list --count origin/main..HEAD` で確認。この台帳更新コミット自体は push 前のため直後は local が 1 ahead）。git から導けない情報のみ記録 → **release バイナリ（installed `bdo`）は `6c29ace` までを `cargo install --path .` で反映済み**（`head`/`tail` 忠実化・`--max-lines 0`・audit `BDO_AUDIT_DIR`・`bdo-rewrite` リネーム等を実機確認）。`b9e516c`（init 移行サブシステム撤去）以降は init フロー refactor でランタイムのトークン挙動に影響しないが installed バイナリ未反映。Qiita 改善記事の下書きは `docs/bushido/qiita-improvements.md`（`.git/info/exclude` でローカル除外・非コミット）。
 
 **残課題（リリースと独立）**
 - （将来）`cat f | shasum` などパイプ時の raw passthrough（選択肢C）: エージェントは常にパイプ実行のためフィルタが広範に無効化される副作用があり、要設計判断。

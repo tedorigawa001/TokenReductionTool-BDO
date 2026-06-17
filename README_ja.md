@@ -135,6 +135,31 @@ async def run(task: Task, retries: int = 3) -> Result: …
 class Config: …
 ```
 
+#### 変更レビュー（`bdo review`）
+
+変更セットを人間 + エージェント向けに一発要約します。`git status`・`rg`・`cargo test` を手で組み合わせていた作業を1コマンドに:
+
+```console
+$ bdo review                 # 作業ツリーの変更（既定）
+$ bdo review --against origin/main   # ref に対するブランチ全体の差分
+
+bdo review — 3 changed file(s) (uncommitted)
+
+CHANGED
+  M  src/core/filter.rs
+  ?? src/cmds/system/review.rs
+
+⚠ ARTIFACTS (0)
+  ✓ none
+⚠ STALE MARKERS (1) — verify before commit
+  scripts/x.sh:27  broken install URL (blob serves HTML)
+
+🧪 SUGGESTED TESTS
+  cargo test -- filter review
+```
+
+紛れ込んだ生成物（`__pycache__`・`target/`・`.bak` 等）、高シグナルな stale マーカー（旧名・壊れた install URL）、変更 Rust ファイルに対応する inline テストモジュールを検出します。
+
 ### Git
 ```bash
 bdo git status                  # コンパクトなステータス

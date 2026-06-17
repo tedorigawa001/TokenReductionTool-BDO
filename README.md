@@ -178,6 +178,34 @@ async def run(task: Task, retries: int = 3) -> Result: …
 class Config: …
 ```
 
+#### Change review (`bdo review`)
+
+A one-shot summary of a change set for human + agent review — what you'd
+otherwise assemble by hand from `git status`, `rg`, and `cargo test`:
+
+```console
+$ bdo review                 # working-tree changes (default)
+$ bdo review --against origin/main   # whole-branch diff vs a ref
+
+bdo review — 3 changed file(s) (uncommitted)
+
+CHANGED
+  M  src/core/filter.rs
+  ?? src/cmds/system/review.rs
+
+⚠ ARTIFACTS (0)
+  ✓ none
+⚠ STALE MARKERS (1) — verify before commit
+  scripts/x.sh:27  broken install URL (blob serves HTML)
+
+🧪 SUGGESTED TESTS
+  cargo test -- filter review
+```
+
+It flags stray build artifacts (`__pycache__`, `target/`, `.bak` …), high-signal
+stale markers (legacy names, broken install URLs), and the inline test modules
+worth running for the changed Rust files.
+
 ### Git
 ```bash
 bdo git status                  # Compact status

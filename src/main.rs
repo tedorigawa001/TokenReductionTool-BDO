@@ -21,7 +21,7 @@ use cmds::ruby::{rake_cmd, rspec_cmd, rubocop_cmd};
 use cmds::rust::{cargo_cmd, runner};
 use cmds::system::{
     deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, map, pipe_cmd,
-    read, summary, tree, wc_cmd,
+    read, review, summary, tree, wc_cmd,
 };
 
 use anyhow::{Context, Result};
@@ -249,6 +249,13 @@ enum Commands {
         /// Directory to map
         #[arg(default_value = ".")]
         path: PathBuf,
+    },
+
+    /// Change summary for review: changed files, stray artifacts, stale markers, test hints
+    Review {
+        /// Review changes against a git ref (e.g. origin/main) instead of the working tree
+        #[arg(long)]
+        against: Option<String>,
     },
 
     /// Show environment variables (filtered, sensitive masked)
@@ -1155,6 +1162,7 @@ enum GoCommands {
 /// If Clap fails to parse these, show the Clap error directly.
 const BDO_META_COMMANDS: &[&str] = &[
     "gain",
+    "review",
     "discover",
     "learn",
     "init",
@@ -1717,6 +1725,11 @@ fn run_cli() -> Result<i32> {
 
         Commands::Map { path } => {
             map::run(&path, cli.verbose)?;
+            0
+        }
+
+        Commands::Review { against } => {
+            review::run(against.as_deref(), cli.verbose)?;
             0
         }
 

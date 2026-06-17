@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rtk-hook-version: 3
+# bdo-hook-version: 3
 # Bushido Claude Code hook — rewrites commands to use bdo for token savings.
 # Requires: bdo >= 0.23.0, jq
 #
@@ -27,7 +27,7 @@ fi
 # Older binaries: warn once and exit cleanly (no silent failure).
 # Cache the version check to avoid spawning multiple processes on every hook call.
 CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}
-CACHE_FILE="$CACHE_DIR/rtk-hook-version-ok"
+CACHE_FILE="$CACHE_DIR/bdo-hook-version-ok"
 if [ ! -f "$CACHE_FILE" ]; then
   BDO_VERSION_RAW=$(bdo --version 2>/dev/null)
   BDO_VERSION=${BDO_VERSION_RAW#bdo }

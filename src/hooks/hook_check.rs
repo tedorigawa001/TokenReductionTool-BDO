@@ -123,7 +123,7 @@ fn check_and_warn() -> Option<()> {
 pub fn parse_hook_version(content: &str) -> u8 {
     // Version tag must be in the first 5 lines (shebang + header convention)
     for line in content.lines().take(5) {
-        if let Some(rest) = line.strip_prefix("# rtk-hook-version:") {
+        if let Some(rest) = line.strip_prefix("# bdo-hook-version:") {
             if let Ok(v) = rest.trim().parse::<u8>() {
                 return v;
             }
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_parse_hook_version_present() {
-        let content = "#!/usr/bin/env bash\n# rtk-hook-version: 2\n# some comment\n";
+        let content = "#!/usr/bin/env bash\n# bdo-hook-version: 2\n# some comment\n";
         assert_eq!(parse_hook_version(content), 2);
     }
 
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_parse_hook_version_future() {
-        let content = "#!/usr/bin/env bash\n# rtk-hook-version: 5\n";
+        let content = "#!/usr/bin/env bash\n# bdo-hook-version: 5\n";
         assert_eq!(parse_hook_version(content), 5);
     }
 

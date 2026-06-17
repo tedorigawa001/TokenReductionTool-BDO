@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rtk-hook-version: 1
+# bdo-hook-version: 1
 # Bushido Cursor Agent hook — rewrites shell commands to use bdo for token savings.
 # Works with both Cursor editor and cursor-cli (they share ~/.cursor/hooks.json).
 # Cursor preToolUse hook format: receives JSON on stdin, returns JSON on stdout.

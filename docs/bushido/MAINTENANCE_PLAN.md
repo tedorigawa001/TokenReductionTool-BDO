@@ -189,14 +189,14 @@ bash scripts/check-test-presence.sh
 - `fix(hook)`: audit writer（`audit_log_inner`）が固定パスで `BDO_AUDIT_DIR` を無視していた writer/reader 不整合を解消。リーダーの `default_log_path()`（`pub(crate)` 化）を再利用。→ [17e960d]
 - `refactor(hooks)`: リネーム漏れの完了 + 廃止。`hooks/{claude,cursor}/rtk-rewrite.sh`→`bdo-rewrite.sh`（`# rtk-hook-version:`→`# bdo-hook-version:` を `hook_check.rs` パーサ・テストと協調修正、`rtk-hook-version` 文字列ゼロ）。停滞シェルテスト `hooks/{claude,copilot}/test-bdo-rewrite.sh` を削除し、参照していた README の Testing 節も除去（stale `rtk-awareness.md`→`bdo-awareness.md` も修正）。→ [cc98821]
 
-**実態メモ**: `origin/main` = `499c7ea`、ローカル HEAD = `cc98821`（**2 commits ahead**: `17e960d` / `cc98821` は未 push）。本セッションの大半は push 済みだが末尾2件は未反映。Qiita 改善記事の下書きは `docs/bushido/qiita-improvements.md`（`.git/info/exclude` でローカル除外・非コミット）。release バイナリは A（audit 修正）以降を未反映。
+- `feat(read)` + `fix(read)`: `cat`/`head` の raw 取得性を改善。明示的 line window（`head -N`/`tail -N`/`--max-lines`）は **生 content に window**（フィルタをバイパス）して native head/tail 互換に。`filter::plain_head` で正確な先頭N行、`--max-lines 0` は空出力。縮約ビュー時は stdout flush 後に stderr へ raw 回復ヒント（`bdo read <file> -l none`）。→ [fc463b2] [6c29ace]
+- `docs`: `hooks/copilot/README.md` の Copilot CLI 挙動を実態（`modifiedArgs` 透過 rewrite）に修正。README/README_ja に Python outline/map の機能例（`async def … : …`・`class …: …`）を追記。→ [f02ced5]
+
+**実態メモ**: 本セッションの全コミットは push 済み（HEAD = `f02ced5` 時点、`6c29ace` まで origin 同期確認済み）。release バイナリは `6c29ace` までの全修正を `cargo install --path .` で反映済み（`head`/`tail` 忠実化・`--max-lines 0`・audit `BDO_AUDIT_DIR`・`bdo-rewrite` リネーム等を実機確認）。Qiita 改善記事の下書きは `docs/bushido/qiita-improvements.md`（`.git/info/exclude` でローカル除外・非コミット）。
 
 **残課題（リリースと独立）**
-- `cat`/`head` 自動書き換え時の raw 内容取得性（生内容が必要な場面の扱い）。
-- レガシー `bdo-rewrite.sh` 掃除コードの整理: リネームで実質デッドコード化。完全削除するかの判断。
-- `hooks/copilot/README.md:10` の挙動記述が stale: 「Copilot CLI format returns `permissionDecision: "deny"`」だが現行は `modifiedArgs` で自動 rewrite。
-- README/README_ja の機能追記（任意）: outline/map の Python `async def`・`def foo(): …` 例。
-- （任意）末尾2コミット（`17e960d`/`cc98821`）の push、A 反映の release バイナリ再ビルド。
+- レガシー `bdo-rewrite.sh` 掃除コードの整理: リネームで実質デッドコード化。完全削除するかの判断（保留）。
+- （将来）`cat f | shasum` などパイプ時の raw passthrough（選択肢C）: エージェントは常にパイプ実行のためフィルタが広範に無効化される副作用があり、要設計判断。
 
 ## 次の作業候補（リリースはペンディング）
 

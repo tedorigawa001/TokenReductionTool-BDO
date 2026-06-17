@@ -37,55 +37,74 @@ pub fn run(
         eprintln!("Detected language: {:?}", lang);
     }
 
-    // Apply filter
-    let filter = filter::get_filter(level);
-    let mut filtered = filter.filter(&content, &lang);
+    // An explicit line window (`head -N` / `tail -N`) must be byte-faithful like
+    // the native tools: apply the window to the RAW content, bypassing the filter
+    // (so leading comments aren't stripped before counting lines). Other reads run
+    // the filter and may auto-summarize very large files.
+    let explicit_window = max_lines.is_some() || tail_lines.is_some();
 
-    // Safety: if filter emptied a non-empty file, fall back to raw content
-    if filtered.trim().is_empty() && !content.trim().is_empty() {
-        eprintln!(
-            "bdo: warning: filter produced empty output for {} ({} bytes), showing raw content",
-            file.display(),
-            content.len()
-        );
-        filtered = content.clone();
-    }
+    let (body, filter_changed, windowed) = if explicit_window {
+        (
+            apply_line_window(&content, level, max_lines, tail_lines, &lang),
+            false,
+            true,
+        )
+    } else {
+        let filter = filter::get_filter(level);
+        let mut filtered = filter.filter(&content, &lang);
 
-    if verbose > 0 {
-        let original_lines = content.lines().count();
-        let filtered_lines = filtered.lines().count();
-        let reduction = if original_lines > 0 {
-            ((original_lines - filtered_lines) as f64 / original_lines as f64) * 100.0
-        } else {
-            0.0
-        };
-        eprintln!(
-            "Lines: {} -> {} ({:.1}% reduction)",
-            original_lines, filtered_lines, reduction
-        );
-    }
+        // Safety: if filter emptied a non-empty file, fall back to raw content
+        if filtered.trim().is_empty() && !content.trim().is_empty() {
+            eprintln!(
+                "bdo: warning: filter produced empty output for {} ({} bytes), showing raw content",
+                file.display(),
+                content.len()
+            );
+            filtered = content.clone();
+        }
 
-    // Did the filter drop anything (e.g. comments) vs the raw bytes?
-    let filter_changed = filtered != content;
+        if verbose > 0 {
+            let original_lines = content.lines().count();
+            let filtered_lines = filtered.lines().count();
+            let reduction = if original_lines > 0 {
+                ((original_lines - filtered_lines) as f64 / original_lines as f64) * 100.0
+            } else {
+                0.0
+            };
+            eprintln!(
+                "Lines: {} -> {} ({:.1}% reduction)",
+                original_lines, filtered_lines, reduction
+            );
+        }
 
-    filtered = apply_line_window(&filtered, level, max_lines, tail_lines, &lang);
-
-    // Was the visible content windowed/summarized (not the whole file)?
-    let windowed = max_lines.is_some()
-        || tail_lines.is_some()
-        || (level == FilterLevel::Auto && should_auto_summarize(&content, &lang));
+        // Did the filter drop anything (e.g. comments) vs the raw bytes?
+        let changed = filtered != content;
+        let summarized = level == FilterLevel::Auto && should_auto_summarize(&content, &lang);
+        let out = apply_line_window(&filtered, level, None, None, &lang);
+        (out, changed, summarized)
+    };
 
     let rtk_output = if line_numbers {
-        format_with_line_numbers(&filtered)
+        format_with_line_numbers(&body)
     } else {
-        filtered.clone()
+        body
     };
     print!("{}", rtk_output);
 
     // `cat`/`head` are often run to get exact bytes. When the shown content is a
     // reduced view (comments stripped, truncated, or windowed), point at the
     // lossless escape hatch so the raw content is always recoverable.
-    if filter_changed || windowed {
+    let reduced_view = filter_changed || windowed;
+    // In the reduced-view case the output ends with a synthetic `[N more lines]`
+    // marker (no trailing newline); add one so the stderr hint that follows
+    // doesn't visually join it on a terminal.
+    if reduced_view && !rtk_output.is_empty() && !rtk_output.ends_with('\n') {
+        println!();
+    }
+    // Flush stdout before the stderr hint so the two streams don't interleave.
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+    if reduced_view {
         eprintln!(
             "bdo: {}: reduced view — full raw content: bdo read {} -l none",
             file.display(),

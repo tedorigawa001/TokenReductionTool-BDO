@@ -349,6 +349,10 @@ pub fn get_filter(level: FilterLevel) -> Box<dyn FilterStrategy> {
 /// expects a deterministic prefix, unlike `smart_truncate` which selectively
 /// keeps "important" lines for an at-a-glance summary.
 pub fn plain_head(content: &str, max_lines: usize) -> String {
+    // `head -0` produces no output.
+    if max_lines == 0 {
+        return String::new();
+    }
     let lines: Vec<&str> = content.lines().collect();
     if lines.len() <= max_lines {
         return content.to_string();
@@ -586,6 +590,12 @@ fn main() {
     fn test_plain_head_no_truncation_when_under_limit() {
         let input = "a\nb\nc\n";
         assert_eq!(plain_head(input, 10), input);
+    }
+
+    // `head -0` produces no output.
+    #[test]
+    fn test_plain_head_zero_is_empty() {
+        assert_eq!(plain_head("a\nb\nc\n", 0), "");
     }
 
     #[test]

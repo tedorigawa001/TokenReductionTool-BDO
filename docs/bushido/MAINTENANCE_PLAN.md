@@ -184,15 +184,19 @@ bash scripts/check-test-presence.sh
 - `fix(outline)`: map（`collapse_all`）モードで Python decorator を抑制（`@deco` が "signature" として水増しカウントされていた問題）。→ [d644cfb]
 - `fix(check-installation)`: Check 6 をネイティブフック（settings.json の `bdo hook claude`）検出に修正。レガシー script 検出のみだった誤診断を解消。→ [834f753]
 - `refactor(hooks)`: `rtk-rewrite.sh` → `bdo-rewrite.sh` に全面リネーム（`REWRITE_HOOK_FILE`・`.rtk-hook.sha256`→`.bdo-hook.sha256`・テストスクリプト `test-rtk-rewrite.sh`→`test-bdo-rewrite.sh`・コード/docs/フィクスチャ）。リポジトリ全体で `rtk-rewrite` 文字列ゼロ。**メンテナ判断: 上流 rtk からの移行検知は廃止**（`rtk-rewrite.sh` の検出/掃除はしない）。→ [72df662]
+- `fix(check-installation)`: stale 箇所を修正。壊れた install URL（`blob`=HTML / 存在しない `master` ブランチ）と SUMMARY の旧フォーク手順（`cargo uninstall` / `git checkout feat/all-features`）を、今確実に動くソースビルド（`git clone` + `cargo install --path .`）に統一。※ `install.sh` は GitHub releases 依存のため、リリース・ペンディング中は `curl|sh` が失敗する点も考慮。→ [499c7ea]
+- プラグインテストの実行確認: **Python hermes は 18/18 PASS**（維持対象）。シェル統合テスト2本は CI 未組込かつ旧契約（audit が native `bdo hook` へ移行 / Copilot の deny→自動 rewrite）を検証しており drift → **廃止**。
+- `fix(hook)`: audit writer（`audit_log_inner`）が固定パスで `BDO_AUDIT_DIR` を無視していた writer/reader 不整合を解消。リーダーの `default_log_path()`（`pub(crate)` 化）を再利用。→ [17e960d]
+- `refactor(hooks)`: リネーム漏れの完了 + 廃止。`hooks/{claude,cursor}/rtk-rewrite.sh`→`bdo-rewrite.sh`（`# rtk-hook-version:`→`# bdo-hook-version:` を `hook_check.rs` パーサ・テストと協調修正、`rtk-hook-version` 文字列ゼロ）。停滞シェルテスト `hooks/{claude,copilot}/test-bdo-rewrite.sh` を削除し、参照していた README の Testing 節も除去（stale `rtk-awareness.md`→`bdo-awareness.md` も修正）。→ [cc98821]
 
-**実態メモ**: `origin/main` は上記コミット（HEAD = `72df662`）と一致済み。本セッション分は push 済みの状態（台帳の「push 保留」は実態とずれ）。Qiita 改善記事の下書きは `docs/bushido/qiita-improvements.md`（`.git/info/exclude` でローカル除外・非コミット）。
+**実態メモ**: `origin/main` = `499c7ea`、ローカル HEAD = `cc98821`（**2 commits ahead**: `17e960d` / `cc98821` は未 push）。本セッションの大半は push 済みだが末尾2件は未反映。Qiita 改善記事の下書きは `docs/bushido/qiita-improvements.md`（`.git/info/exclude` でローカル除外・非コミット）。release バイナリは A（audit 修正）以降を未反映。
 
 **残課題（リリースと独立）**
-- `check-installation.sh` の stale 箇所: install URL（`.../blob/master/install.sh` は HTML を返す壊れリンク。`raw.githubusercontent` が正）と SUMMARY の旧フォーク手順（`git checkout feat/all-features` 等）。
-- 標準 python/bash プラグインテストの実行確認（`hooks/hermes/tests/`, `hooks/*/test-bdo-rewrite.sh`）。今回リネーム済みだが実行は未確認。
 - `cat`/`head` 自動書き換え時の raw 内容取得性（生内容が必要な場面の扱い）。
 - レガシー `bdo-rewrite.sh` 掃除コードの整理: リネームで実質デッドコード化。完全削除するかの判断。
+- `hooks/copilot/README.md:10` の挙動記述が stale: 「Copilot CLI format returns `permissionDecision: "deny"`」だが現行は `modifiedArgs` で自動 rewrite。
 - README/README_ja の機能追記（任意）: outline/map の Python `async def`・`def foo(): …` 例。
+- （任意）末尾2コミット（`17e960d`/`cc98821`）の push、A 反映の release バイナリ再ビルド。
 
 ## 次の作業候補（リリースはペンディング）
 

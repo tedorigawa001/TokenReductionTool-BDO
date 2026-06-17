@@ -343,6 +343,21 @@ pub fn get_filter(level: FilterLevel) -> Box<dyn FilterStrategy> {
     }
 }
 
+/// Faithful first-`max_lines` truncation (like `head -n`): keeps the exact
+/// leading lines in order, then a single `[N more lines]` marker. Used for
+/// explicit line limits (`head -N`, `bdo read --max-lines N`) where the caller
+/// expects a deterministic prefix, unlike `smart_truncate` which selectively
+/// keeps "important" lines for an at-a-glance summary.
+pub fn plain_head(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= max_lines {
+        return content.to_string();
+    }
+    let mut result: Vec<String> = lines[..max_lines].iter().map(|s| s.to_string()).collect();
+    result.push(format!("[{} more lines]", lines.len() - max_lines));
+    result.join("\n")
+}
+
 pub fn smart_truncate(content: &str, max_lines: usize, _lang: &Language) -> String {
     let lines: Vec<&str> = content.lines().collect();
     if lines.len() <= max_lines {
@@ -555,6 +570,22 @@ fn main() {
         assert!(output.contains("[9 more lines]"));
         // Only the first line is kept (plain-text, no important signatures)
         assert!(output.starts_with("line1\n"));
+    }
+
+    // plain_head keeps the EXACT first N lines (unlike smart_truncate, which for
+    // the same input keeps only the first max/2 plain lines). Same 10-line input
+    // as test_smart_truncate_no_annotations, max=3.
+    #[test]
+    fn test_plain_head_exact_prefix() {
+        let input = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n";
+        let output = plain_head(input, 3);
+        assert_eq!(output, "line1\nline2\nline3\n[7 more lines]");
+    }
+
+    #[test]
+    fn test_plain_head_no_truncation_when_under_limit() {
+        let input = "a\nb\nc\n";
+        assert_eq!(plain_head(input, 10), input);
     }
 
     #[test]

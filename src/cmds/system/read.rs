@@ -65,7 +65,15 @@ pub fn run(
         );
     }
 
+    // Did the filter drop anything (e.g. comments) vs the raw bytes?
+    let filter_changed = filtered != content;
+
     filtered = apply_line_window(&filtered, level, max_lines, tail_lines, &lang);
+
+    // Was the visible content windowed/summarized (not the whole file)?
+    let windowed = max_lines.is_some()
+        || tail_lines.is_some()
+        || (level == FilterLevel::Auto && should_auto_summarize(&content, &lang));
 
     let rtk_output = if line_numbers {
         format_with_line_numbers(&filtered)
@@ -73,6 +81,17 @@ pub fn run(
         filtered.clone()
     };
     print!("{}", rtk_output);
+
+    // `cat`/`head` are often run to get exact bytes. When the shown content is a
+    // reduced view (comments stripped, truncated, or windowed), point at the
+    // lossless escape hatch so the raw content is always recoverable.
+    if filter_changed || windowed {
+        eprintln!(
+            "bdo: {}: reduced view — full raw content: bdo read {} -l none",
+            file.display(),
+            file.display()
+        );
+    }
     timer.track(
         &format!("cat {}", file.display()),
         "bdo read",
@@ -173,7 +192,9 @@ fn apply_line_window(
     }
 
     if let Some(max) = max_lines {
-        return filter::smart_truncate(content, max, lang);
+        // Explicit limit (head -N / --max-lines N): faithful first-N lines, not a
+        // selective summary, so the output matches what `head` would show.
+        return filter::plain_head(content, max);
     }
 
     if level == FilterLevel::Auto && should_auto_summarize(content, lang) {
@@ -234,12 +255,13 @@ fn main() {{
         assert_eq!(output, "c\nd");
     }
 
+    // Explicit --max-lines / head -N must return the EXACT first N lines (a
+    // faithful prefix), not smart_truncate's selective "important lines" subset.
     #[test]
-    fn test_apply_line_window_max_lines_still_works() {
+    fn test_apply_line_window_max_lines_is_exact_prefix() {
         let input = "a\nb\nc\nd\n";
         let output = apply_line_window(input, FilterLevel::Auto, Some(2), None, &Language::Unknown);
-        assert!(output.starts_with("a\n"));
-        assert!(output.contains("more lines"));
+        assert_eq!(output, "a\nb\n[2 more lines]");
     }
 
     fn rtk_bin() -> std::path::PathBuf {

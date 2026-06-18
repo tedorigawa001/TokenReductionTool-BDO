@@ -146,6 +146,10 @@ bdo grep "pattern" .            # Grouped search results
 bdo diff file1 file2            # Condensed diff
 ```
 
+`find`/`grep` always print the true total and a `+N more — use --all …` line
+when the display is capped, so matches are never dropped silently; `--all`
+lifts every cap (the result count and grep's per-file cap).
+
 #### Code map (`bdo map`)
 
 Get the API surface of an entire directory in one shot — every file's top-level

@@ -131,6 +131,17 @@ fn parse_native_find_args(args: &[String]) -> Result<FindArgs> {
                     parsed.max_depth = Some(val.parse().context("invalid -maxdepth value")?);
                 }
             }
+            // Accept bdo's result cap in native syntax too, so the "+N more —
+            // use --max …" recovery hint works regardless of which syntax the
+            // caller used.
+            "-m" | "--max" => {
+                if let Some(val) = next_arg(args, &mut i) {
+                    parsed.max_results = val.parse().context("invalid --max value")?;
+                }
+            }
+            "--all" => {
+                parsed.max_results = usize::MAX;
+            }
             flag if flag.starts_with('-') => {
                 eprintln!("bdo find: unknown flag '{}', ignored", flag);
             }
@@ -162,6 +173,9 @@ fn parse_rtk_find_args(args: &[String]) -> Result<FindArgs> {
                 if let Some(val) = next_arg(args, &mut i) {
                     parsed.max_results = val.parse().context("invalid --max value")?;
                 }
+            }
+            "--all" => {
+                parsed.max_results = usize::MAX;
             }
             "-t" | "--file-type" => {
                 if let Some(val) = next_arg(args, &mut i) {
@@ -346,7 +360,8 @@ pub fn run(
     }
 
     if shown < total_files {
-        println!("+{} more", total_files - shown);
+        // Show the omitted count AND how to recover them — never drop silently.
+        println!("+{} more — use --all to show every file", total_files - shown);
     }
 
     // Extension summary
@@ -470,6 +485,26 @@ mod tests {
         assert_eq!(parsed.pattern, "*.toml");
         assert_eq!(parsed.max_depth, Some(2));
         assert_eq!(parsed.max_results, 50); // max_results unchanged by -maxdepth
+    }
+
+    // `--all` lifts the result cap; `-m`/`--max` are accepted in native syntax
+    // too, so the "+N more — use --all" recovery hint is actionable either way.
+    #[test]
+    fn parse_native_find_all_lifts_cap() {
+        let parsed = parse_find_args(&args(&[".", "-name", "*.rs", "--all"])).unwrap();
+        assert_eq!(parsed.max_results, usize::MAX);
+    }
+
+    #[test]
+    fn parse_native_find_max_flag() {
+        let parsed = parse_find_args(&args(&[".", "-name", "*.rs", "--max", "7"])).unwrap();
+        assert_eq!(parsed.max_results, 7);
+    }
+
+    #[test]
+    fn parse_rtk_find_all_lifts_cap() {
+        let parsed = parse_find_args(&args(&["*.rs", "--all"])).unwrap();
+        assert_eq!(parsed.max_results, usize::MAX);
     }
 
     #[test]

@@ -114,7 +114,12 @@ pub fn run(
     let mut files: Vec<_> = by_file.iter().collect();
     files.sort_by_key(|(f, _)| *f);
 
-    let per_file = config::limits().grep_max_per_file;
+    // `--all` arrives as max_results == usize::MAX; lift the per-file cap too.
+    let per_file = if max_results == usize::MAX {
+        usize::MAX
+    } else {
+        config::limits().grep_max_per_file
+    };
     for (file, matches) in files {
         if shown >= max_results {
             break;
@@ -131,7 +136,11 @@ pub fn run(
     }
 
     if total_matches > shown {
-        rtk_output.push_str(&format!("[+{} more]\n", total_matches - shown));
+        // Show the omitted count AND how to recover them — never drop matches silently.
+        rtk_output.push_str(&format!(
+            "[+{} more — use --all to show every match]\n",
+            total_matches - shown
+        ));
     }
 
     print!("{}", rtk_output);

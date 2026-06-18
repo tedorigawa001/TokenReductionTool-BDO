@@ -346,6 +346,9 @@ enum Commands {
         /// Suppress filenames (grep/rg -h --no-filename); forwarded to the search
         #[arg(short = 'h', long = "no-filename")]
         no_filename: bool,
+        /// Show all matches (lift the result and per-file caps)
+        #[arg(long)]
+        all: bool,
         /// Print help (use --help; `-h` is grep's --no-filename, not help)
         #[arg(long, action = clap::ArgAction::Help)]
         help: Option<bool>,
@@ -1846,6 +1849,7 @@ fn run_cli() -> Result<i32> {
             file_type,
             line_numbers: _, // no-op: line numbers always enabled in grep_cmd::run
             no_filename,
+            all,
             help: _, // ArgAction::Help handles --help; field is unused
             mut extra_args,
         } => {
@@ -1855,6 +1859,9 @@ fn run_cli() -> Result<i32> {
             if no_filename {
                 extra_args.insert(0, "--no-filename".to_string());
             }
+            // `--all` lifts every cap; grep_cmd treats usize::MAX as "no limit"
+            // (including the per-file cap).
+            let max = if all { usize::MAX } else { max };
             grep_cmd::run(
                 &pattern,
                 &path,

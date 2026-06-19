@@ -214,6 +214,25 @@ It flags stray build artifacts (`__pycache__`, `target/`, `.bak` …), high-sign
 stale markers (legacy names, broken install URLs), and the inline test modules
 worth running for the changed Rust files.
 
+#### Residue audit (`bdo stale`)
+
+Where `bdo review` checks the change set, `bdo stale` audits the **whole tracked
+tree** for residue — generated artifacts that slipped into git and high-signal
+stale strings (legacy names, broken install URLs) — and exits non-zero when any
+are found, so it can gate CI:
+
+```console
+$ bdo stale                  # whole repo (or: bdo stale <path>)
+bdo stale — scanned 312 tracked files
+
+⚠ TRACKED ARTIFACTS (0)
+  ✓ none
+⚠ STALE MARKERS (1)
+  scripts/x.sh:27  broken install URL (blob serves HTML)
+
+✗ 1 residue item(s) found
+```
+
 ### Git
 ```bash
 bdo git status                  # Compact status

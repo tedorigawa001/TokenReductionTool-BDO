@@ -21,7 +21,7 @@ use cmds::ruby::{rake_cmd, rspec_cmd, rubocop_cmd};
 use cmds::rust::{cargo_cmd, runner};
 use cmds::system::{
     deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, map, pipe_cmd,
-    read, review, summary, tree, wc_cmd,
+    read, review, stale, summary, tree, wc_cmd,
 };
 
 use anyhow::{Context, Result};
@@ -268,6 +268,13 @@ enum Commands {
         /// Review changes against a git ref (e.g. origin/main) instead of the working tree
         #[arg(long)]
         against: Option<String>,
+    },
+
+    /// Audit the whole tracked tree for residue (stray artifacts, stale markers); exits 1 if found
+    Stale {
+        /// Limit the scan to a path (default: whole repo)
+        #[arg(default_value = ".")]
+        path: PathBuf,
     },
 
     /// Show environment variables (filtered, sensitive masked)
@@ -1178,6 +1185,7 @@ enum GoCommands {
 const BDO_META_COMMANDS: &[&str] = &[
     "gain",
     "review",
+    "stale",
     "discover",
     "learn",
     "init",
@@ -1841,6 +1849,8 @@ fn run_cli() -> Result<i32> {
             review::run(against.as_deref(), cli.verbose)?;
             0
         }
+
+        Commands::Stale { path } => stale::run(&path, cli.verbose)?,
 
         Commands::Env { filter, show_all } => {
             env_cmd::run(filter.as_deref(), show_all, cli.verbose)?;

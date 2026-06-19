@@ -83,6 +83,22 @@ pub fn changed_files(against: Option<&str>, pathspec: Option<&Path>) -> Result<V
     }
 }
 
+/// All git-tracked files (NUL-safe), optionally limited to a `pathspec`.
+/// Unlike `changed_files`, this is the whole tree — used by `bdo stale`.
+pub fn tracked_files(pathspec: Option<&Path>) -> Result<Vec<String>> {
+    let mut args = vec!["ls-files", "-z"];
+    if let Some(s) = pathspec.and_then(|p| p.to_str()) {
+        args.push("--");
+        args.push(s);
+    }
+    let raw = git_stdout(&args)?;
+    Ok(raw
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(|s| s.to_string())
+        .collect())
+}
+
 /// Inline-test-module names worth running for a change set: the file stem of
 /// each changed Rust source under `src/` (`src/core/outline.rs` → `outline`),
 /// which is also its `#[cfg(test)] mod tests` filter for `cargo test -- <stem>`.

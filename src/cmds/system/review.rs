@@ -7,36 +7,9 @@
 //! repo — keeping the output small, in the spirit of the rest of bdo.
 
 use crate::core::changes::{changed_files, in_git_repo, rust_test_targets};
+use crate::core::residue::{artifact_reason, scan_stale};
 use crate::core::tracking;
 use anyhow::Result;
-
-/// Generated/junk path fragments that usually should not be committed.
-/// `(fragment, label)` — `fragment` is matched as a substring of the path.
-const ARTIFACT_MARKERS: &[(&str, &str)] = &[
-    ("__pycache__/", "python bytecode dir"),
-    (".pyc", "python bytecode"),
-    ("target/", "cargo build output"),
-    (".DS_Store", "macOS metadata"),
-    ("node_modules/", "node dependencies"),
-    (".orig", "merge leftover"),
-    (".rej", "patch reject"),
-    (".bak", "backup file"),
-];
-
-/// High-signal stale strings that are almost always a mistake in this repo.
-/// Built with `concat!` so the patterns are not contiguous in this source file
-/// (otherwise `bdo review` would flag its own implementation).
-fn stale_markers() -> Vec<(String, &'static str)> {
-    vec![
-        (concat!("cargo install ", "bdo").to_string(), "wrong crate name (use --git or `bushido`)"),
-        (concat!("rtk", "-rewrite").to_string(), "legacy hook script name"),
-        (concat!("rtk", "-hook-version").to_string(), "legacy hook version marker"),
-        (concat!("rtk", "-awareness").to_string(), "legacy awareness file name"),
-        (concat!(".config/", "rtk").to_string(), "legacy config dir"),
-        (concat!("blob/", "master").to_string(), "broken install URL (blob serves HTML)"),
-        (concat!("feat/", "all-features").to_string(), "obsolete fork branch"),
-    ]
-}
 
 pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
     let timer = tracking::TimedExecution::start();
@@ -80,29 +53,20 @@ pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
     }
 
     // ── Stale markers (scan changed, non-deleted text files) ─────
-    let markers = stale_markers();
     let mut stale_hits: Vec<String> = Vec::new();
-    for c in &changes {
+    'scan: for c in &changes {
         if c.status == "D" {
             continue;
         }
         let Ok(content) = std::fs::read_to_string(&c.path) else {
             continue; // missing or binary
         };
-        for (lineno, line) in content.lines().enumerate() {
-            for (pat, label) in &markers {
-                if line.contains(pat.as_str()) {
-                    stale_hits.push(format!("  {}:{}  {}", c.path, lineno + 1, label));
-                    break; // one hit per line is enough
-                }
-            }
+        for (lineno, label) in scan_stale(&content) {
+            stale_hits.push(format!("  {}:{}  {}", c.path, lineno, label));
             if stale_hits.len() >= 40 {
-                break;
+                stale_hits.push("  … (more; capped at 40)".to_string());
+                break 'scan;
             }
-        }
-        if stale_hits.len() >= 40 {
-            stale_hits.push("  … (more; capped at 40)".to_string());
-            break;
         }
     }
     out.push_str(&section_header("⚠ STALE MARKERS", stale_hits.len(), "verify before commit"));
@@ -138,44 +102,5 @@ fn section_header(title: &str, count: usize, hint: &str) -> String {
         format!("\n{} (0)\n  ✓ none\n", title)
     } else {
         format!("\n{} ({}) — {}\n", title, count, hint)
-    }
-}
-
-fn artifact_reason(path: &str) -> Option<&'static str> {
-    ARTIFACT_MARKERS
-        .iter()
-        .find(|(frag, _)| {
-            if let Some(dir) = frag.strip_suffix('/') {
-                // Directory marker: match only as a full path segment, so
-                // `mytarget/x` doesn't trip the `target/` rule.
-                path.starts_with(frag) || path.contains(&format!("/{dir}/"))
-            } else {
-                // Suffix/substring marker (.pyc, .DS_Store, .bak, …).
-                path.contains(frag)
-            }
-        })
-        .map(|(_, label)| *label)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_artifact_reason() {
-        assert!(artifact_reason("a/__pycache__/x.pyc").is_some());
-        assert!(artifact_reason("target/debug/bdo").is_some());
-        assert!(artifact_reason("src/core/filter.rs").is_none());
-    }
-
-    #[test]
-    fn test_stale_markers_detect_known_bad_strings() {
-        let markers = stale_markers();
-        let hit = |s: &str| markers.iter().any(|(p, _)| s.contains(p.as_str()));
-        // Split literals with concat! so `bdo review` doesn't flag this fixture.
-        assert!(hit(concat!("run: cargo install ", "bdo")));
-        assert!(hit(concat!("see hooks/claude/rtk", "-rewrite.sh")));
-        assert!(hit(concat!("curl .../blob/", "master/install.sh")));
-        assert!(!hit("a perfectly normal line"));
     }
 }

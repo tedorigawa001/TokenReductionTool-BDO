@@ -164,6 +164,10 @@ CHANGED
 
 紛れ込んだ生成物（`__pycache__`・`target/`・`.bak` 等）、高シグナルな stale マーカー（旧名・壊れた install URL）、変更 Rust ファイルに対応する inline テストモジュールを検出します。
 
+#### 残骸監査（`bdo stale`）
+
+`bdo review` が変更セットを見るのに対し、`bdo stale` は **tracked tree 全体**の残骸（git に紛れ込んだ生成物・旧名・壊れた install URL 等）を監査し、見つかれば**非ゼロ終了**します（CI ゲートに利用可）。`bdo stale <path>` でスコープ可。
+
 ### Git
 ```bash
 bdo git status                  # コンパクトなステータス

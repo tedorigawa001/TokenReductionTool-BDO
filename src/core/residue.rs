@@ -54,7 +54,7 @@ pub fn stale_markers() -> Vec<(String, &'static str)> {
         (concat!(".config/", "rtk").to_string(), "legacy config dir"),
         (
             concat!("blob/", "master").to_string(),
-            "broken install URL (blob serves HTML)",
+            "stale master-branch URL (default branch is main; use raw for downloads)",
         ),
         (concat!("feat/", "all-features").to_string(), "obsolete fork branch"),
     ]

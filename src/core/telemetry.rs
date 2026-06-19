@@ -399,7 +399,7 @@ fn count_custom_toml_filters() -> usize {
         }
     }
 
-    // Global: ~/.config/rtk/filters/*.toml
+    // Global: ~/.config/bdo/filters/*.toml
     if let Some(config_dir) = dirs::config_dir() {
         if let Ok(entries) = std::fs::read_dir(config_dir.join("bdo/filters")) {
             count += entries

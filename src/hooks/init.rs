@@ -479,7 +479,7 @@ fn prompt_telemetry_consent() -> Result<()> {
     eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool)");
     eprintln!("  Rights:  disable anytime with `bdo telemetry disable`,");
     eprintln!("           request erasure with `bdo telemetry forget`");
-    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool/blob/master/docs/TELEMETRY.md");
+    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md");
     eprintln!();
     eprint!("Enable anonymous telemetry? [y/N] ");
 

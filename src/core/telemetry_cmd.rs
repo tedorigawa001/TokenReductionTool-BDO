@@ -55,7 +55,7 @@ fn run_status() -> Result<()> {
 
     println!();
     println!("Data controller: Bushido (github.com/tedorigawa001/TokenReductionTool)");
-    println!("Details: https://github.com/tedorigawa001/TokenReductionTool/blob/master/docs/TELEMETRY.md");
+    println!("Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md");
 
     Ok(())
 }
@@ -73,7 +73,7 @@ fn run_enable() -> Result<()> {
     eprintln!();
     eprintln!("  What:    command names (not arguments), token savings, OS, version");
     eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool)");
-    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool/blob/master/docs/TELEMETRY.md");
+    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md");
     eprintln!();
     eprint!("Enable anonymous telemetry? [y/N] ");
 

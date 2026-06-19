@@ -89,7 +89,7 @@ flowchart TD
     end
 
     subgraph RUNTIME ["bdo my-tool args"]
-        R["TomlFilterRegistry::load()\n1. .rtk/filters.toml\n2. ~/.config/rtk/filters.toml\n3. BUILTIN_TOML\n4. passthrough"] --> S
+        R["TomlFilterRegistry::load()\n1. .bdo/filters.toml\n2. ~/.config/bdo/filters.toml\n3. BUILTIN_TOML\n4. passthrough"] --> S
         S{"match_command\nmatches?"} -->|"no match"| T[["exec raw (passthrough)"]]
         S -->|"match"| U["exec command\ncapture stdout"]
         U --> V["8-stage pipeline\nstrip_ansi → replace → match_output\n→ strip/keep_lines → truncate\n→ tail_lines → max_lines → on_empty"]
@@ -104,10 +104,10 @@ flowchart TD
 ```mermaid
 flowchart LR
     CMD["bdo my-tool args"] --> P1
-    P1{"1. .rtk/filters.toml\n(project-local)"}
+    P1{"1. .bdo/filters.toml\n(project-local)"}
     P1 -->|"match"| WIN["apply filter"]
     P1 -->|"no match"| P2
-    P2{"2. ~/.config/rtk/filters.toml\n(user-global)"}
+    P2{"2. ~/.config/bdo/filters.toml\n(user-global)"}
     P2 -->|"match"| WIN
     P2 -->|"no match"| P3
     P3{"3. BUILTIN_TOML\n(binary)"}

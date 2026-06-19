@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: cargo install bdo
+      - run: cargo install --git https://github.com/tedorigawa001/TokenReductionTool
       - run: bdo gain --weekly --format json > stats/week-$(date +%Y-%W).json
       - run: git add stats/ && git commit -m "Weekly bdo stats" && git push
 ```

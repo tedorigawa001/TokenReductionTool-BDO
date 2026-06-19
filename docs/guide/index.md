@@ -62,4 +62,4 @@ See [Discover and Session](./analytics/discover.md) for details.
 - [Configuration](./getting-started/configuration.md) — config.toml, global flags, env vars, tee recovery
 - [Troubleshooting](./resources/troubleshooting.md) — common issues and fixes
 - [Telemetry & Privacy](./resources/telemetry.md) — what Bushido collects and how to opt out
-- [ARCHITECTURE.md](https://github.com/tedorigawa001/TokenReductionTool/blob/master/ARCHITECTURE.md) — system design for contributors
+- [ARCHITECTURE.md](https://github.com/tedorigawa001/TokenReductionTool/blob/main/ARCHITECTURE.md) — system design for contributors

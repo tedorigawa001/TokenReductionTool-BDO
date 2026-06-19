@@ -11,7 +11,7 @@ sidebar:
 
 | Platform | Path |
 |----------|------|
-| Linux | `~/.config/rtk/config.toml` |
+| Linux | `~/.config/bdo/config.toml` |
 | macOS | `~/Library/Application Support/rtk/config.toml` |
 
 ```bash
@@ -129,4 +129,4 @@ enabled = false
 
 ## Per-project filters
 
-Create `.rtk/filters.toml` in your project root to add custom filters or override built-ins. See [`src/filters/README.md`](https://github.com/tedorigawa001/TokenReductionTool/blob/master/src/filters/README.md) for the full TOML DSL reference.
+Create `.bdo/filters.toml` in your project root to add custom filters or override built-ins. See [`src/filters/README.md`](https://github.com/tedorigawa001/TokenReductionTool/blob/main/src/filters/README.md) for the full TOML DSL reference.

@@ -79,7 +79,7 @@ In short: avoid noise comments; keep the ones that would save a future reader a 
 
 Use explicit, descriptive names for variables, just like for functions.
 
-Do not hardcode repetitive patterns or values that control behavior — extract them into named constants at the top of the file. For anything a user might want to tune (thresholds, limits, display cutoffs), use `config::limits()` so it flows through `~/.config/rtk/config.toml`.
+Do not hardcode repetitive patterns or values that control behavior — extract them into named constants at the top of the file. For anything a user might want to tune (thresholds, limits, display cutoffs), use `config::limits()` so it flows through `~/.config/bdo/config.toml`.
 
 Example from `src/cmds/git/git.rs`:
 
@@ -179,7 +179,7 @@ Bushido executes shell commands on behalf of the user, so security is a first-cl
 
 **Hook integrity.** Bushido verifies hook files via SHA-256 hashes before operational commands. If a hook has been tampered with, Bushido exits with code 1. See [`src/hooks/integrity.rs`](../../src/hooks/integrity.rs).
 
-**Project filter trust.** `.rtk/filters.toml` files are not loaded until the user explicitly trusts them, and content changes require re-trust. See [`src/hooks/trust.rs`](../../src/hooks/trust.rs).
+**Project filter trust.** `.bdo/filters.toml` files are not loaded until the user explicitly trusts them, and content changes require re-trust. See [`src/hooks/trust.rs`](../../src/hooks/trust.rs).
 
 **Permission whitelist.** `is_operational_command()` in `main.rs` uses a whitelist pattern — new commands are *not* integrity-checked until explicitly added. This is an intentional security posture: fail-open with an audit trail is preferred over false confidence.
 

@@ -350,7 +350,7 @@ Compiled filter modules for complex transformations with 60-95% token savings.
 
 ### TOML DSL Filters (src/filters/*.toml)
 
-Declarative filters with an 8-stage pipeline: strip ANSI, regex replace, match output, strip/keep lines, truncate lines, head/tail, max lines, on-empty message. Loaded from three tiers: built-in (compiled), global (`~/.config/rtk/filters/`), project-local (`.rtk/filters/`, trust-gated).
+Declarative filters with an 8-stage pipeline: strip ANSI, regex replace, match output, strip/keep lines, truncate lines, head/tail, max lines, on-empty message. Loaded from three tiers: built-in (compiled), global (`~/.config/bdo/filters/`), project-local (`.bdo/filters/`, trust-gated).
 
 > **Details**: [`src/core/README.md`](../src/core/README.md) covers the TOML filter engine.
 

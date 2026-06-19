@@ -5,5 +5,5 @@
 ## Specifics
 
 - Prompt-level guidance via awareness document -- no programmatic hook
-- `rtk-awareness.md` is injected into `AGENTS.md` with an `@Bushido.md` reference
+- `bdo-awareness.md` is injected into `AGENTS.md` with an `@Bushido.md` reference
 - Installed to `$CODEX_HOME` when set, otherwise `~/.codex/`, by `bdo init --codex`

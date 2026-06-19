@@ -1292,7 +1292,7 @@ exclude_commands = ["curl", "playwright"]
 
 ### Fichier de configuration
 
-**Emplacement :** `~/.config/rtk/config.toml` (Linux) ou `~/Library/Application Support/rtk/config.toml` (macOS)
+**Emplacement :** `~/.config/bdo/config.toml` (Linux) ou `~/Library/Application Support/rtk/config.toml` (macOS)
 
 **Commandes :**
 ```bash

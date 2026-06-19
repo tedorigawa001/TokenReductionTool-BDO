@@ -208,7 +208,7 @@ Example: `cargo fmt --all && cargo test` becomes `bdo cargo fmt --all && bdo car
 ### Override Controls
 
 - **`BDO_DISABLED=1`**: Per-command override (`BDO_DISABLED=1 git status` runs raw)
-- **`exclude_commands`**: In `~/.config/rtk/config.toml`, list commands to never rewrite. Matches against the full command after stripping env prefixes. Subcommand patterns work (`"git push"` excludes `git push origin main`). Patterns starting with `^` are treated as regex.
+- **`exclude_commands`**: In `~/.config/bdo/config.toml`, list commands to never rewrite. Matches against the full command after stripping env prefixes. Subcommand patterns work (`"git push"` excludes `git push origin main`). Patterns starting with `^` are treated as regex.
 - **Already-RTK**: `bdo git status` passes through unchanged (no `bdo bdo git`)
 
 ## Exit Code Contract

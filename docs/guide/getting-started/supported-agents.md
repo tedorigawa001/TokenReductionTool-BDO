@@ -213,7 +213,7 @@ Hooks never block command execution. If Bushido is missing, the hook exits clean
 BDO_DISABLED=1 git status    # runs raw git status, no rewrite
 ```
 
-Or exclude commands permanently in `~/.config/rtk/config.toml`:
+Or exclude commands permanently in `~/.config/bdo/config.toml`:
 
 ```toml
 [hooks]

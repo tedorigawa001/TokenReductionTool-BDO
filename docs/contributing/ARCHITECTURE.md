@@ -874,7 +874,7 @@ Modules with Exit Code Preservation:
 
 > For config file format, tee settings, tracking database path, and TOML filter tiers, see [src/core/README.md](src/core/README.md).
 
-Two tiers: **User settings** (`~/.config/rtk/config.toml`) and **LLM integration** (CLAUDE.md via `bdo init`).
+Two tiers: **User settings** (`~/.config/bdo/config.toml`) and **LLM integration** (CLAUDE.md via `bdo init`).
 
 ### Initialization Flow
 
@@ -886,7 +886,7 @@ Two tiers: **User settings** (`~/.config/rtk/config.toml`) and **LLM integration
 $ bdo init [--global]
       ↓
 Check existing CLAUDE.md:
-  • --global? → ~/.config/rtk/CLAUDE.md
+  • --global? → ~/.config/bdo/CLAUDE.md
   • else      → ./CLAUDE.md
       ↓
       ├─ Exists? → Warn user, ask to overwrite

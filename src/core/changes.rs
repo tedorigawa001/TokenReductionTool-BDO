@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// A changed path with its git status code (e.g. "M", "A", "??", "R").
@@ -83,15 +83,18 @@ pub fn changed_files(against: Option<&str>, pathspec: Option<&Path>) -> Result<V
     }
 }
 
-/// All git-tracked files (NUL-safe), optionally limited to a `pathspec`.
-/// Unlike `changed_files`, this is the whole tree — used by `bdo stale`.
-pub fn tracked_files(pathspec: Option<&Path>) -> Result<Vec<String>> {
-    let mut args = vec!["ls-files", "-z"];
-    if let Some(s) = pathspec.and_then(|p| p.to_str()) {
-        args.push("--");
-        args.push(s);
-    }
-    let raw = git_stdout(&args)?;
+/// Absolute path to the repository root (`git rev-parse --show-toplevel`).
+pub fn repo_root() -> Result<PathBuf> {
+    Ok(PathBuf::from(git_stdout(&["rev-parse", "--show-toplevel"])?.trim()))
+}
+
+/// Every git-tracked file in the **whole repo** (NUL-safe), as repo-root-relative
+/// paths — independent of the current directory. Runs git with `-C <root>` so a
+/// subdirectory invocation still audits the entire tree (used by `bdo stale`).
+pub fn tracked_files() -> Result<Vec<String>> {
+    let root = repo_root()?;
+    let root = root.to_string_lossy();
+    let raw = git_stdout(&["-C", &root, "ls-files", "-z"])?;
     Ok(raw
         .split('\0')
         .filter(|p| !p.is_empty())

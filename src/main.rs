@@ -272,9 +272,8 @@ enum Commands {
 
     /// Audit the whole tracked tree for residue (stray artifacts, stale markers); exits 1 if found
     Stale {
-        /// Limit the scan to a path (default: whole repo)
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        /// Limit the scan to a path (default: whole repo, regardless of cwd)
+        path: Option<PathBuf>,
     },
 
     /// Show environment variables (filtered, sensitive masked)
@@ -1850,7 +1849,7 @@ fn run_cli() -> Result<i32> {
             0
         }
 
-        Commands::Stale { path } => stale::run(&path, cli.verbose)?,
+        Commands::Stale { path } => stale::run(path.as_deref(), cli.verbose)?,
 
         Commands::Env { filter, show_all } => {
             env_cmd::run(filter.as_deref(), show_all, cli.verbose)?;

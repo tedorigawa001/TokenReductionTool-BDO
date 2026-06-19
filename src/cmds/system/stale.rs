@@ -7,23 +7,33 @@ use crate::core::changes;
 use crate::core::residue::{artifact_reason, scan_stale};
 use crate::core::tracking;
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Cap on reported stale-string hits, to keep output bounded on large repos.
+/// Cap on *displayed* stale-string hits (the true count is still reported).
 const MAX_STALE_HITS: usize = 100;
 
-pub fn run(path: &Path, verbose: u8) -> Result<i32> {
+pub fn run(path: Option<&Path>, verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
 
     if !changes::in_git_repo() {
         anyhow::bail!("bdo stale: not inside a git repository");
     }
-    let spec = (path != Path::new(".")).then_some(path);
-    let mut files = changes::tracked_files(spec)?;
+    // Resolve everything against the repo root so the audit and `.bdostaleignore`
+    // are identical regardless of which subdirectory bdo was invoked from.
+    let root = changes::repo_root()?;
+    let mut files = changes::tracked_files()?; // whole tree, root-relative
+
+    // Optional scope: limit to files under `path` (resolved to a root-relative prefix).
+    if let Some(p) = path {
+        let Some(prefix) = root_relative_prefix(&root, p) else {
+            anyhow::bail!("bdo stale: {} is not inside the repository", p.display());
+        };
+        files.retain(|f| Path::new(f).starts_with(&prefix));
+    }
 
     // Honor `.bdostaleignore` (gitignore-style globs) so files that legitimately
     // document residue — the rename ledger, CHANGELOG — aren't flagged forever.
-    let ignore = load_stale_ignore();
+    let ignore = load_stale_ignore(&root);
     let before = files.len();
     files.retain(|f| !ignore.matched(f, false).is_ignore());
     let ignored = before - files.len();
@@ -34,18 +44,18 @@ pub fn run(path: &Path, verbose: u8) -> Result<i32> {
         .filter_map(|f| artifact_reason(f).map(|r| (f, r)))
         .collect();
 
-    // Stale strings (content scan of each tracked text file).
-    let mut stale: Vec<String> = Vec::new();
-    let mut truncated = false;
-    'scan: for f in &files {
-        let Ok(content) = std::fs::read_to_string(f) else {
+    // Stale strings: count every hit, but only keep the first MAX_STALE_HITS for
+    // display, so the reported total stays accurate on large repos.
+    let mut stale_display: Vec<String> = Vec::new();
+    let mut stale_count = 0usize;
+    for f in &files {
+        let Ok(content) = std::fs::read_to_string(root.join(f)) else {
             continue; // missing or binary
         };
         for (lineno, label) in scan_stale(&content) {
-            stale.push(format!("  {}:{}  {}", f, lineno, label));
-            if stale.len() >= MAX_STALE_HITS {
-                truncated = true;
-                break 'scan;
+            stale_count += 1;
+            if stale_display.len() < MAX_STALE_HITS {
+                stale_display.push(format!("  {}:{}  {}", f, lineno, label));
             }
         }
     }
@@ -62,16 +72,20 @@ pub fn run(path: &Path, verbose: u8) -> Result<i32> {
         out.push_str(&format!("  {}  [{}]\n", path, reason));
     }
 
-    out.push_str(&section_header("⚠ STALE MARKERS", stale.len()));
-    for hit in &stale {
+    out.push_str(&section_header("⚠ STALE MARKERS", stale_count));
+    for hit in &stale_display {
         out.push_str(hit);
         out.push('\n');
     }
-    if truncated {
-        out.push_str(&format!("  … (more; capped at {})\n", MAX_STALE_HITS));
+    if stale_count > stale_display.len() {
+        out.push_str(&format!(
+            "  … (showing {} of {})\n",
+            stale_display.len(),
+            stale_count
+        ));
     }
 
-    let total = artifacts.len() + stale.len();
+    let total = artifacts.len() + stale_count;
     out.push_str(&format!(
         "\n{}\n",
         if total == 0 {
@@ -83,7 +97,7 @@ pub fn run(path: &Path, verbose: u8) -> Result<i32> {
 
     print!("{}", out);
     if verbose > 0 {
-        eprintln!("scanned {} tracked files under {}", files.len(), path.display());
+        eprintln!("scanned {} tracked files under {}", files.len(), root.display());
     }
     timer.track("stale", "bdo stale", "", &out);
 
@@ -91,11 +105,19 @@ pub fn run(path: &Path, verbose: u8) -> Result<i32> {
     Ok(if total == 0 { 0 } else { 1 })
 }
 
+/// Resolve `p` (absolute or relative to cwd) to a repo-root-relative prefix, or
+/// `None` if it can't be resolved under `root`.
+fn root_relative_prefix(root: &Path, p: &Path) -> Option<PathBuf> {
+    let abs = std::fs::canonicalize(p).ok()?;
+    let root_abs = std::fs::canonicalize(root).ok()?;
+    abs.strip_prefix(&root_abs).ok().map(|r| r.to_path_buf())
+}
+
 /// Load `.bdostaleignore` (gitignore-style globs) from the repo root, if present.
 /// Absent or unparseable → an empty matcher (nothing ignored).
-fn load_stale_ignore() -> ignore::gitignore::Gitignore {
-    let mut b = ignore::gitignore::GitignoreBuilder::new(".");
-    let _ = b.add(".bdostaleignore"); // returns Some(err) on read failure — ignore
+fn load_stale_ignore(root: &Path) -> ignore::gitignore::Gitignore {
+    let mut b = ignore::gitignore::GitignoreBuilder::new(root);
+    let _ = b.add(root.join(".bdostaleignore")); // Some(err) on read failure — ignore
     b.build()
         .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty())
 }

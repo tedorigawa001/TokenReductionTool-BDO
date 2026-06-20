@@ -1,9 +1,37 @@
 # Changelog
 
-All notable changes to rtk (Rust Token Killer) will be documented in this file.
+All notable changes to Bushido (bdo) will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.43.0] (2026-06-18)
+
+First Bushido (bdo) release line — a hardened fork of
+[rtk (Rust Token Killer)](https://github.com/rtk-ai/rtk), continuing semver from
+upstream 0.42.2.
+
+### Features
+
+- **Rebrand**: full `rtk` → `bdo` rename (crate `bushido`, binary `bdo`), native
+  `bdo hook` PreToolUse hook, fail-safe filtering (`panic = "unwind"` +
+  `catch_unwind`).
+- **Change-review workflow**: `bdo review` (change-set summary: changed files,
+  stray artifacts, stale markers, suggested tests), `bdo map` / `bdo map
+  --changed` (repo/code map), `bdo test --changed` (run only tests for changed
+  files), `bdo stale` (whole-tree residue audit with `.bdostaleignore`, exits 1
+  for CI).
+- **Reading**: `bdo read -l outline` (signatures only); Python outline handles
+  `async def`, multi-line signatures, and a `def foo(): …` body marker; `bdo map`
+  supports Rust/Go/JS-TS/C/C++/Java/Python.
+- **Search**: `grep --all` to lift caps; `-h` forwarded as `--no-filename`;
+  `head`/`tail`/`--max-lines` are byte-faithful with a raw-recovery hint; `find`/
+  `grep` never drop matches silently.
+
+### Fixes
+
+- Audit log honors `BDO_AUDIT_DIR`; `curl` JSON minify only on a TTY (pipes pass
+  through byte-exact); numerous de-RTK residue fixes across code and docs.
 
 ## [0.42.2](https://github.com/rtk-ai/rtk/compare/v0.42.1...v0.42.2) (2026-06-05)
 

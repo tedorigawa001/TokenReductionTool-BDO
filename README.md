@@ -85,7 +85,7 @@ Download from [releases](https://github.com/tedorigawa001/TokenReductionTool/rel
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.42.2"
+bdo --version   # Should show "bdo 0.43.0"
 bdo gain        # Should show token savings stats
 ```
 

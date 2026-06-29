@@ -133,10 +133,14 @@ pub fn python_test_cmd(changes: &[Change]) -> Option<String> {
         cmd.push_str(&shell_quote(f));
     }
     if !stems.is_empty() {
-        // The `-k` value is a single double-quoted shell arg; the stems inside
-        // are pytest keyword tokens (identifiers), not paths.
+        // The `-k` value is one shell argument holding a pytest keyword
+        // expression (`a or b`). The stems come from changed *filenames*, which
+        // are attacker-controllable, and this runs via `sh -c` — so it must be
+        // single-quoted like every other path here. Double quotes would leave
+        // `$(...)`, backticks and `$IFS` live (command injection); single quotes
+        // neutralize them while preserving the spaces pytest needs.
         let k = stems.into_iter().collect::<Vec<_>>().join(" or ");
-        cmd.push_str(&format!(" -k \"{k}\""));
+        cmd.push_str(&format!(" -k {}", shell_quote(&k)));
     }
     Some(cmd)
 }
@@ -232,9 +236,23 @@ mod tests {
         let cmd = python_test_cmd(&changes).unwrap();
         assert!(cmd.starts_with("pytest "));
         assert!(cmd.contains("'tests/test_auth.py'"));
-        assert!(cmd.contains("-k \"service\""));
+        assert!(cmd.contains("-k 'service'"));
         assert!(!cmd.contains("__init__"));
         assert!(!cmd.contains("gone"));
+    }
+
+    #[test]
+    fn test_python_k_stem_is_shell_quoted_against_injection() {
+        // A malicious filename must not let `$(...)`/backticks/`$IFS` reach the
+        // shell through the `-k` argument. The whole keyword expression is
+        // single-quoted, so the substitution stays inert text.
+        let changes = vec![ch("M", "pkg/evil$(touch${IFS}pwned).py")];
+        let cmd = python_test_cmd(&changes).unwrap();
+        assert!(
+            cmd.contains("-k 'evil$(touch${IFS}pwned)'"),
+            "k stem not single-quoted: {cmd}"
+        );
+        assert!(!cmd.contains("-k \""), "k must not use double quotes: {cmd}");
     }
 
     #[test]

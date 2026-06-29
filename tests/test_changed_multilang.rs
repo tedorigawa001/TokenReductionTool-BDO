@@ -66,7 +66,7 @@ fn test_changed_plans_each_language() {
     );
     // Python: a non-test source file maps to a `-k` stem filter.
     assert!(
-        out.contains("bdo test --changed [python]: pytest -k \"svc\""),
+        out.contains("bdo test --changed [python]: pytest -k 'svc'"),
         "missing python plan header: {out}"
     );
 }

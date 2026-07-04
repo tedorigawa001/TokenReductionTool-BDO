@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.91"
 authors = ["Patrick Szymkowiak"]
 description = "Bushido (bdo) - High-performance CLI proxy to minimize LLM token consumption. Fork of rtk (Rust Token Killer)."
-license = "Apache 2.0"
+license = "Apache-2.0"
 homepage = "https://github.com/tedorigawa001/TokenReductionTool"
 repository = "https://github.com/tedorigawa001/TokenReductionTool"
 readme = "README.md"
@@ -58,6 +58,12 @@ codegen-units = 1
 # `panic = "abort"`. See ARCHITECTURE.md design principle #4 (Fail-Safe).
 panic = "unwind"
 strip = true
+
+# The profile that 'dist' will build with. Inherits release unchanged so
+# distributed binaries match local builds — including panic = "unwind",
+# which the fail-safe guarantee depends on (see the release profile note).
+[profile.dist]
+inherits = "release"
 
 # cargo-deb configuration
 [package.metadata.deb]

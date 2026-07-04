@@ -624,6 +624,79 @@ fn rewrite_compound(
     }
 }
 
+/// Prepend `BDO_AGENT=<agent>` to every segment of a command that invokes
+/// `bdo`, so `bdo gain --by-agent` can attribute the run even when the host
+/// exports no sniffable env vars — Gemini CLI 0.46 spawns shell children with
+/// no `GEMINI_CLI*` variable at all, so `detect_agent`'s env sniffing can
+/// never see it. Compound rewrites (`bdo a && bdo b`) get one prefix per
+/// segment so every invocation is attributed, not just the first.
+///
+/// The env-assignment prefix form is POSIX-shell syntax; on Windows
+/// (cmd/powershell hosts) the string is returned unchanged rather than
+/// emitting a command those shells can't parse. Idempotent: segments already
+/// carrying a `BDO_AGENT=` assignment are left alone, so a hook re-firing on
+/// its own output cannot stack prefixes.
+pub fn attribute_agent(cmd: &str, agent: &str) -> String {
+    if cfg!(target_os = "windows") {
+        return cmd.to_string();
+    }
+    // The agent name lands inside a shell command string; only our own fixed
+    // hook names are expected, but refuse anything that would need quoting.
+    if agent.is_empty()
+        || !agent
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return cmd.to_string();
+    }
+
+    // Segment starts: position 0 plus the first byte after every
+    // `&&`/`||`/`;`/`|`/`&` token (the same boundaries rewrite_compound uses;
+    // tokenize is quote-aware, so operators inside quoted args don't split).
+    let mut seg_starts = vec![0usize];
+    for tok in tokenize(cmd) {
+        let is_sep = matches!(tok.kind, TokenKind::Operator | TokenKind::Pipe)
+            || (tok.kind == TokenKind::Shellism && tok.value == "&");
+        if is_sep {
+            seg_starts.push(tok.offset + tok.value.len());
+        }
+    }
+
+    let mut insert_at = Vec::new();
+    for &start in &seg_starts {
+        if start >= cmd.len() {
+            continue;
+        }
+        let seg = &cmd[start..];
+        let ws = seg.len() - seg.trim_start().len();
+        let rest = &seg[ws..];
+        // ENV_PREFIX is anchored, so a match length is the env/sudo prefix of
+        // this segment; insert after it (`RUST_LOG=x BDO_AGENT=y bdo …`).
+        let env_len = ENV_PREFIX.find(rest).map(|m| m.end()).unwrap_or(0);
+        let (env_prefix, tail) = rest.split_at(env_len);
+        if env_prefix.contains("BDO_AGENT=") {
+            continue;
+        }
+        if tail == "bdo" || tail.starts_with("bdo ") {
+            insert_at.push(start + ws + env_len);
+        }
+    }
+    if insert_at.is_empty() {
+        return cmd.to_string();
+    }
+
+    let prefix = format!("BDO_AGENT={agent} ");
+    let mut out = String::with_capacity(cmd.len() + prefix.len() * insert_at.len());
+    let mut prev = 0;
+    for pos in insert_at {
+        out.push_str(&cmd[prev..pos]);
+        out.push_str(&prefix);
+        prev = pos;
+    }
+    out.push_str(&cmd[prev..]);
+    out
+}
+
 fn rewrite_line_range(cmd: &str) -> Option<String> {
     for re in [&*HEAD_N, &*HEAD_LINES] {
         if let Some(caps) = re.captures(cmd) {
@@ -874,6 +947,78 @@ mod tests {
 
     fn rewrite_command_no_prefixes(cmd: &str, excluded: &[String]) -> Option<String> {
         super::rewrite_command(cmd, excluded, &[])
+    }
+
+    // --- attribute_agent (POSIX-only feature; identity on Windows) ---
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_attribute_agent_simple() {
+        assert_eq!(
+            attribute_agent("bdo git status", "gemini"),
+            "BDO_AGENT=gemini bdo git status"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_attribute_agent_inserts_after_env_prefix() {
+        assert_eq!(
+            attribute_agent("RUST_LOG=debug bdo cargo test", "gemini"),
+            "RUST_LOG=debug BDO_AGENT=gemini bdo cargo test"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_attribute_agent_compound_attributes_every_segment() {
+        assert_eq!(
+            attribute_agent("bdo git add . && bdo cargo test", "copilot"),
+            "BDO_AGENT=copilot bdo git add . && BDO_AGENT=copilot bdo cargo test"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_attribute_agent_pipe_target_untouched() {
+        assert_eq!(
+            attribute_agent("bdo git log | head -5", "gemini"),
+            "BDO_AGENT=gemini bdo git log | head -5"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_attribute_agent_idempotent() {
+        let once = attribute_agent("bdo git status && bdo cargo test", "gemini");
+        assert_eq!(attribute_agent(&once, "gemini"), once);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_attribute_agent_quoted_operator_not_a_boundary() {
+        // The `&& bdo` inside quotes is data, not a second segment.
+        assert_eq!(
+            attribute_agent("bdo git commit -m 'a && bdo b'", "gemini"),
+            "BDO_AGENT=gemini bdo git commit -m 'a && bdo b'"
+        );
+    }
+
+    #[test]
+    fn test_attribute_agent_non_bdo_unchanged() {
+        assert_eq!(attribute_agent("htop", "gemini"), "htop");
+        assert_eq!(attribute_agent("bdofoo bar", "gemini"), "bdofoo bar");
+    }
+
+    #[test]
+    fn test_attribute_agent_rejects_unsafe_agent_name() {
+        // Never let a weird agent string turn into shell syntax.
+        assert_eq!(attribute_agent("bdo git status", "a b"), "bdo git status");
+        assert_eq!(
+            attribute_agent("bdo git status", "x;rm"),
+            "bdo git status"
+        );
+        assert_eq!(attribute_agent("bdo git status", ""), "bdo git status");
     }
 
     #[test]

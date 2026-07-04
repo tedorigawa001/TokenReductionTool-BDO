@@ -152,8 +152,54 @@ fn decide_hook_action(cmd: &str, host: permissions::Host) -> HookDecision {
     decide_from_verdict(cmd, permissions::check_command_for(cmd, host))
 }
 
+/// [`decide_from_verdict`] plus agent attribution for hosts whose shell
+/// children carry no sniffable env vars (Gemini CLI, Copilot): every rewritten
+/// `bdo` segment gets a `BDO_AGENT=<agent>` prefix so `bdo gain --by-agent`
+/// attributes the run deterministically. A command that already invokes `bdo`
+/// directly (agents following the instructions file do this) normally needs no
+/// rewrite — here it still gets one, carrying just the attribution.
+fn decide_from_verdict_for_agent(
+    cmd: &str,
+    verdict: PermissionVerdict,
+    agent: &str,
+) -> HookDecision {
+    use crate::discover::registry::attribute_agent;
+    if verdict == PermissionVerdict::Deny {
+        return HookDecision::Deny;
+    }
+    if crate::discover::lexer::contains_unattestable_construct(cmd) {
+        return HookDecision::Defer;
+    }
+    let rewritten = match get_rewritten(cmd) {
+        Some(r) => Some(attribute_agent(&r, agent)),
+        // Heredocs are never touched (same rule as get_rewritten).
+        None if has_heredoc(cmd) => None,
+        None => {
+            let attributed = attribute_agent(cmd, agent);
+            (attributed != cmd).then_some(attributed)
+        }
+    };
+    match rewritten {
+        Some(r) if verdict == PermissionVerdict::Allow => HookDecision::AllowRewrite(r),
+        Some(r) => HookDecision::AskRewrite(r),
+        None => HookDecision::Defer,
+    }
+}
+
+fn decide_hook_action_for_agent(
+    cmd: &str,
+    host: permissions::Host,
+    agent: &str,
+) -> HookDecision {
+    decide_from_verdict_for_agent(cmd, permissions::check_command_for(cmd, host), agent)
+}
+
 fn handle_vscode(cmd: &str) -> Result<()> {
-    let (decision, rewritten) = match decide_hook_action(cmd, permissions::Host::Claude) {
+    let (decision, rewritten) = match decide_hook_action_for_agent(
+        cmd,
+        permissions::Host::Claude,
+        "copilot",
+    ) {
         HookDecision::Deny => {
             audit_log("deny", cmd, "");
             return Ok(());
@@ -187,7 +233,7 @@ fn handle_copilot_cli(cmd: &str, args: &Value) -> Result<()> {
 fn copilot_cli_response(cmd: &str, args: &Value) -> Option<Value> {
     copilot_cli_response_from_decision(
         args,
-        decide_hook_action(cmd, permissions::Host::Claude),
+        decide_hook_action_for_agent(cmd, permissions::Host::Claude, "copilot"),
         cmd,
     )
 }
@@ -249,7 +295,7 @@ pub fn run_gemini() -> Result<()> {
         return Ok(());
     }
 
-    match decide_hook_action(cmd, permissions::Host::Gemini) {
+    match decide_hook_action_for_agent(cmd, permissions::Host::Gemini, "gemini") {
         HookDecision::Deny => {
             let _ = writeln!(
                 io::stdout(),
@@ -708,8 +754,36 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
+    fn test_copilot_cli_already_rtk_gets_attribution_rewrite() {
+        // No filter rewrite is needed, but the hook still rewrites to carry
+        // the BDO_AGENT attribution (agents following the instructions file
+        // type `bdo …` directly and would otherwise show up as direct usage).
+        let r = copilot_cli_response("bdo cargo test", &cli_args("bdo cargo test")).unwrap();
+        assert_eq!(r["modifiedArgs"]["command"], "BDO_AGENT=copilot bdo cargo test");
+    }
+
+    #[test]
+    #[cfg(windows)]
     fn test_copilot_cli_passthrough_already_rtk() {
+        // Windows shells can't parse the VAR=val prefix, so attribution is
+        // disabled there and already-bdo commands pass through untouched.
         assert!(copilot_cli_response("bdo cargo test", &cli_args("bdo cargo test")).is_none());
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_copilot_cli_attribution_is_idempotent() {
+        // Re-firing on the hook's own output must not stack prefixes.
+        let cmd = "BDO_AGENT=copilot bdo cargo test";
+        assert!(copilot_cli_response(cmd, &cli_args(cmd)).is_none());
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_copilot_cli_rewrite_carries_attribution() {
+        let r = copilot_cli_response("cargo test", &cli_args("cargo test")).unwrap();
+        assert_eq!(r["modifiedArgs"]["command"], "BDO_AGENT=copilot bdo cargo test");
     }
 
     #[test]
@@ -725,10 +799,12 @@ mod tests {
             &cli_args("RUST_LOG=debug cargo test"),
         )
         .unwrap();
-        assert_eq!(
-            r["modifiedArgs"]["command"],
+        let expected = if cfg!(windows) {
             "RUST_LOG=debug bdo cargo test"
-        );
+        } else {
+            "RUST_LOG=debug BDO_AGENT=copilot bdo cargo test"
+        };
+        assert_eq!(r["modifiedArgs"]["command"], expected);
     }
 
     #[test]
@@ -1344,7 +1420,9 @@ mod tests {
     // --- Gemini rendering ---
 
     fn gemini_render(cmd: &str, deny: &[String], ask: &[String], allow: &[String]) -> String {
-        match decide_with_rules(cmd, deny, ask, allow) {
+        // Mirror run_gemini: the agent-attributing decision path.
+        let verdict = permissions::check_command_with_rules(cmd, deny, ask, allow);
+        match decide_from_verdict_for_agent(cmd, verdict, "gemini") {
             HookDecision::Deny => {
                 r#"{"decision":"deny","reason":"Blocked by Bushido permission rule"}"#.to_string()
             }
@@ -1355,24 +1433,57 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn test_gemini_allow_emits_rewrite() {
         let v: Value =
             serde_json::from_str(&gemini_render("git status", &[], &[], &all_allowed())).unwrap();
         assert!(v.get("decision").is_none());
         assert_eq!(
             v["hookSpecificOutput"]["tool_input"]["command"],
-            "bdo git status"
+            "BDO_AGENT=gemini bdo git status"
         );
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn test_gemini_default_rewrites_without_decision() {
         // The "ask" path also rewrites with no decision (Gemini has no ask value).
         let v: Value = serde_json::from_str(&gemini_render("git status", &[], &[], &[])).unwrap();
         assert!(v.get("decision").is_none());
         assert_eq!(
             v["hookSpecificOutput"]["tool_input"]["command"],
-            "bdo git status"
+            "BDO_AGENT=gemini bdo git status"
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_gemini_already_bdo_gets_attribution_only_rewrite() {
+        let v: Value =
+            serde_json::from_str(&gemini_render("bdo git status", &[], &[], &[])).unwrap();
+        assert_eq!(
+            v["hookSpecificOutput"]["tool_input"]["command"],
+            "BDO_AGENT=gemini bdo git status"
+        );
+    }
+
+    #[test]
+    fn test_gemini_attribution_is_idempotent() {
+        // Second pass over already-attributed output must defer (no rewrite),
+        // otherwise the hook would loop rewriting its own output forever.
+        assert_eq!(
+            gemini_render("BDO_AGENT=gemini bdo git status", &[], &[], &[]),
+            "{}"
+        );
+    }
+
+    #[test]
+    fn test_gemini_substitution_never_attributed() {
+        // Unattestable constructs are checked before attribution: even a
+        // command that names bdo must not be touched when it embeds `$( )`.
+        assert_eq!(
+            gemini_render("bdo git status $(rm -rf /tmp/x)", &[], &[], &all_allowed()),
+            "{}"
         );
     }
 

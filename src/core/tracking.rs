@@ -54,16 +54,32 @@ fn current_project_path_string() -> String {
 /// empty string for "unknown / direct" (e.g. a human shell). No command or hook
 /// changes needed — the agents already export these.
 pub fn detect_agent() -> String {
-    if let Ok(a) = std::env::var("BDO_AGENT") {
+    let explicit = std::env::var("BDO_AGENT").ok();
+    let keys: Vec<String> = std::env::vars_os()
+        .map(|(k, _)| k.to_string_lossy().into_owned())
+        .collect();
+    classify_agent(explicit.as_deref(), &keys)
+}
+
+/// Pure classifier behind [`detect_agent`], split out so tests don't have to
+/// mutate process-global env vars (racy under the parallel test runner).
+fn classify_agent(explicit: Option<&str>, env_keys: &[String]) -> String {
+    if let Some(a) = explicit {
         let a = a.trim();
         if !a.is_empty() {
             return a.to_string();
         }
     }
-    let has_prefix =
-        |p: &str| std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with(p));
-    if std::env::var("CLAUDECODE").is_ok() || has_prefix("CLAUDE_CODE") {
+    let has = |name: &str| env_keys.iter().any(|k| k == name);
+    let has_prefix = |p: &str| env_keys.iter().any(|k| k.starts_with(p));
+    if has("CLAUDECODE") || has_prefix("CLAUDE_CODE") {
         "claude".to_string()
+    } else if has_prefix("ANTIGRAVITY") {
+        // Google Antigravity (Gemini's successor IDE): its agent shell exports
+        // ANTIGRAVITY_AGENT=1 plus ANTIGRAVITY_{TRAJECTORY,CONVERSATION,…}_ID.
+        // Checked before GEMINI_CLI — Antigravity shares ~/.gemini on disk but
+        // its shell env carries no GEMINI_CLI* variables.
+        "antigravity".to_string()
     } else if has_prefix("GEMINI_CLI") {
         "gemini".to_string()
     } else if has_prefix("CURSOR") {
@@ -1483,6 +1499,49 @@ pub fn args_display(args: &[OsString]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // classify_agent — pure agent detection from env-var names
+    fn keys(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_classify_agent_explicit_bdo_agent_wins() {
+        assert_eq!(
+            classify_agent(Some("gemini"), &keys(&["CLAUDECODE"])),
+            "gemini"
+        );
+        // Blank explicit value falls through to sniffing.
+        assert_eq!(classify_agent(Some("  "), &keys(&["CLAUDECODE"])), "claude");
+    }
+
+    #[test]
+    fn test_classify_agent_antigravity() {
+        // The real shell env observed in Antigravity 2.2.1's agent terminal.
+        assert_eq!(
+            classify_agent(
+                None,
+                &keys(&["ANTIGRAVITY_AGENT", "ANTIGRAVITY_TRAJECTORY_ID", "PATH"])
+            ),
+            "antigravity"
+        );
+    }
+
+    #[test]
+    fn test_classify_agent_known_agents() {
+        assert_eq!(classify_agent(None, &keys(&["CLAUDECODE"])), "claude");
+        assert_eq!(classify_agent(None, &keys(&["GEMINI_CLI"])), "gemini");
+        assert_eq!(classify_agent(None, &keys(&["CURSOR_TRACE_ID"])), "cursor");
+        assert_eq!(classify_agent(None, &keys(&["COPILOT_AGENT"])), "copilot");
+        assert_eq!(classify_agent(None, &keys(&["PATH", "HOME"])), "");
+    }
+
+    #[test]
+    fn test_classify_agent_claudecode_must_match_exactly() {
+        // CLAUDECODE is an exact-name check, not a prefix: a var like
+        // CLAUDECODE_FOO shouldn't claim the claude attribution by accident.
+        assert_eq!(classify_agent(None, &keys(&["CLAUDECODE_X"])), "");
+    }
 
     // 1. estimate_tokens — verify ~4 chars/token ratio
     #[test]

@@ -236,6 +236,31 @@ bdo stale — scanned 312 tracked files
 Add a `.bdostaleignore` (gitignore-style globs) for files that legitimately
 *document* residue — a changelog or rename ledger — so they aren't flagged.
 
+#### Pre-merge gate (`bdo ci`)
+
+`bdo ci` runs the three checks above as one gate — `bdo review` (change summary,
+informational), `bdo stale` (whole-tree residue), and `bdo test --changed`
+(tests for the change set) — and returns a **single exit code**. Cheap checks
+run first and the slow tests last, but every stage runs regardless of earlier
+failures so one pass shows all blockers:
+
+```console
+$ bdo ci                     # working tree (or: bdo ci --against origin/main)
+━━━ bdo ci (1/3) — change summary ━━━
+...
+━━━ bdo ci (2/3) — residue audit ━━━
+...
+━━━ bdo ci (3/3) — changed tests ━━━
+...
+━━━ bdo ci: FAIL ━━━
+  review  shown (informational)
+  stale   ok
+  tests   FAIL (exit 101)
+```
+
+The gate exits non-zero if either gating stage fails; a real test exit code
+(e.g. cargo's `101`) is preserved over the residue gate's bare `1`.
+
 ### Git
 ```bash
 bdo git status                  # Compact status

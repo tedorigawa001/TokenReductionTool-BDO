@@ -168,6 +168,10 @@ CHANGED
 
 `bdo review` が変更セットを見るのに対し、`bdo stale` は **tracked tree 全体**の残骸（git に紛れ込んだ生成物・旧名・壊れた install URL 等）を監査し、見つかれば**非ゼロ終了**します（CI ゲートに利用可）。`bdo stale <path>` でスコープ可。残骸を*記録している*ファイル（CHANGELOG や rename 台帳など）は `.bdostaleignore`（gitignore 風 glob）で除外できます。
 
+#### プリマージ・ゲート（`bdo ci`）
+
+`bdo ci` は上記3つを1コマンドのゲートにまとめ、**単一の終了コード**を返します — `bdo review`（変更サマリ・情報のみ）＋ `bdo stale`（tree 全体の残骸）＋ `bdo test --changed`（変更セットのテスト）。軽い検査を先に、遅いテストを最後に実行しますが、**先の失敗に関わらず全ステージを走らせる**ので、1回で全ブロッカーが見えます（`bdo ci --against origin/main` でブランチ全体の差分に対して実行）。ゲートはいずれかのゲーティング段が失敗すれば非ゼロ終了し、テストの実終了コード（例: cargo の `101`）を残骸ゲートの `1` より優先して保持します。
+
 ### Git
 ```bash
 bdo git status                  # コンパクトなステータス

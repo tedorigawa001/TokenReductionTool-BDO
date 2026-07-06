@@ -219,8 +219,10 @@ bash scripts/check-test-presence.sh
 ### ✅ 追加実装済み（0.44.0）
 - **`bdo test --changed` の多言語化**: 変更セットを言語別にプランニングする `core::testplan` を新設。Rust→`cargo test -- <stems>`、Go→`go test <./pkg dirs>`（変更 `.go` の親パッケージ）、Python→`pytest <test files> [-k "<stems>"]`（テストは直接・ソースは `-k` 連動）、JS/TS→`package.json` から runner を判定し `vitest related --run` / `jest --findRelatedTests`。複数言語が混在すれば各々を順に実行し、最初の非ゼロ exit を返す。シェルに渡るパス/識別子は `shell_quote`/`quote_join` で個別クォートし、スペース入りパスでも引数が割れない。テスト追加（`testplan` ユニット9件 + 統合 `tests/test_changed_multilang.rs` 2件）。
 
-### 新規候補（assistant の欲しい機能）
-- **`bdo ci`（統合ゲート）**: `bdo stale` + `bdo test --changed` + `bdo review` を 1 コマンドで実行し、単一 exit code を返す pre-merge/CI ゲート。
+### ✅ 追加実装済み（bdo ci）
+- **`bdo ci`（統合ゲート）**: `bdo review`（変更サマリ・情報のみ）+ `bdo stale`（tree 全体の残骸ゲート）+ `bdo test --changed`（変更セットのテストゲート）を 1 コマンドで実行し**単一 exit code** を返す pre-merge ゲート。軽い検査（review, stale）を先に・遅いテストを最後に実行するが、**全ステージを常に走らせて**1 パスで全ブロッカーを提示（fail-fast しない）。exit code は「テスト失敗の実コード（例: cargo の 101）を残骸ゲートの 1 より優先」。`--against <ref>` は change-set 系（review / test --changed）に伝播、stale は常に tree 全体。実装は `cmds/system/ci.rs`（`automod` 自動登録）。`test --changed` のロジックを `ci::run_changed_tests` に切り出して main.rs の Test アームと共有（重複排除）。`is_operational_command` には非追加（review/stale と同じくフックパイプライン外のユーザー/CI 直実行）。純関数 `gate_exit_code` にユニット4件 + scratch git で 4 ケース（clean / 変更のみ / テスト失敗 101 / 残骸 1）を E2E 検証。全 2250 テスト green。
+
+### 新規候補（assistant の欲しい機能・残）
 - **`bdo stale` の docs↔impl コマンド名ズレ検出**: ドキュメント中の `bdo <cmd>` 参照のうち `bdo --help` に存在しないものを検出（元バックログの未実装分）。
 - **`.bdostaleignore` の行内サプレッション**: ファイル glob に加え、`# bdo-stale-ignore` 行内マーカーで 1 行単位の除外（文書化された残骸の局所許可）。
 

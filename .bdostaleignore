@@ -7,3 +7,7 @@ docs/bushido/MAINTENANCE_PLAN.md
 
 # The changelog records historical behavior (old paths, old names).
 CHANGELOG.md
+
+# This test's fixtures embed a wrong-crate-name install line on purpose (they
+# verify `.bdostaleignore` suppresses it); the strings are data, not residue.
+tests/review_stale_ignore.rs

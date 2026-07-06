@@ -20,8 +20,8 @@ use cmds::python::{mypy_cmd, pip_cmd, pytest_cmd, ruff_cmd};
 use cmds::ruby::{rake_cmd, rspec_cmd, rubocop_cmd};
 use cmds::rust::{cargo_cmd, runner};
 use cmds::system::{
-    deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, map, pipe_cmd,
-    read, review, stale, summary, tree, wc_cmd,
+    ci, deps, env_cmd, find_cmd, format_cmd, grep_cmd, json_cmd, local_llm, log_cmd, ls, map,
+    pipe_cmd, read, review, stale, summary, tree, wc_cmd,
 };
 
 use anyhow::{Context, Result};
@@ -275,6 +275,13 @@ enum Commands {
     Stale {
         /// Limit the scan to a path (default: whole repo, regardless of cwd)
         path: Option<PathBuf>,
+    },
+
+    /// Pre-merge gate: run review + stale + test --changed; exits non-zero if any gate fails
+    Ci {
+        /// Diff the change set against a git ref (e.g. origin/main) instead of the working tree
+        #[arg(long)]
+        against: Option<String>,
     },
 
     /// Show environment variables (filtered, sensitive masked)
@@ -1189,6 +1196,7 @@ const BDO_META_COMMANDS: &[&str] = &[
     "gain",
     "review",
     "stale",
+    "ci",
     "discover",
     "learn",
     "init",
@@ -1789,36 +1797,7 @@ fn run_cli() -> Result<i32> {
             // they trail the test command; recover them (see resolve_test_changed_args).
             let (changed, against, command) = resolve_test_changed_args(changed, against, command);
             if changed {
-                use core::changes;
-                if !command.is_empty() {
-                    eprintln!(
-                        "bdo test --changed: ignoring command args {:?} (targets are derived from the change set)",
-                        command
-                    );
-                }
-                if !changes::in_git_repo() {
-                    anyhow::bail!("bdo test --changed: not inside a git repository");
-                }
-                let changeset = changes::changed_files(against.as_deref(), None)?;
-                let root = changes::repo_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
-                let plan = core::testplan::plan_changed_tests(&changeset, &root);
-                if plan.is_empty() {
-                    println!("bdo test --changed: no test targets in the change set");
-                    0
-                } else {
-                    // Run each language's tests in turn; surface the first
-                    // non-zero exit so a later pass can't mask an earlier failure.
-                    let mut worst = 0;
-                    for tc in &plan {
-                        println!("bdo test --changed [{}]: {}", tc.lang, tc.display);
-                        let code =
-                            runner::run_test_argv(&tc.program, &tc.args, &tc.display, cli.verbose)?;
-                        if code != 0 && worst == 0 {
-                            worst = code;
-                        }
-                    }
-                    worst
-                }
+                ci::run_changed_tests(against.as_deref(), &command, cli.verbose)?
             } else {
                 let cmd = command.join(" ");
                 runner::run_test(&cmd, cli.verbose)?
@@ -1858,6 +1837,8 @@ fn run_cli() -> Result<i32> {
         }
 
         Commands::Stale { path } => stale::run(path.as_deref(), cli.verbose)?,
+
+        Commands::Ci { against } => ci::run(against.as_deref(), cli.verbose)?,
 
         Commands::Env { filter, show_all } => {
             env_cmd::run(filter.as_deref(), show_all, cli.verbose)?;
@@ -2683,6 +2664,11 @@ fn is_operational_command(cmd: &Commands) -> bool {
             | Commands::Pnpm { .. }
             | Commands::Err { .. }
             | Commands::Test { .. }
+            // `ci` is not a hook-rewrite target, but it embeds the same
+            // `test --changed` execution path as `Test`, so it must pass the
+            // integrity gate too — otherwise it would be a way to run that path
+            // while bypassing the check `bdo test --changed` enforces.
+            | Commands::Ci { .. }
             | Commands::Json { .. }
             | Commands::Deps { .. }
             | Commands::Map { .. }
@@ -3234,6 +3220,9 @@ mod tests {
             vec!["rtk", "run", "-c", "echo hi"],
             vec!["rtk", "hook-audit"],
             vec!["rtk", "cc-economics"],
+            vec!["rtk", "review"],
+            vec!["rtk", "stale"],
+            vec!["rtk", "ci"],
         ];
         for args in &meta_cmds_that_parse {
             let result = Cli::try_parse_from(args.iter());

@@ -1,10 +1,12 @@
 [package]
 name = "bushido"
-version = "0.44.5"
+version = "0.44.6"
 edition = "2021"
 rust-version = "1.91"
 authors = ["Patrick Szymkowiak"]
-description = "Bushido (bdo) - High-performance CLI proxy to minimize LLM token consumption. Fork of rtk (Rust Token Killer)."
+# Kept ≤80 chars so the generated Homebrew formula's `desc` line stays under
+# rubocop's 118-column limit (the longer form tripped `brew style` at 119).
+description = "High-performance CLI proxy that minimizes LLM token consumption (fork of rtk)."
 license = "Apache-2.0"
 homepage = "https://github.com/tedorigawa001/TokenReductionTool-BDO"
 repository = "https://github.com/tedorigawa001/TokenReductionTool-BDO"

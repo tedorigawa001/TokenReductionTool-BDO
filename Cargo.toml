@@ -1,13 +1,13 @@
 [package]
 name = "bushido"
-version = "0.44.4"
+version = "0.44.5"
 edition = "2021"
 rust-version = "1.91"
 authors = ["Patrick Szymkowiak"]
 description = "Bushido (bdo) - High-performance CLI proxy to minimize LLM token consumption. Fork of rtk (Rust Token Killer)."
 license = "Apache-2.0"
-homepage = "https://github.com/tedorigawa001/TokenReductionTool"
-repository = "https://github.com/tedorigawa001/TokenReductionTool"
+homepage = "https://github.com/tedorigawa001/TokenReductionTool-BDO"
+repository = "https://github.com/tedorigawa001/TokenReductionTool-BDO"
 readme = "README.md"
 keywords = ["cli", "llm", "token", "filter", "productivity"]
 categories = ["command-line-utilities", "development-tools"]

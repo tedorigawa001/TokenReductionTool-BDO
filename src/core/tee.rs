@@ -187,6 +187,10 @@ fn set_private_directory_permissions(path: &std::path::Path) -> std::io::Result<
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
     }
+    // No POSIX modes on other platforms (Windows ACLs default to per-user
+    // profile protection); keep the parameter used so -D warnings holds.
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -196,6 +200,8 @@ fn set_private_file_permissions(path: &std::path::Path) -> std::io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 

@@ -290,9 +290,15 @@ impl Tracker {
     /// # Ok::<(), anyhow::Error>(())
     /// ```
     pub fn new() -> Result<Self> {
-        let db_path = get_db_path()?;
+        let (db_path, source) = get_db_path_with_source()?;
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
+            // Lock down bdo's own data dir. An overridden location
+            // (BDO_DB_PATH / config database_path) may be a shared directory
+            // the user manages — changing its mode is not bdo's call.
+            if source == crate::core::utils::PathSource::Default {
+                set_private_directory_permissions(parent)?;
+            }
         }
 
         let conn = Connection::open(&db_path)?;
@@ -302,6 +308,11 @@ impl Tracker {
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;",
         );
+        // The DB file itself is bdo's wherever it lives, so tighten it in both
+        // cases — but best-effort: the enforced 0o700 on the default dir above
+        // is the primary barrier, and a chmod failure (e.g. a non-POSIX
+        // filesystem at an override path) must not take tracking down.
+        let _ = set_private_sqlite_permissions(&db_path);
         conn.execute(
             "CREATE TABLE IF NOT EXISTS commands (
                 id INTEGER PRIMARY KEY,
@@ -1138,8 +1149,10 @@ impl Tracker {
         let rows = stmt.query_map(params![limit as i64], |row| {
             let cmd: String = row.get(0)?;
             let sav: f64 = row.get(1)?;
-            let short = cmd.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
-            Ok((short, sav))
+            // Telemetry must never include arguments. `rtk_cmd` contains the
+            // complete command display string, so retain only the proxied tool.
+            let tool = cmd.split_whitespace().nth(1).unwrap_or(&cmd).to_string();
+            Ok((tool, sav))
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
@@ -1294,22 +1307,63 @@ fn categorize_command(rtk_cmd: &str) -> String {
     .to_string()
 }
 
-fn get_db_path() -> Result<PathBuf> {
-    // Priority 1: Environment variable BDO_DB_PATH
-    if let Ok(custom_path) = std::env::var("BDO_DB_PATH") {
-        return Ok(PathBuf::from(custom_path));
-    }
+fn get_db_path_with_source() -> Result<(PathBuf, crate::core::utils::PathSource)> {
+    let env_override = std::env::var("BDO_DB_PATH").ok();
+    let config_override = crate::core::config::Config::load()
+        .ok()
+        .and_then(|config| config.tracking.database_path);
+    Ok(resolve_db_path(env_override, config_override))
+}
 
-    // Priority 2: Configuration file
-    if let Ok(config) = crate::core::config::Config::load() {
-        if let Some(db_path) = config.tracking.database_path {
-            return Ok(db_path);
+/// Pure resolution of the DB path and where it came from (testable without
+/// touching process-global env). Priority: `BDO_DB_PATH` env var, then the
+/// config file's `database_path`, then the platform data dir. The source
+/// decides whether bdo may tighten the parent directory's permissions.
+fn resolve_db_path(
+    env_override: Option<String>,
+    config_override: Option<PathBuf>,
+) -> (PathBuf, crate::core::utils::PathSource) {
+    use crate::core::utils::PathSource;
+    if let Some(custom_path) = env_override {
+        return (PathBuf::from(custom_path), PathSource::Override);
+    }
+    if let Some(db_path) = config_override {
+        return (db_path, PathSource::Override);
+    }
+    let data_dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    (
+        data_dir.join(BDO_DATA_DIR).join(HISTORY_DB),
+        PathSource::Default,
+    )
+}
+
+fn set_private_directory_permissions(path: &std::path::Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn set_private_file_permissions(path: &std::path::Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+fn set_private_sqlite_permissions(db_path: &std::path::Path) -> Result<()> {
+    set_private_file_permissions(db_path)?;
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{}", db_path.display(), suffix));
+        if sidecar.exists() {
+            set_private_file_permissions(&sidecar)?;
         }
     }
-
-    // Priority 3: Default platform-specific location
-    let data_dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    Ok(data_dir.join(BDO_DATA_DIR).join(HISTORY_DB))
+    Ok(())
 }
 
 /// Individual parse failure record.
@@ -1632,6 +1686,59 @@ mod tests {
         // because the savings calculation is correct for both cases
     }
 
+    #[test]
+    fn test_low_savings_commands_do_not_return_arguments() {
+        let tracker = Tracker::new_in_memory().unwrap();
+        tracker
+            .record(
+                "curl https://example.test/?token=secret",
+                "bdo curl https://example.test/?token=secret",
+                100,
+                80,
+                1,
+            )
+            .unwrap();
+
+        let rows = tracker.low_savings_commands(5).unwrap();
+        assert_eq!(rows, vec![("curl".to_string(), 20.0)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_private_permissions_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let file = tmpdir.path().join("history.db");
+        std::fs::write(&file, "test").unwrap();
+        set_private_directory_permissions(tmpdir.path()).unwrap();
+        set_private_file_permissions(&file).unwrap();
+
+        assert_eq!(std::fs::metadata(tmpdir.path()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_private_sqlite_permissions_cover_sidecars() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let db = tmpdir.path().join("history.db");
+        std::fs::write(&db, "db").unwrap();
+        std::fs::write(format!("{}-wal", db.display()), "wal").unwrap();
+        std::fs::write(format!("{}-shm", db.display()), "shm").unwrap();
+        set_private_sqlite_permissions(&db).unwrap();
+
+        for path in [
+            db.clone(),
+            PathBuf::from(format!("{}-wal", db.display())),
+            PathBuf::from(format!("{}-shm", db.display())),
+        ] {
+            assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+    }
+
     // get_by_agent groups rows and sums saved tokens. Both records get the same
     // (env-derived) agent, so they collapse into a single group of 2 — stable
     // regardless of the concrete agent value.
@@ -1688,18 +1795,50 @@ mod tests {
         static ENV_LOCK: Mutex<()> = Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap();
 
+        use crate::core::utils::PathSource;
         let custom_path = env::temp_dir().join("rtk_test_custom.db");
         env::set_var("BDO_DB_PATH", &custom_path);
-        let db_path = get_db_path().expect("Failed to get db path");
+        let (db_path, source) = get_db_path_with_source().expect("Failed to get db path");
         assert_eq!(db_path, custom_path);
+        assert_eq!(source, PathSource::Override);
 
         env::remove_var("BDO_DB_PATH");
-        let db_path = get_db_path().expect("Failed to get db path");
+        let (db_path, source) = get_db_path_with_source().expect("Failed to get db path");
         assert!(
             db_path.ends_with("bdo/history.db"),
             "expected default path ending with bdo/history.db, got: {}",
             db_path.display()
         );
+        assert_eq!(source, PathSource::Default);
+    }
+
+    // resolve_db_path classifies overrides so Tracker::new only chmods the
+    // default data dir, never a user-managed directory named by an override.
+    #[test]
+    fn test_resolve_db_path_env_override_wins_and_is_override() {
+        use crate::core::utils::PathSource;
+        let (p, s) = resolve_db_path(
+            Some("/x/custom.db".to_string()),
+            Some(PathBuf::from("/y/config.db")),
+        );
+        assert_eq!(p, PathBuf::from("/x/custom.db"));
+        assert_eq!(s, PathSource::Override);
+    }
+
+    #[test]
+    fn test_resolve_db_path_config_is_override() {
+        use crate::core::utils::PathSource;
+        let (p, s) = resolve_db_path(None, Some(PathBuf::from("/y/config.db")));
+        assert_eq!(p, PathBuf::from("/y/config.db"));
+        assert_eq!(s, PathSource::Override);
+    }
+
+    #[test]
+    fn test_resolve_db_path_default_is_default() {
+        use crate::core::utils::PathSource;
+        let (p, s) = resolve_db_path(None, None);
+        assert!(p.ends_with("bdo/history.db"));
+        assert_eq!(s, PathSource::Default);
     }
 
     // 9. project_filter_params uses GLOB pattern with * wildcard // added

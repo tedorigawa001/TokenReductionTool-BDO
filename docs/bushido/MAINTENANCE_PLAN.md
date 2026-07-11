@@ -222,6 +222,11 @@ bash scripts/check-test-presence.sh
 ### ✅ 追加実装済み（bdo ci）
 - **`bdo ci`（統合ゲート）**: `bdo review`（変更サマリ・情報のみ）+ `bdo stale`（tree 全体の残骸ゲート）+ `bdo test --changed`（変更セットのテストゲート）を 1 コマンドで実行し**単一 exit code** を返す pre-merge ゲート。軽い検査（review, stale）を先に・遅いテストを最後に実行するが、**全ステージを常に走らせて**1 パスで全ブロッカーを提示（fail-fast しない）。exit code は「テスト失敗の実コード（例: cargo の 101）を残骸ゲートの 1 より優先」。`--against <ref>` は change-set 系（review / test --changed）に伝播、stale は常に tree 全体。実装は `cmds/system/ci.rs`（`automod` 自動登録）。`test --changed` のロジックを `ci::run_changed_tests` に切り出して main.rs の Test アームと共有（重複排除）。`is_operational_command` には非追加（review/stale と同じくフックパイプライン外のユーザー/CI 直実行）。純関数 `gate_exit_code` にユニット4件 + scratch git で 4 ケース（clean / 変更のみ / テスト失敗 101 / 残骸 1）を E2E 検証。全 2250 テスト green。
 
+### ✅ セキュリティ修正（2026-07-07、ローカルデータ保護）
+- **tee / tracking DB のパーミッション強化**（発見・初版は Codex、レビュー+補強は Claude）: tee ファイル（生コマンド出力=秘密を含み得る）と tracking DB（全コマンド文字列）がデフォルト umask で他ユーザー可読だった問題。デフォルトのデータディレクトリを 0700、ファイルを 0600 に。ディレクトリを先に絞ってからファイルを作るため chmod 前の露出窓なし（SQLite が後から作る WAL/SHM もディレクトリで保護）。
+- **override パスでは dir chmod をスキップ**（レビュー指摘の反映）: `BDO_DB_PATH`/`BDO_TEE_DIR`/config の override は共有ディレクトリを指し得るため、その親 dir の mode 変更は行わない。`core::utils::PathSource`（Default/Override）を導入し、`resolve_db_path`（純関数）と `get_tee_dir` が出所を返す。ファイル自体は所有物なので両ケースで保護 — tee は `OpenOptionsExt::mode(0o600)` で**生成時から owner-only**、DB は chmod best-effort（非 POSIX fs で tracking を殺さない）。
+- **telemetry の引数リーク除去**: `low_savings_commands` が rtk_cmd の先頭3語（URL 内トークン等を含み得る）を返していた → ツール名のみ（`nth(1)`）に。全 rtk_cmd 形（`bdo <tool>` / `bdo:toml <tool>`）で安全、`bdo fallback:` 行は input_tokens=0 で SQL 段階から除外済みを確認。telemetry は RGPD consent 必須（既定 off）のため defense-in-depth。
+
 ### 新規候補（assistant の欲しい機能・残）
 - **`bdo stale` の docs↔impl コマンド名ズレ検出**: ドキュメント中の `bdo <cmd>` 参照のうち `bdo --help` に存在しないものを検出（元バックログの未実装分）。
 - **`.bdostaleignore` の行内サプレッション**: ファイル glob に加え、`# bdo-stale-ignore` 行内マーカーで 1 行単位の除外（文書化された残骸の局所許可）。

@@ -2,6 +2,7 @@
 
 use super::constants::BDO_DATA_DIR;
 use crate::core::config::Config;
+use crate::core::utils::PathSource;
 use std::path::PathBuf;
 
 /// Minimum output size to tee (smaller outputs don't need recovery)
@@ -34,20 +35,23 @@ fn sanitize_slug(slug: &str) -> String {
     }
 }
 
-/// Get the tee directory, respecting config and env overrides.
-fn get_tee_dir(config: &Config) -> Option<PathBuf> {
+/// Get the tee directory, respecting config and env overrides. The returned
+/// [`PathSource`] says whether the dir is bdo's own default — only then may
+/// its permissions be tightened (an override may name a shared, user-managed
+/// directory).
+fn get_tee_dir(config: &Config) -> Option<(PathBuf, PathSource)> {
     // Env var override
     if let Ok(dir) = std::env::var("BDO_TEE_DIR") {
-        return Some(PathBuf::from(dir));
+        return Some((PathBuf::from(dir), PathSource::Override));
     }
 
     // Config override
     if let Some(ref dir) = config.tee.directory {
-        return Some(dir.clone());
+        return Some((dir.clone(), PathSource::Override));
     }
 
     // Default: ~/.local/share/bdo/tee/
-    dirs::data_local_dir().map(|d| d.join(BDO_DATA_DIR).join("tee"))
+    dirs::data_local_dir().map(|d| (d.join(BDO_DATA_DIR).join("tee"), PathSource::Default))
 }
 
 /// Rotate old tee files: keep only the last `max_files`, delete oldest.
@@ -110,8 +114,15 @@ fn write_tee_file(
     tee_dir: &std::path::Path,
     max_file_size: usize,
     max_files: usize,
+    source: PathSource,
 ) -> Option<PathBuf> {
     std::fs::create_dir_all(tee_dir).ok()?;
+    // Lock down bdo's own tee dir. An overridden dir (BDO_TEE_DIR / config
+    // tee.directory) may be shared and user-managed — leave its mode alone;
+    // the tee files themselves are still created owner-only below.
+    if source == PathSource::Default {
+        set_private_directory_permissions(tee_dir).ok()?;
+    }
 
     let slug = sanitize_slug(command_slug);
     let epoch = std::time::SystemTime::now()
@@ -138,12 +149,54 @@ fn write_tee_file(
         raw.to_string()
     };
 
-    std::fs::write(&filepath, content).ok()?;
+    write_private_file(&filepath, &content).ok()?;
 
     // Rotate old files
     cleanup_old_files(tee_dir, max_files);
 
     Some(filepath)
+}
+
+/// Write `content` to `path` with the file created owner-only (0o600) from
+/// the start, so raw output is never world-readable even for the instant a
+/// separate chmod would leave open — this matters when an override points the
+/// tee dir at a shared location. A pre-existing file keeps its old mode
+/// (`create` doesn't re-apply it), so tighten it afterwards as well.
+fn write_private_file(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(content.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, content)?;
+    let _ = set_private_file_permissions(path);
+    Ok(())
+}
+
+fn set_private_directory_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn set_private_file_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 /// Write raw output to tee file if conditions are met.
@@ -155,7 +208,7 @@ pub fn tee_raw(raw: &str, command_slug: &str, exit_code: i32) -> Option<PathBuf>
     }
 
     let config = Config::load().ok()?;
-    let tee_dir = get_tee_dir(&config)?;
+    let (tee_dir, source) = get_tee_dir(&config)?;
 
     let tee_dir = should_tee(&config.tee, raw.len(), exit_code, Some(tee_dir))?;
 
@@ -165,6 +218,7 @@ pub fn tee_raw(raw: &str, command_slug: &str, exit_code: i32) -> Option<PathBuf>
         &tee_dir,
         config.tee.max_file_size,
         config.tee.max_files,
+        source,
     )
 }
 
@@ -203,7 +257,7 @@ fn force_tee_path(content: &str, command_slug: &str) -> Option<PathBuf> {
         return None;
     }
 
-    let tee_dir = get_tee_dir(&config)?;
+    let (tee_dir, source) = get_tee_dir(&config)?;
     let tee_dir = std::fs::create_dir_all(&tee_dir).ok().and(Some(tee_dir))?;
 
     write_tee_file(
@@ -212,6 +266,7 @@ fn force_tee_path(content: &str, command_slug: &str) -> Option<PathBuf> {
         &tee_dir,
         config.tee.max_file_size,
         config.tee.max_files,
+        source,
     )
 }
 
@@ -346,6 +401,7 @@ mod tests {
             tmpdir.path(),
             DEFAULT_MAX_FILE_SIZE,
             20,
+            PathSource::Default,
         );
         assert!(result.is_some());
 
@@ -355,12 +411,55 @@ mod tests {
         assert!(written.contains("error: test failed"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_write_tee_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let path = write_tee_file(
+            "secret output",
+            "test",
+            tmpdir.path(),
+            DEFAULT_MAX_FILE_SIZE,
+            20,
+            PathSource::Default,
+        )
+        .expect("tee file");
+
+        assert_eq!(std::fs::metadata(tmpdir.path()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    // An overridden tee dir (BDO_TEE_DIR / config) is user-managed: its mode
+    // must be left alone, while the tee file itself is still born owner-only.
+    #[cfg(unix)]
+    #[test]
+    fn test_write_tee_file_override_leaves_dir_mode_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = write_tee_file(
+            "secret output",
+            "test",
+            tmpdir.path(),
+            DEFAULT_MAX_FILE_SIZE,
+            20,
+            PathSource::Override,
+        )
+        .expect("tee file");
+
+        assert_eq!(std::fs::metadata(tmpdir.path()).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
     #[test]
     fn test_write_tee_file_truncation() {
         let tmpdir = tempfile::tempdir().unwrap();
         let big_output = "x".repeat(2000);
         // Set max_file_size to 1000 bytes
-        let result = write_tee_file(&big_output, "test", tmpdir.path(), 1000, 20);
+        let result = write_tee_file(&big_output, "test", tmpdir.path(), 1000, 20, PathSource::Default);
         assert!(result.is_some());
 
         let path = result.unwrap();
@@ -380,7 +479,7 @@ mod tests {
         assert_eq!(japanese.len(), 999);
 
         // Truncate at 998 — falls in the middle of the 333rd character
-        let result = write_tee_file(&japanese, "test_utf8", tmpdir.path(), 998, 20);
+        let result = write_tee_file(&japanese, "test_utf8", tmpdir.path(), 998, 20, PathSource::Default);
         assert!(result.is_some());
 
         let path = result.unwrap();
@@ -398,7 +497,7 @@ mod tests {
         assert_eq!(emojis.len(), 400);
 
         // Truncate at 201 — falls mid-emoji (4-byte boundary is at 200, 204)
-        let result = write_tee_file(&emojis, "test_emoji", tmpdir.path(), 201, 20);
+        let result = write_tee_file(&emojis, "test_emoji", tmpdir.path(), 201, 20, PathSource::Default);
         assert!(result.is_some());
 
         let path = result.unwrap();

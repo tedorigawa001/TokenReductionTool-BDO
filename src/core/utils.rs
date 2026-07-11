@@ -10,6 +10,16 @@ use regex::Regex;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Where a bdo-managed path came from: bdo's own default location, or a
+/// user-specified override (env var / config file). bdo tightens permissions
+/// (0o700) only on directories it owns — an override may point into a shared
+/// directory the user manages, and changing its mode is not bdo's call.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PathSource {
+    Default,
+    Override,
+}
+
 /// Truncates a string to `max_len` characters, appending `...` if needed.
 ///
 /// # Arguments

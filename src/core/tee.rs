@@ -132,6 +132,11 @@ fn write_tee_file(
     let filename = format!("{}_{}.log", epoch, slug);
     let filepath = tee_dir.join(filename);
 
+    // Tee files exist for lossless recovery, but secrets are the one thing
+    // deliberately not recovered: mask before truncation, so a size cut
+    // can't split a token into a fragment the patterns no longer catch.
+    let raw = crate::core::redact::redact_secrets(raw);
+
     // Truncate at max_file_size (find a safe UTF-8 char boundary)
     let content = if raw.len() > max_file_size {
         let boundary = raw
@@ -458,6 +463,34 @@ mod tests {
 
         assert_eq!(std::fs::metadata(tmpdir.path()).unwrap().permissions().mode() & 0o777, 0o755);
         assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    // Raw output is recovery data, but secrets are deliberately not
+    // recovered: they must be masked before the file hits disk.
+    #[test]
+    fn test_write_tee_file_redacts_secrets() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let raw = format!(
+            "remote: https://ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r\n{}",
+            "padding line\n".repeat(50) // clear MIN_TEE_SIZE
+        );
+        let path = write_tee_file(
+            &raw,
+            "test_redact",
+            tmpdir.path(),
+            DEFAULT_MAX_FILE_SIZE,
+            20,
+            PathSource::Default,
+        )
+        .expect("tee file");
+
+        let written = std::fs::read_to_string(path).unwrap();
+        assert!(
+            !written.contains("ghp_abcdefghijklmnopqrstuvwxyz012345"),
+            "token persisted unredacted"
+        );
+        assert!(written.contains("[REDACTED]"));
+        assert!(written.contains("padding line"), "non-secret content must survive");
     }
 
     #[test]

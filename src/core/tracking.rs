@@ -8,6 +8,7 @@
 //!
 //! - Storage: SQLite database (~/.local/share/bdo/tracking.db)
 //! - Retention: 90-day automatic cleanup
+//! - Redaction: known secret formats are masked before persistence (see [`crate::core::redact`])
 //! - Metrics: Input/output tokens, savings %, execution time
 //!
 //! # Quick Start
@@ -475,13 +476,18 @@ impl Tracker {
         let project_path = current_project_path_string(); // added: record cwd
         let agent = detect_agent(); // which AI agent invoked bdo (best-effort)
 
+        // Command lines can carry secrets (curl -H "Authorization: ...",
+        // --password=..., token URLs); mask them before they persist.
+        let original_cmd = crate::core::redact::redact_secrets(original_cmd);
+        let rtk_cmd = crate::core::redact::redact_secrets(rtk_cmd);
+
         self.conn.execute(
             "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, project_path, agent, input_tokens, output_tokens, saved_tokens, savings_pct, exec_time_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)", // added: agent
             params![
                 Utc::now().to_rfc3339(),
-                original_cmd,
-                rtk_cmd,
+                original_cmd.as_ref(),
+                rtk_cmd.as_ref(),
                 project_path, // added
                 agent,        // added
                 input_tokens as i64,
@@ -529,13 +535,17 @@ impl Tracker {
         error_message: &str,
         fallback_succeeded: bool,
     ) -> Result<()> {
+        // Failed commands are stored verbatim for diagnostics, and parser
+        // errors often echo the offending input — mask secrets in both.
+        let raw_command = crate::core::redact::redact_secrets(raw_command);
+        let error_message = crate::core::redact::redact_secrets(error_message);
         self.conn.execute(
             "INSERT INTO parse_failures (timestamp, raw_command, error_message, fallback_succeeded)
              VALUES (?1, ?2, ?3, ?4)",
             params![
                 Utc::now().to_rfc3339(),
-                raw_command,
-                error_message,
+                raw_command.as_ref(),
+                error_message.as_ref(),
                 fallback_succeeded as i32,
             ],
         )?;
@@ -1646,6 +1656,36 @@ mod tests {
 
         assert_eq!(test_record.saved_tokens, 80);
         assert_eq!(test_record.savings_pct, 80.0);
+    }
+
+    // 3b. record() masks secrets before they reach the DB
+    #[test]
+    fn test_record_redacts_secrets_at_rest() {
+        let tracker = Tracker::new_in_memory().expect("Failed to create tracker");
+
+        tracker
+            .record(
+                "curl -H 'Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz012345' https://api.github.com",
+                "bdo curl secret_roundtrip",
+                100,
+                20,
+                5,
+            )
+            .expect("Failed to record");
+
+        let stored: String = tracker
+            .conn
+            .query_row(
+                "SELECT original_cmd FROM commands WHERE rtk_cmd = ?1",
+                params!["bdo curl secret_roundtrip"],
+                |row| row.get(0),
+            )
+            .expect("record not found");
+        assert!(
+            !stored.contains("ghp_abcdefghijklmnopqrstuvwxyz012345"),
+            "token persisted unredacted: {stored}"
+        );
+        assert!(stored.contains("[REDACTED]"), "{stored}");
     }
 
     // 4. track_passthrough doesn't dilute stats (input=0, output=0)

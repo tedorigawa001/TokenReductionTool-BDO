@@ -227,6 +227,13 @@ bash scripts/check-test-presence.sh
 - **override パスでは dir chmod をスキップ**（レビュー指摘の反映）: `BDO_DB_PATH`/`BDO_TEE_DIR`/config の override は共有ディレクトリを指し得るため、その親 dir の mode 変更は行わない。`core::utils::PathSource`（Default/Override）を導入し、`resolve_db_path`（純関数）と `get_tee_dir` が出所を返す。ファイル自体は所有物なので両ケースで保護 — tee は `OpenOptionsExt::mode(0o600)` で**生成時から owner-only**、DB は chmod best-effort（非 POSIX fs で tracking を殺さない）。
 - **telemetry の引数リーク除去**: `low_savings_commands` が rtk_cmd の先頭3語（URL 内トークン等を含み得る）を返していた → ツール名のみ（`nth(1)`）に。全 rtk_cmd 形（`bdo <tool>` / `bdo:toml <tool>`）で安全、`bdo fallback:` 行は input_tokens=0 で SQL 段階から除外済みを確認。telemetry は RGPD consent 必須（既定 off）のため defense-in-depth。
 
+### ✅ セキュリティ修正（2026-07-15、保存前シークレットリダクション）
+- **`core::redact` 新設**: パーミッション対策（外周）の残余だった「DB/tee の中身は平文フルコマンド」への対応。高確度パターンのみマスク — GitHub（ghp_/gho_/ghu_/ghs_/ghr_/github_pat_）、GitLab（glpat-）、npm、AWS（AKIA/ASIA）、Slack（xox?-）、OpenAI/Anthropic（sk-）、Stripe（sk_live/sk_test）、Google（AIza）、JWT、`Authorization: Bearer/Basic/Token`（スキームは残す）、`password=`/`api_key:` 等の代入形、PRIVATE KEY ブロック。fail-safe 哲学どおり**誤検知しない側に倒す**（取り逃しは 0600/0700 層が受ける）。トリガー文字列の事前スキャンで非該当コマンドは regex パスをスキップ（フック hot path はほぼゼロコスト、マッチなしは `Cow::Borrowed` で無アロケーション）。
+- **適用点は保存直前の3箇所**: `Tracker::record`（original_cmd/rtk_cmd）、`record_parse_failure`（raw_command/error_message — パーサエラーは入力をエコーし得る）、`tee::write_tee_file`（**切り詰め前**の raw に適用 — 境界カットでトークンが分断されパターン不一致になるのを防ぐ）。表示系は保存済みデータが既にマスク済みのため変更不要。
+- **保持期間は既存実装を確認**: `cleanup_old()` が insert 毎に 90 日超のレコードを削除（commands/parse_failures 両方）、tee は max_files ローテーション — 新規実装不要と判明。
+- テスト: redact ユニット8件 + tracking round-trip（in-memory DB で `original_cmd` が `[REDACTED]` 化）+ tee 書き込み（トークン消滅・非秘密行残存）。全 2268 テスト green、clippy clean。
+- **残余（継続認識）**: Windows の ACL 未対応（chmod は cfg(unix) のみ）、override パス配下の既存ファイル遡及なし、パターン外の秘密は平文のまま（パーミッション層のみ）。
+
 ### 新規候補（assistant の欲しい機能・残）
 - **`bdo stale` の docs↔impl コマンド名ズレ検出**: ドキュメント中の `bdo <cmd>` 参照のうち `bdo --help` に存在しないものを検出（元バックログの未実装分）。
 - **`.bdostaleignore` の行内サプレッション**: ファイル glob に加え、`# bdo-stale-ignore` 行内マーカーで 1 行単位の除外（文書化された残骸の局所許可）。

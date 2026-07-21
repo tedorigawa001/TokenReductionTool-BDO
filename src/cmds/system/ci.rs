@@ -67,7 +67,7 @@ pub fn run(against: Option<&str>, verbose: u8) -> Result<i32> {
 
     // ── Stage 2/3: whole-tree residue audit (gates) ─────────────────────
     println!("\n━━━ bdo ci (2/3) — residue audit ━━━");
-    let stale_code = stale::run(None, verbose)?;
+    let stale_code = stale::run(None, verbose, &crate::known_command_names())?;
 
     // ── Stage 3/3: tests for the change set (gates) ─────────────────────
     println!("\n━━━ bdo ci (3/3) — changed tests ━━━");

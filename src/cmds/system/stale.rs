@@ -4,7 +4,7 @@
 //! entire repo. Exits non-zero when anything is found, so it can gate CI.
 
 use crate::core::changes;
-use crate::core::residue::{artifact_reason, load_ignore, scan_stale};
+use crate::core::residue::{artifact_reason, load_ignore, scan_doc_command_drift, scan_stale};
 use crate::core::tracking;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 /// Cap on *displayed* stale-string hits (the true count is still reported).
 const MAX_STALE_HITS: usize = 100;
 
-pub fn run(path: Option<&Path>, verbose: u8) -> Result<i32> {
+pub fn run(path: Option<&Path>, verbose: u8, valid_commands: &[String]) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
 
     if !changes::in_git_repo() {
@@ -48,6 +48,10 @@ pub fn run(path: Option<&Path>, verbose: u8) -> Result<i32> {
     // display, so the reported total stays accurate on large repos.
     let mut stale_display: Vec<String> = Vec::new();
     let mut stale_count = 0usize;
+    // Doc↔impl drift: `bdo <cmd>` examples in markdown that name a subcommand
+    // `bdo --help` doesn't recognize (renamed/removed since the doc was written).
+    let mut drift_display: Vec<String> = Vec::new();
+    let mut drift_count = 0usize;
     for f in &files {
         let Ok(content) = std::fs::read_to_string(root.join(f)) else {
             continue; // missing or binary
@@ -56,6 +60,14 @@ pub fn run(path: Option<&Path>, verbose: u8) -> Result<i32> {
             stale_count += 1;
             if stale_display.len() < MAX_STALE_HITS {
                 stale_display.push(format!("  {}:{}  {}", f, lineno, label));
+            }
+        }
+        if is_markdown(f) {
+            for (lineno, label) in scan_doc_command_drift(&content, valid_commands) {
+                drift_count += 1;
+                if drift_display.len() < MAX_STALE_HITS {
+                    drift_display.push(format!("  {}:{}  {}", f, lineno, label));
+                }
             }
         }
     }
@@ -85,7 +97,20 @@ pub fn run(path: Option<&Path>, verbose: u8) -> Result<i32> {
         ));
     }
 
-    let total = artifacts.len() + stale_count;
+    out.push_str(&section_header("⚠ DOC↔IMPL DRIFT", drift_count));
+    for hit in &drift_display {
+        out.push_str(hit);
+        out.push('\n');
+    }
+    if drift_count > drift_display.len() {
+        out.push_str(&format!(
+            "  … (showing {} of {})\n",
+            drift_display.len(),
+            drift_count
+        ));
+    }
+
+    let total = artifacts.len() + stale_count + drift_count;
     out.push_str(&format!(
         "\n{}\n",
         if total == 0 {
@@ -111,6 +136,12 @@ fn root_relative_prefix(root: &Path, p: &Path) -> Option<PathBuf> {
     let abs = std::fs::canonicalize(p).ok()?;
     let root_abs = std::fs::canonicalize(root).ok()?;
     abs.strip_prefix(&root_abs).ok().map(|r| r.to_path_buf())
+}
+
+/// Only markdown carries doc examples worth checking for command drift —
+/// scanning source files would just flag test fixtures and code comments.
+fn is_markdown(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".md")
 }
 
 fn section_header(title: &str, count: usize) -> String {

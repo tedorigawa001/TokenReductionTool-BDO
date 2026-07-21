@@ -26,7 +26,7 @@ use cmds::system::{
 
 use anyhow::{Context, Result};
 use clap::error::ErrorKind;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -1214,6 +1214,17 @@ const BDO_META_COMMANDS: &[&str] = &[
     "rewrite",
 ];
 
+/// The CLI's real top-level subcommand names (kebab-case, exactly as `bdo
+/// --help` lists them) — read from the clap definition itself so `bdo
+/// stale`'s docs↔impl drift check compares against the actual source of
+/// truth and can't itself drift from what's shipped.
+pub(crate) fn known_command_names() -> Vec<String> {
+    Cli::command()
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .collect()
+}
+
 fn run_fallback(parse_error: clap::Error) -> Result<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -1836,7 +1847,9 @@ fn run_cli() -> Result<i32> {
             0
         }
 
-        Commands::Stale { path } => stale::run(path.as_deref(), cli.verbose)?,
+        Commands::Stale { path } => {
+            stale::run(path.as_deref(), cli.verbose, &known_command_names())?
+        }
 
         Commands::Ci { against } => ci::run(against.as_deref(), cli.verbose)?,
 

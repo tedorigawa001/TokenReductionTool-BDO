@@ -133,5 +133,5 @@ Run `cargo test parser::tests`. Each parser should have tier validation tests: a
 
 ### Phase 5: Observability
 - [ ] Extend tracking.db: `parse_tier`, `format_mode`
-- [ ] `bdo parse-health` command
+- [ ] `bdo parse-health` command <!-- bdo-stale-ignore: not implemented yet, roadmap item -->
 - [ ] Alert if degradation > 10%

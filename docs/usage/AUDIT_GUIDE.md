@@ -279,7 +279,7 @@ Savings %       = (Saved / Input) × 100
 | Command | Typical Savings | Mechanism |
 |---------|----------------|-----------|
 | `bdo git status` | 77-93% | Compact stat format |
-| `bdo eslint` | 84% | Group by rule |
+| `bdo lint` | 84% | Group by rule |
 | `bdo jest` | 94-99% | Show failures only |
 | `bdo vitest` | 94-99% | Show failures only |
 | `bdo find` | 75% | Tree format |

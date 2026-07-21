@@ -234,9 +234,13 @@ bash scripts/check-test-presence.sh
 - テスト: redact ユニット8件 + tracking round-trip（in-memory DB で `original_cmd` が `[REDACTED]` 化）+ tee 書き込み（トークン消滅・非秘密行残存）。全 2268 テスト green、clippy clean。
 - **残余（継続認識）**: Windows の ACL 未対応（chmod は cfg(unix) のみ）、override パス配下の既存ファイル遡及なし、パターン外の秘密は平文のまま（パーミッション層のみ）。
 
+### ✅ 追加実装済み（2026-07-21、docs↔impl ドリフト検出 + 行内サプレッション）
+- **`bdo stale` に「⚠ DOC↔IMPL DRIFT」セクション新設**: markdown ファイル中の `` `bdo <word>` `` 参照（single-backtick スパンのみ、fenced block は対象外 — prose の誤検知を避けるため）を、clap の実定義から取得した実サブコマンド一覧と突合。一致しなければ「リネーム/削除されたコマンドを指す古い例」として検出。実装は `core::residue::scan_doc_command_drift`(純関数、`valid_commands: &[String]` を受け取るのでテスト時にハードコード不要)。**一覧はハードコードでなく `main.rs::known_command_names()` が `Cli::command().get_subcommands()` から都度取得** — チェック自体が実装からドリフトし得ない設計。`stale::run` のシグネチャに `valid_commands: &[String]` を追加（呼び出し元は main.rs と `bdo ci`(`ci.rs`)の2箇所、両方 `known_command_names()` を渡すよう更新）。
+- **`.bdostaleignore` の行内サプレッション**: `core::residue::INLINE_IGNORE_MARKER`(`"bdo-stale-ignore"`)をファイル内の行に含めると、コメント構文を問わず（`#`/`//`/`<!-- -->` 等）その行の stale マーカー検出・doc drift 検出の両方から除外。`scan_stale`/`scan_doc_command_drift` 双方が同じマーカーを尊重。
+- **実運用で即座に効果確認**: 実装後に自リポジトリへ実行したところ4件検出 — 2件は意図的な「誤った形との対比」例（`docs/contributing/ARCHITECTURE.md`「`bdo go test` not `bdo gotest`」、`hooks/README.md`「no `bdo bdo git`」）→ `<!-- bdo-stale-ignore -->` で抑制、1件は未実装の将来コマンド TODO（`src/parser/README.md`「`bdo parse-health` command」）→ 同様に抑制、**1件は実際のドキュメントバグ**（`docs/usage/AUDIT_GUIDE.md` の savings 表が存在しない `bdo eslint` を記載 → 実装は `bdo lint`、修正済み）。機能導入初回で実バグを1件発見・修正できたことを確認。
+- テスト: residue ユニット6件追加（drift 検出/未知コマンド許容/フラグ・プレースホルダ除外/prose 除外/行内サプレッション）。全 2274 テスト green、clippy clean。
+
 ### 新規候補（assistant の欲しい機能・残）
-- **`bdo stale` の docs↔impl コマンド名ズレ検出**: ドキュメント中の `bdo <cmd>` 参照のうち `bdo --help` に存在しないものを検出（元バックログの未実装分）。
-- **`.bdostaleignore` の行内サプレッション**: ファイル glob に加え、`# bdo-stale-ignore` 行内マーカーで 1 行単位の除外（文書化された残骸の局所許可）。
 
 ### 地味だが効く
 - **共通 raw バイパスの統一**: `-l none` / `BDO_NO_TOML` / passthrough が散在。全コマンド共通の `--raw` / `BDO_RAW=1` に集約し学習コスト減。

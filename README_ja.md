@@ -166,7 +166,7 @@ CHANGED
 
 #### 残骸監査（`bdo stale`）
 
-`bdo review` が変更セットを見るのに対し、`bdo stale` は **tracked tree 全体**の残骸（git に紛れ込んだ生成物・旧名・壊れた install URL 等）を監査し、見つかれば**非ゼロ終了**します（CI ゲートに利用可）。`bdo stale <path>` でスコープ可。残骸を*記録している*ファイル（CHANGELOG や rename 台帳など）は `.bdostaleignore`（gitignore 風 glob）で除外できます。
+`bdo review` が変更セットを見るのに対し、`bdo stale` は **tracked tree 全体**の残骸（git に紛れ込んだ生成物・旧名・壊れた install URL 等）を監査し、見つかれば**非ゼロ終了**します（CI ゲートに利用可）。`bdo stale <path>` でスコープ可。**docs↔impl のズレ**も検出します — markdown 中の `` `bdo <cmd>` `` 参照が `bdo --help` に実在しないコマンドを指していれば検出（clap の実定義と突合するため、このチェック自体がドリフトすることはありません)。残骸を*記録している*ファイル（CHANGELOG や rename 台帳など）は `.bdostaleignore`（gitignore 風 glob）で除外できます。1 行だけ除外したい場合は、その行のどこかに `bdo-stale-ignore` を含めてください（`#`/`//`/`<!-- -->` などコメント構文は問いません）。
 
 #### プリマージ・ゲート（`bdo ci`）
 

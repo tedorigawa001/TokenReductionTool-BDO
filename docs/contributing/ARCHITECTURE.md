@@ -466,7 +466,7 @@ Uses `Commands::Go { #[command(subcommand)] command: GoCommand }` in main.rs, wi
 **Why Sub-Enum?**
 - `go test/build/vet` are semantically related (core Go toolchain)
 - Mirrors existing git/cargo patterns (consistency)
-- Natural CLI: `bdo go test` not `bdo gotest`
+- Natural CLI: `bdo go test` not `bdo gotest` <!-- bdo-stale-ignore: intentional wrong-form contrast -->
 
 **Why golangci-lint Standalone?**
 - Third-party tool (not core Go toolchain)

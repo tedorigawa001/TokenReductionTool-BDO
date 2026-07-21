@@ -63,11 +63,14 @@ pub fn run(path: Option<&Path>, verbose: u8, valid_commands: &[String]) -> Resul
             }
         }
         if is_markdown(f) {
-            for (lineno, label) in scan_doc_command_drift(&content, valid_commands) {
-                drift_count += 1;
-                if drift_display.len() < MAX_STALE_HITS {
-                    drift_display.push(format!("  {}:{}  {}", f, lineno, label));
-                }
+            // Cap to the *remaining* display budget, not the full
+            // MAX_STALE_HITS each time — otherwise a pathological file could
+            // still allocate up to the cap per file across many files.
+            let remaining = MAX_STALE_HITS.saturating_sub(drift_display.len());
+            let (hits, total) = scan_doc_command_drift(&content, valid_commands, remaining);
+            drift_count += total;
+            for (lineno, label) in hits {
+                drift_display.push(format!("  {}:{}  {}", f, lineno, label));
             }
         }
     }

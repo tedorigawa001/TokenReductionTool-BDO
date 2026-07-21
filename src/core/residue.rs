@@ -116,24 +116,38 @@ fn doc_command_regex() -> &'static Regex {
 /// removed. `valid_commands` should come from the CLI's own clap definition
 /// (the source of truth), not a hand-maintained list, so this check can't
 /// itself drift from what's shipped. Honors [`INLINE_IGNORE_MARKER`].
-pub fn scan_doc_command_drift(content: &str, valid_commands: &[String]) -> Vec<(usize, String)> {
+///
+/// Returns `(capped hits for display, true total)`. `cap` bounds how many
+/// hits get their display `String` formatted and allocated — without it, a
+/// pathological doc (a huge generated file with many stray `` `bdo x` ``
+/// spans) would force formatting and allocating one `String` per match
+/// before the caller ever gets a chance to truncate for display.
+pub fn scan_doc_command_drift(
+    content: &str,
+    valid_commands: &[String],
+    cap: usize,
+) -> (Vec<(usize, String)>, usize) {
     let re = doc_command_regex();
     let mut hits = Vec::new();
+    let mut total = 0usize;
     for (lineno, line) in content.lines().enumerate() {
         if line.contains(INLINE_IGNORE_MARKER) {
             continue;
         }
-        for cap in re.captures_iter(line) {
-            let cmd = &cap[1];
+        for cap_match in re.captures_iter(line) {
+            let cmd = &cap_match[1];
             if !valid_commands.iter().any(|c| c == cmd) {
-                hits.push((
-                    lineno + 1,
-                    format!("`bdo {cmd}` — not a known subcommand (bdo --help doesn't list it)"),
-                ));
+                total += 1;
+                if hits.len() < cap {
+                    hits.push((
+                        lineno + 1,
+                        format!("`bdo {cmd}` — not a known subcommand (bdo --help doesn't list it)"),
+                    ));
+                }
             }
         }
     }
-    hits
+    (hits, total)
 }
 
 #[cfg(test)]
@@ -181,7 +195,8 @@ mod tests {
     fn test_scan_doc_command_drift_flags_unknown_command() {
         let valid = vec!["review".to_string(), "stale".to_string()];
         let content = "See `bdo oldcmd --flag` for details.\n";
-        let hits = scan_doc_command_drift(content, &valid);
+        let (hits, total) = scan_doc_command_drift(content, &valid, 100);
+        assert_eq!(total, 1);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, 1);
         assert!(hits[0].1.contains("bdo oldcmd"));
@@ -191,14 +206,18 @@ mod tests {
     fn test_scan_doc_command_drift_accepts_known_command() {
         let valid = vec!["review".to_string(), "git".to_string()];
         let content = "Run `bdo review --against origin/main` or `bdo git status`.\n";
-        assert!(scan_doc_command_drift(content, &valid).is_empty());
+        let (hits, total) = scan_doc_command_drift(content, &valid, 100);
+        assert_eq!(total, 0);
+        assert!(hits.is_empty());
     }
 
     #[test]
     fn test_scan_doc_command_drift_ignores_flags_and_placeholders() {
         let valid = vec!["review".to_string()];
         let content = "Usage: `bdo <command>` or `bdo --help` or `bdo -v`.\n";
-        assert!(scan_doc_command_drift(content, &valid).is_empty());
+        let (hits, total) = scan_doc_command_drift(content, &valid, 100);
+        assert_eq!(total, 0);
+        assert!(hits.is_empty());
     }
 
     #[test]
@@ -206,14 +225,30 @@ mod tests {
         let valid = vec!["review".to_string()];
         // Not backtick-wrapped, so it's prose, not a code example.
         let content = "bdo works well once configured.\n";
-        assert!(scan_doc_command_drift(content, &valid).is_empty());
+        let (hits, total) = scan_doc_command_drift(content, &valid, 100);
+        assert_eq!(total, 0);
+        assert!(hits.is_empty());
     }
 
     #[test]
     fn test_scan_doc_command_drift_honors_inline_ignore() {
         let valid = vec!["review".to_string()];
         let content = format!("`bdo oldcmd` {}\n", INLINE_IGNORE_MARKER);
-        assert!(scan_doc_command_drift(&content, &valid).is_empty());
+        let (hits, total) = scan_doc_command_drift(&content, &valid, 100);
+        assert_eq!(total, 0);
+        assert!(hits.is_empty());
+    }
+
+    // Codex review finding: the cap must bound *allocation*, not just
+    // display — every match used to get a formatted String regardless of
+    // how many the caller would ever show.
+    #[test]
+    fn test_scan_doc_command_drift_cap_bounds_allocated_hits_not_total() {
+        let valid = vec!["review".to_string()];
+        let content = "`bdo a` `bdo b` `bdo c` `bdo d`\n";
+        let (hits, total) = scan_doc_command_drift(content, &valid, 2);
+        assert_eq!(total, 4, "total must count every match");
+        assert_eq!(hits.len(), 2, "hits must stop at the cap");
     }
 
     #[test]

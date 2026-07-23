@@ -13,6 +13,13 @@ installers = ["shell", "npm", "homebrew"]
 # so the package is `bdo-cli`. The installed command is still `bdo`
 # (npm's bin name comes from the cargo [[bin]] name).
 npm-package = "bdo-cli"
+# Some security scanners flag any npm package that ships an
+# npm-shrinkwrap.json as a supply-chain risk heuristic (it can pin
+# dependency versions the top-level package.json doesn't show). Our
+# lockfile matched package.json exactly and posed no real risk, but the
+# installer only needs `detect-libc`/`prettier`'s existing semver ranges —
+# skip generating the lockfile rather than keep re-justifying the warning.
+npm-shrinkwrap = false
 # Publish the Homebrew formula and the npm package from CI.
 # Requires repo secrets: HOMEBREW_TAP_TOKEN (PAT with write access to the
 # tap repo) and NPM_TOKEN (npm automation token).

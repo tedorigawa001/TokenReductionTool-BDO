@@ -239,6 +239,11 @@ bash scripts/check-test-presence.sh
 - **`.bdostaleignore` の行内サプレッション**: `core::residue::INLINE_IGNORE_MARKER`(`"bdo-stale-ignore"`)をファイル内の行に含めると、コメント構文を問わず（`#`/`//`/`<!-- -->` 等）その行の stale マーカー検出・doc drift 検出の両方から除外。`scan_stale`/`scan_doc_command_drift` 双方が同じマーカーを尊重。
 - **実運用で即座に効果確認**: 実装後に自リポジトリへ実行したところ4件検出 — 2件は意図的な「誤った形との対比」例（`docs/contributing/ARCHITECTURE.md`「`bdo go test` not `bdo gotest`」、`hooks/README.md`「no `bdo bdo git`」）→ `<!-- bdo-stale-ignore -->` で抑制、1件は未実装の将来コマンド TODO（`src/parser/README.md`「`bdo parse-health` command」）→ 同様に抑制、**1件は実際のドキュメントバグ**（`docs/usage/AUDIT_GUIDE.md` の savings 表が存在しない `bdo eslint` を記載 → 実装は `bdo lint`、修正済み）。機能導入初回で実バグを1件発見・修正できたことを確認。
 - テスト: residue ユニット6件追加（drift 検出/未知コマンド許容/フラグ・プレースホルダ除外/prose 除外/行内サプレッション）。全 2274 テスト green、clippy clean。
+- **フォロー: Codex レビューで `scan_doc_command_drift` の非効率を指摘** — 表示上限(100件)の前に全マッチ分の `String` を確保していた（病的な巨大 markdown で 23MB/50万マッチ時 約11.8秒）。`cap: usize` を関数に渡し `(捕捉件数分の Vec, 真の総数)` を返す設計に修正 — 総数は全件カウントするが `format!` アロケーションは cap 件まで。`stale.rs` は「その時点までの残り表示枠」を各ファイルに渡すためツリー全体で cap が守られる。テスト1件追加、全2275テスト green。
+
+### ✅ npm パッケージの shrinkwrap 生成を無効化（2026-07-21）
+- **背景**: `bdo-cli`(v0.44.4〜)がセキュリティスキャナーから「shrinkwrap ファイルを含む」警告を受けた。実際に tarball を取得して検証したところ、中身は `package.json` の依存(`detect-libc`/devDependency `prettier`)と完全に整合しており実害なし — cargo-dist の npm インストーラテンプレートが自動生成する定型ファイル。
+- **対応**: 実害はなかったが、この警告を毎回説明し直すコストの方が高いため `dist-workspace.toml` に `npm-shrinkwrap = false` を追加(`dist` バイナリの strings 解析で設定キーの存在を確認済み)。`dist generate` 実行済み(release.yml に変更なし — この設定は CI ワークフロー生成ではなく `publish-npm` ジョブ内の `dist` 自体のインストーラ生成ロジックに効く)。次回リリース(v0.44.10 以降)から npm パッケージに `npm-shrinkwrap.json` が同梱されなくなる想定 — リリース後に `npm pack bdo-cli@<version>` で tarball の中身を確認して検証すること。
 
 ### 新規候補（assistant の欲しい機能・残）
 

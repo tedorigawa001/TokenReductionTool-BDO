@@ -5,6 +5,117 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.10] (2026-07-24)
+
+### Chores
+
+- **npm package**: stop generating `npm-shrinkwrap.json` (`npm-shrinkwrap = false`
+  in `dist-workspace.toml`). The shrinkwrap matched `package.json` exactly and
+  posed no real risk, but security scanners flag any npm package that ships one
+  as a supply-chain heuristic — not worth re-justifying every release.
+
+## [0.44.9] (2026-07-22)
+
+### Features
+
+- **`bdo stale`**: new "DOC↔IMPL DRIFT" check — flags `` `bdo <cmd>` ``
+  references in markdown that name a subcommand `bdo --help` no longer lists
+  (checked against the CLI's own clap definition, so the check can't itself
+  drift). Caught a real doc bug on its first run (`bdo eslint` → `bdo lint`).
+- **`.bdostaleignore`**: inline suppression — a line containing the literal
+  string `bdo-stale-ignore` (any comment syntax) is skipped by both the stale-
+  marker scan and the new doc-drift check, for one-off intentional mentions
+  that don't warrant a whole-file ignore entry.
+
+### Fixes
+
+- **`bdo stale`**: bound the doc-drift scan's allocation by a cap instead of
+  only truncating at display time — a pathological markdown file could
+  previously force formatting and allocating a `String` per match before any
+  truncation happened.
+
+## [0.44.8] (2026-07-15)
+
+### Security
+
+- **Secret redaction at rest**: mask known secret formats (GitHub/GitLab/npm/
+  AWS/Slack/OpenAI/Anthropic/Stripe/Google tokens, JWTs, `Authorization`
+  headers, `password=`/`api_key:` assignments, PEM private key blocks) before
+  persisting command strings to the tracking DB or raw output to tee recovery
+  files. Closes the gap left by 0.44.7's permission hardening: files were
+  owner-only, but their contents were still plaintext.
+
+### Fixes
+
+- **Windows build**: fix unused-variable errors in permission helpers that
+  only used their path argument under `#[cfg(unix)]`.
+
+## [0.44.7] (2026-07-11)
+
+### Security
+
+- **Local data protection**: tracking DB and tee recovery files are now
+  created owner-only (0600 for files, 0700 for their default directories),
+  closing a world-readable window for locally stored command history and raw
+  output. Override paths (`BDO_DB_PATH`, `BDO_TEE_DIR`, config) skip the
+  directory chmod (they may be shared/user-managed) but files are still
+  tightened.
+- **Telemetry**: `low_savings_commands` now reports only the tool name, not
+  the first three words of the command (which could carry URL tokens or other
+  incidental data).
+
+## [0.44.6] (2026-07-07)
+
+### Features
+
+- **`bdo ci`**: single pre-merge gate composing `bdo review` (informational
+  change summary), `bdo stale` (whole-tree residue audit), and `bdo test
+  --changed` (change-set tests) into one exit code. All stages always run
+  (no fail-fast) so a single pass surfaces every blocker; a real test exit
+  code (e.g. cargo's 101) takes priority over the bare residue-gate `1`.
+
+### Chores
+
+- Shortened the Homebrew formula's `desc` line to stay under rubocop's
+  118-column limit. (0.44.5 was an internal version bump that never
+  published — its plan failed because the tag didn't point at the version
+  bump commit; no user-facing changes beyond what's listed here.)
+
+## [0.44.4] (2026-07-04)
+
+First release distributed via the new [cargo-dist](https://opensource.axo.dev/cargo-dist/)
+pipeline — tagged pushes now build and publish to GitHub Releases, npm
+(`bdo-cli`), and Homebrew (`tedorigawa001/tap/bushido`) automatically. Also
+the first tagged/published release since 0.43.0; covers all work merged in
+that window (versions 0.44.0–0.44.3 were internal bumps that were never
+independently released).
+
+### Features
+
+- **`bdo gain --by-agent`**: per-agent attribution for Claude Code, Gemini
+  CLI, Cursor, GitHub Copilot, and Google Antigravity. Gemini/Copilot
+  attribution is embedded directly in the rewritten command
+  (`BDO_AGENT=<agent>`) since those hooks don't otherwise expose it.
+- **`bdo test --changed`**: multi-language test planning via `core::testplan`
+  — Rust (`cargo test -- <stems>`), Go (`go test <changed packages>`), Python
+  (`pytest <files> [-k "<stems>"]`), JS/TS (`vitest related --run` /
+  `jest --findRelatedTests`, runner auto-detected from `package.json`).
+
+### Security
+
+- **Command injection**: single-quote the `pytest -k` filter value instead of
+  interpolating it unescaped.
+- **Test execution**: run test commands via argv instead of `sh -c`, removing
+  a shell-interpretation step entirely.
+
+### Fixes
+
+- `bdo init` and hook decision output: rebrand stale "RTK" references,
+  Codex uses inline `AGENTS.md` (not `@import`), spec-compliant Gemini
+  decision format, clarified Copilot formats.
+- `bdo review` / `bdo map`: honor `.bdostaleignore`; one-line body signatures
+  in map output.
+
 ## [0.43.0] (2026-06-18)
 
 First Bushido (bdo) release line — a hardened fork of

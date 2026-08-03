@@ -34,7 +34,7 @@ This data directly drives our roadmap. For example, if telemetry shows that 40% 
 
 | Field | Example | Purpose |
 |-------|---------|---------|
-| `device_hash` | `a3f8c9...` (64 hex chars) | Count unique installations. SHA-256 of a per-device random salt stored locally (`~/.local/share/rtk/.device_salt`). Not reversible. No hostname or username included. |
+| `device_hash` | `a3f8c9...` (64 hex chars) | Count unique installations. SHA-256 of a per-device random salt stored locally (`~/.local/share/bdo/.device_salt`). Not reversible. No hostname or username included. |
 
 ### Environment
 
@@ -136,7 +136,7 @@ export BDO_TELEMETRY_DISABLED=1
 
 - **Server-side**: telemetry records are retained for a maximum of **12 months**, then automatically purged (periodic task every 24 hours).
 - **Server-side (erasure log)**: IP addresses in the erasure audit log are **anonymized after 6 months** (GDPR — IP is personal data).
-- **Client-side**: the local SQLite database (`~/.local/share/rtk/tracking.db`) retains data for **90 days** by default (configurable via `tracking.history_days` in `config.toml`). Deleted entirely by `bdo telemetry forget`.
+- **Client-side**: the local SQLite database (`~/.local/share/bdo/history.db`) retains data for **90 days** by default (configurable via `tracking.history_days` in `config.toml`). Deleted entirely by `bdo telemetry forget`.
 
 ## Your Rights (GDPR)
 
@@ -146,7 +146,7 @@ Under the EU General Data Protection Regulation, you have the right to:
 - **Rectification**: since data is anonymous and aggregate, rectification is not applicable.
 - **Erasure** (Art. 17): run `bdo telemetry forget` to delete local data and send an erasure request to the server. Alternatively, open an issue at https://github.com/tedorigawa001/TokenReductionTool/issues with your device hash.
 - **Restriction of processing**: `bdo telemetry disable` stops all data collection immediately.
-- **Portability**: the local SQLite database at `~/.local/share/rtk/tracking.db` contains all locally stored data.
+- **Portability**: the local SQLite database at `~/.local/share/bdo/history.db` contains all locally stored data.
 - **Objection**: `bdo telemetry disable` or `export BDO_TELEMETRY_DISABLED=1`.
 
 ## Erasure Procedure
@@ -166,7 +166,7 @@ Under the EU General Data Protection Regulation, you have the right to:
 ### Server-side Requirements
 
 The telemetry server must implement:
-- `POST /erasure` endpoint accepting `{"device_hash": "...", "action": "erasure"}`, authenticated via `X-RTK-Token`
+- `POST /erasure` endpoint accepting `{"device_hash": "...", "action": "erasure"}`, authenticated via `X-BDO-Token`
 - Automatic periodic purge of telemetry records older than 12 months
 - Audit log for erasure requests (GDPR Art. 17(2) accountability) with IP anonymization after 6 months
 

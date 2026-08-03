@@ -116,21 +116,21 @@ Savings %     = (Saved / Input) × 100
 
 Savings data is stored locally in SQLite:
 
-- **Location**: `~/.local/share/rtk/history.db` (Linux / macOS)
+- **Location**: `~/.local/share/bdo/history.db` (Linux) or `~/Library/Application Support/bdo/history.db` (macOS)
 - **Retention**: 90 days (automatic cleanup)
 - **Scope**: Global across all projects and Claude sessions
 
 ```bash
 # Inspect raw data
-sqlite3 ~/.local/share/rtk/history.db \
+sqlite3 ~/.local/share/bdo/history.db \
   "SELECT timestamp, rtk_cmd, saved_tokens FROM commands
    ORDER BY timestamp DESC LIMIT 10"
 
 # Backup
-cp ~/.local/share/rtk/history.db ~/backups/rtk-history-$(date +%Y%m%d).db
+cp ~/.local/share/bdo/history.db ~/backups/bdo-history-$(date +%Y%m%d).db
 
 # Reset
-rm ~/.local/share/rtk/history.db    # recreated on next command
+rm ~/.local/share/bdo/history.db    # recreated on next command
 ```
 
 ## Analysis workflows
@@ -144,7 +144,7 @@ bdo gain --monthly --format json | jq '.monthly[] |
   {month, saved_tokens, quota_pct: (.saved_tokens / 6000000 * 100)}'
 
 # Cron: daily JSON snapshot for a dashboard
-0 0 * * * bdo gain --all --format json > /var/www/dashboard/rtk-stats.json
+0 0 * * * bdo gain --all --format json > /var/www/dashboard/bdo-stats.json
 ```
 
 **Python/pandas:**
@@ -198,8 +198,8 @@ The tiers (`pro`, `5x`, `20x`) correspond to Anthropic Claude API subscription l
 
 **No data showing:**
 ```bash
-ls -lh ~/.local/share/rtk/history.db
-sqlite3 ~/.local/share/rtk/history.db "SELECT COUNT(*) FROM commands"
+ls -lh ~/.local/share/bdo/history.db
+sqlite3 ~/.local/share/bdo/history.db "SELECT COUNT(*) FROM commands"
 git status    # run any tracked command to generate data
 ```
 

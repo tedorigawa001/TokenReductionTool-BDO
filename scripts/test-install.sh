@@ -56,8 +56,8 @@ def make(name, entry):
 
 make("traversal.tgz", "../etc/evil")
 make("absolute.tgz", "/tmp/evil_abs")
-make("middle.tgz", "rtk/../../../etc/evil")
-make("end_dotdot.tgz", "rtk/..")
+make("middle.tgz", "bdo/../../../etc/evil")
+make("end_dotdot.tgz", "bdo/..")
 PY
 
 FAIL=0

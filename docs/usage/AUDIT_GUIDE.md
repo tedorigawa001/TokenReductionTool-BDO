@@ -6,7 +6,7 @@ Complete guide to analyzing your bdo token savings with temporal breakdowns and 
 
 The `bdo gain` command provides comprehensive analytics for tracking your token savings across time periods.
 
-**Database Location**: `~/.local/share/rtk/history.db`
+**Database Location**: `~/.local/share/bdo/history.db`
 **Retention Policy**: 90 days
 **Scope**: Global across all projects, worktrees, and Claude sessions
 
@@ -221,7 +221,7 @@ daily_df.plot(x='date', y='savings_pct', kind='line')
 
 ### Excel Analysis
 
-1. Export CSV: `bdo gain --all --format csv > rtk-data.csv`
+1. Export CSV: `bdo gain --all --format csv > bdo-data.csv`
 2. Open in Excel
 3. Create pivot tables:
    - Daily trends (line chart)
@@ -232,14 +232,14 @@ daily_df.plot(x='date', y='savings_pct', kind='line')
 
 ```bash
 # Generate dashboard data daily via cron
-0 0 * * * bdo gain --all --format json > /var/www/dashboard/rtk-stats.json
+0 0 * * * bdo gain --all --format json > /var/www/dashboard/bdo-stats.json
 
 # Serve with static site
 cat > index.html <<'EOF'
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <canvas id="savings"></canvas>
 <script>
-fetch('rtk-stats.json')
+fetch('bdo-stats.json')
   .then(r => r.json())
   .then(data => {
     new Chart(document.getElementById('savings'), {
@@ -292,18 +292,18 @@ Savings %       = (Saved / Input) × 100
 
 ```bash
 # Location
-ls -lh ~/.local/share/rtk/history.db
+ls -lh ~/.local/share/bdo/history.db
 
 # Schema
-sqlite3 ~/.local/share/rtk/history.db ".schema"
+sqlite3 ~/.local/share/bdo/history.db ".schema"
 
 # Recent records
-sqlite3 ~/.local/share/rtk/history.db \
+sqlite3 ~/.local/share/bdo/history.db \
   "SELECT timestamp, rtk_cmd, saved_tokens FROM commands
    ORDER BY timestamp DESC LIMIT 10"
 
 # Total database size
-sqlite3 ~/.local/share/rtk/history.db \
+sqlite3 ~/.local/share/bdo/history.db \
   "SELECT COUNT(*),
           SUM(saved_tokens) as total_saved,
           MIN(DATE(timestamp)) as first_record,
@@ -315,24 +315,24 @@ sqlite3 ~/.local/share/rtk/history.db \
 
 ```bash
 # Backup
-cp ~/.local/share/rtk/history.db ~/backups/rtk-history-$(date +%Y%m%d).db
+cp ~/.local/share/bdo/history.db ~/backups/bdo-history-$(date +%Y%m%d).db
 
 # Restore
-cp ~/backups/rtk-history-20260128.db ~/.local/share/rtk/history.db
+cp ~/backups/bdo-history-20260128.db ~/.local/share/bdo/history.db
 
 # Export for migration
-sqlite3 ~/.local/share/rtk/history.db .dump > rtk-backup.sql
+sqlite3 ~/.local/share/bdo/history.db .dump > bdo-backup.sql
 ```
 
 ### Cleanup
 
 ```bash
 # Manual cleanup (older than 90 days)
-sqlite3 ~/.local/share/rtk/history.db \
+sqlite3 ~/.local/share/bdo/history.db \
   "DELETE FROM commands WHERE timestamp < datetime('now', '-90 days')"
 
 # Reset all data
-rm ~/.local/share/rtk/history.db
+rm ~/.local/share/bdo/history.db
 # Next bdo command will recreate database
 ```
 
@@ -341,7 +341,7 @@ rm ~/.local/share/rtk/history.db
 ### GitHub Actions CI/CD
 
 ```yaml
-# .github/workflows/rtk-stats.yml
+# .github/workflows/bdo-stats.yml
 name: Bushido Stats Report
 on:
   schedule:
@@ -392,10 +392,10 @@ def send_rtk_stats():
 
 ```bash
 # Check if database exists
-ls -lh ~/.local/share/rtk/history.db
+ls -lh ~/.local/share/bdo/history.db
 
 # Check record count
-sqlite3 ~/.local/share/rtk/history.db "SELECT COUNT(*) FROM commands"
+sqlite3 ~/.local/share/bdo/history.db "SELECT COUNT(*) FROM commands"
 
 # Run a tracked command to generate data
 bdo git status
@@ -405,7 +405,7 @@ bdo git status
 
 ```bash
 # Check for pipe errors
-bdo gain --format json 2>&1 | tee /tmp/rtk-debug.log | jq .
+bdo gain --format json 2>&1 | tee /tmp/bdo-debug.log | jq .
 
 # Use release build to avoid warnings
 cargo build --release

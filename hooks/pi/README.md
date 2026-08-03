@@ -19,18 +19,18 @@ with other Pi extensions.
 - Calls `bdo rewrite` via `pi.exec`; mutates `event.input.command` in-place if rewrite differs
 - All error paths return `undefined` (pass through); Bushido never blocks execution
 - Version guard at load time: checks `bdo >= 0.23.0`; warns and registers no-op if too old or missing
-- Installed to `.pi/extensions/rtk.ts` by `bdo init --agent pi` (project-local) or `~/.pi/agent/extensions/rtk.ts` by `bdo init --agent pi --global`
+- Installed to `.pi/extensions/bdo.ts` by `bdo init --agent pi` (project-local) or `~/.pi/agent/extensions/bdo.ts` by `bdo init --agent pi --global`
 
 ## Uninstall
 
 ```bash
 # Remove project-local install (run from the project root)
 bdo init --uninstall --agent pi
-# → removes .pi/extensions/rtk.ts
+# → removes .pi/extensions/bdo.ts
 
 # Remove global install
 bdo init --uninstall --agent pi --global
-# → removes ~/.pi/agent/extensions/rtk.ts
+# → removes ~/.pi/agent/extensions/bdo.ts
 ```
 
 Uninstall is idempotent — re-running when nothing is installed is a no-op.
@@ -40,13 +40,13 @@ Only the extension file is managed by install/uninstall.
 
 ```bash
 # Load the extension directly without installing
-pi -e ./hooks/pi/rtk.ts
+pi -e ./hooks/pi/bdo.ts
 
 # Verify rewrites are active — ask the agent to run a command, then check history
-bdo gain --history   # should show rtk-prefixed commands with savings %
+bdo gain --history   # should show bdo-prefixed commands with savings %
 
 # Test BDO_DISABLED passthrough
-BDO_DISABLED=1 pi -e ./hooks/pi/rtk.ts
+BDO_DISABLED=1 pi -e ./hooks/pi/bdo.ts
 # → commands pass through unchanged; no rewrites in bdo gain --history
 
 # Test version guard — temporarily shadow bdo with a stub that prints "bdo 0.22.0"

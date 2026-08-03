@@ -1054,7 +1054,7 @@ Les sous-commandes non reconnues sont transmises directement ou detectees comme 
 
 Bushido enregistre chaque execution de commande dans une base SQLite :
 
-- **Emplacement :** `~/.local/share/rtk/tracking.db` (Linux), `~/Library/Application Support/rtk/tracking.db` (macOS)
+- **Emplacement :** `~/.local/share/bdo/history.db` (Linux), `~/Library/Application Support/bdo/history.db` (macOS)
 - **Retention :** 90 jours automatique
 - **Metriques :** tokens entree/sortie, pourcentage d'economies, temps d'execution, projet
 
@@ -1113,7 +1113,7 @@ Top commands:
 
 ### `bdo discover` -- Opportunites manquees
 
-**Objectif :** Analyse l'historique Claude Code pour trouver les commandes qui auraient pu etre optimisees par rtk.
+**Objectif :** Analyse l'historique Claude Code pour trouver les commandes qui auraient pu etre optimisees par Bushido.
 
 ```bash
 bdo discover                          # Projet courant, 30 derniers jours
@@ -1292,7 +1292,7 @@ exclude_commands = ["curl", "playwright"]
 
 ### Fichier de configuration
 
-**Emplacement :** `~/.config/bdo/config.toml` (Linux) ou `~/Library/Application Support/rtk/config.toml` (macOS)
+**Emplacement :** `~/.config/bdo/config.toml` (Linux) ou `~/Library/Application Support/bdo/config.toml` (macOS)
 
 **Commandes :**
 ```bash
@@ -1351,14 +1351,14 @@ Quand une commande echoue, Bushido sauvegarde automatiquement la sortie brute co
 
 **Fonctionnement :**
 1. La commande echoue (exit code != 0)
-2. Bushido sauvegarde la sortie brute dans `~/.local/share/rtk/tee/`
+2. Bushido sauvegarde la sortie brute dans `~/.local/share/bdo/tee/`
 3. Le chemin du fichier est affiche dans la sortie filtree
 4. Le LLM peut lire le fichier si besoin de plus de details
 
 **Sortie :**
 ```
 FAILED: 2/15 tests
-[full output: ~/.local/share/rtk/tee/1707753600_cargo_test.log]
+[full output: ~/.local/share/bdo/tee/1707753600_cargo_test.log]
 ```
 
 **Configuration :**

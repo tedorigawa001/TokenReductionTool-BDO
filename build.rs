@@ -7,7 +7,7 @@ fn main() {
     {
         // Clap + the full command graph can exceed the default 1 MiB Windows
         // main-thread stack during process startup. Reserve a larger stack for
-        // the CLI binary so `rtk.exe --version`, `--help`, and hook entry
+        // the CLI binary so `bdo.exe --version`, `--help`, and hook entry
         // points start reliably without requiring ad-hoc RUSTFLAGS.
         println!("cargo:rustc-link-arg=/STACK:8388608");
     }

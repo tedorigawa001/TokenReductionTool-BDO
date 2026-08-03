@@ -1,6 +1,6 @@
 # Contributing to bdo
 
-**Welcome!** We appreciate your interest in contributing to rtk.
+**Welcome!** We appreciate your interest in contributing to Bushido.
 
 ## Quick Links
 
@@ -44,7 +44,7 @@ Filters should be flag-aware: default output (no flags) gets aggressively compre
 
 The LLM doesn't know Bushido is involved for which commands, hooks rewrite commands silently. Bushido's output must be a valid, useful subset of the original tool's output, not a different format the LLM wouldn't expect. If an LLM parses `git diff` output, Bushido's filtered version must still look like `git diff` output.
 
-Don't invent new output formats. Don't add RTK-specific headers or markers in the default output. The filtered output should be indistinguishable from "a shorter version of the real command."
+Don't invent new output formats. Don't add Bushido-specific headers or markers in the default output. The filtered output should be indistinguishable from "a shorter version of the real command."
 
 ### Never Block
 

@@ -460,7 +460,7 @@ if command -v python3 &> /dev/null && command -v ruff &> /dev/null && command -v
 
   cat > pyproject.toml << 'PYEOF'
 [project]
-name = "rtk-bench"
+name = "bdo-bench"
 version = "0.1.0"
 
 [tool.ruff]

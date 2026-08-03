@@ -331,7 +331,7 @@ source ~/.bashrc  # or source ~/.zshrc
 ### Bushido command not available (e.g., vitest)
 ```bash
 # Check branch
-cd /path/to/rtk
+cd /path/to/TokenReductionTool-BDO
 git branch
 
 # Switch to feat/vitest-support if needed

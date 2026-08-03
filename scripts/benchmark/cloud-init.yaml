@@ -262,7 +262,7 @@ runcmd:
   - |
     su - ubuntu -c '
     mkdir -p /tmp/test-git && cd /tmp/test-git
-    git init && git config user.email "test@rtk.dev" && git config user.name "Bushido Test"
+    git init && git config user.email "test@bdo.dev" && git config user.name "Bushido Test"
     for i in $(seq 1 20); do echo "line $i" >> file.txt && git add file.txt && git commit -m "feat: commit number $i"; done
     echo "modified" >> file.txt && echo "new file" > new.txt
     '

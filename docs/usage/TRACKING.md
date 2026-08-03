@@ -15,7 +15,7 @@ Comprehensive documentation for Bushido's token savings tracking system.
 ## Overview
 
 Bushido's tracking system records every command execution to provide analytics on token savings. The system:
-- Stores command history in SQLite (~/.local/share/rtk/tracking.db)
+- Stores command history in SQLite (`~/.local/share/bdo/history.db`)
 - Tracks input/output tokens, savings percentage, and execution time
 - Automatically cleans up records older than 90 days
 - Provides aggregation APIs (daily/weekly/monthly)
@@ -36,7 +36,7 @@ TimedExecution::track(original_cmd, rtk_cmd, input, output)
   ↓
 Tracker::record(original_cmd, rtk_cmd, input_tokens, output_tokens, exec_time_ms)
   ↓
-SQLite database (~/.local/share/rtk/tracking.db)
+SQLite database (`~/.local/share/bdo/history.db`)
   ↓
 Aggregation APIs (get_summary, get_all_days, etc.)
   ↓
@@ -45,9 +45,9 @@ CLI output (bdo gain) or JSON/CSV export
 
 ### Storage Location
 
-- **Linux**: `~/.local/share/rtk/tracking.db`
-- **macOS**: `~/Library/Application Support/rtk/tracking.db`
-- **Windows**: `%APPDATA%\bdo\tracking.db`
+- **Linux**: `~/.local/share/bdo/history.db`
+- **macOS**: `~/Library/Application Support/bdo/history.db`
+- **Windows**: `%APPDATA%\bdo\history.db`
 
 ### Data Retention
 
@@ -356,7 +356,7 @@ date,commands,input_tokens,output_tokens,saved_tokens,savings_pct,total_time_ms,
 ### GitHub Actions - Track Savings in CI
 
 ```yaml
-# .github/workflows/track-rtk-savings.yml
+# .github/workflows/track-bdo-savings.yml
 name: Track Bushido Savings
 
 on:
@@ -373,22 +373,22 @@ jobs:
 
       - name: Export weekly stats
         run: |
-          bdo gain --weekly --format json > rtk-weekly.json
-          cat rtk-weekly.json
+          bdo gain --weekly --format json > bdo-weekly.json
+          cat bdo-weekly.json
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
-          name: rtk-metrics
-          path: rtk-weekly.json
+          name: bdo-metrics
+          path: bdo-weekly.json
 
       - name: Post to Slack
         if: success()
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
-          SAVINGS=$(jq -r '.[0].saved_tokens' rtk-weekly.json)
-          PCT=$(jq -r '.[0].savings_pct' rtk-weekly.json)
+          SAVINGS=$(jq -r '.[0].saved_tokens' bdo-weekly.json)
+          PCT=$(jq -r '.[0].savings_pct' bdo-weekly.json)
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\":\"📊 Bushido Weekly: ${SAVINGS} tokens saved (${PCT}%)\"}" \
             $SLACK_WEBHOOK
@@ -422,13 +422,13 @@ def export_to_datadog(metrics):
 
     for day in metrics.get("daily", []):
         datadog.api.Metric.send(
-            metric="rtk.tokens_saved",
+            metric="bdo.tokens_saved",
             points=[(datetime.now().timestamp(), day["saved_tokens"])],
             tags=[f"date:{day['date']}"]
         )
 
         datadog.api.Metric.send(
-            metric="rtk.savings_pct",
+            metric="bdo.savings_pct",
             points=[(datetime.now().timestamp(), day["savings_pct"])],
             tags=[f"date:{day['date']}"]
         )
@@ -540,7 +540,7 @@ let _ = conn.execute(
 
 - **Local storage only**: Tracking database never leaves the machine
 - **Telemetry requires consent**: Bushido can send a daily anonymous usage ping (version, OS, command counts, token savings). Disabled by default, requires explicit consent via `bdo init` or `bdo telemetry enable`. Manage with `bdo telemetry status/disable/forget`. Override: `BDO_TELEMETRY_DISABLED=1`
-- **User control**: Users can delete `~/.local/share/rtk/tracking.db` anytime
+- **User control**: Users can delete `~/.local/share/bdo/history.db` anytime
 - **90-day retention**: Old data automatically purged
 
 ## Troubleshooting
@@ -549,15 +549,15 @@ let _ = conn.execute(
 
 If you see "database is locked" errors:
 - Ensure only one Bushido process writes at a time
-- Check file permissions on `~/.local/share/rtk/tracking.db`
-- Delete and recreate: `rm ~/.local/share/rtk/tracking.db && bdo gain`
+- Check file permissions on `~/.local/share/bdo/history.db`
+- Delete and recreate: `rm ~/.local/share/bdo/history.db && bdo gain`
 
 ### Missing exec_time_ms column
 
 Older databases may not have the `exec_time_ms` column. Bushido automatically migrates on first use, but you can force it:
 
 ```bash
-sqlite3 ~/.local/share/rtk/tracking.db \
+sqlite3 ~/.local/share/bdo/history.db \
   "ALTER TABLE commands ADD COLUMN exec_time_ms INTEGER DEFAULT 0"
 ```
 

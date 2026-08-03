@@ -30,7 +30,7 @@ Zero config changes to your workflow. The hook handles everything automatically.
 
 ## What Bushido optimizes
 
-Dozens of commands across all major ecosystems — Git, Cargo/Rust, JavaScript, Python, Go, Ruby, .NET, Docker/Kubernetes, and more. See [What Bushido Optimizes](./resources/what-rtk-covers.md) for the full list with savings percentages.
+Dozens of commands across all major ecosystems — Git, Cargo/Rust, JavaScript, Python, Go, Ruby, .NET, Docker/Kubernetes, and more. See [What Bushido Optimizes](./resources/what-bdo-covers.md) for the full list with savings percentages.
 
 ## Get started
 

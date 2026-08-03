@@ -111,9 +111,9 @@ const BDO_INSTRUCTIONS: &str = r##"<!-- bdo-instructions v2 -->
 
 ## Golden Rule
 
-**Always prefix commands with `rtk`**. If Bushido has a dedicated filter, it uses it. If not, it passes through unchanged. This means Bushido is always safe to use.
+**Always prefix commands with `bdo`**. If Bushido has a dedicated filter, it uses it. If not, it passes through unchanged. This means Bushido is always safe to use.
 
-**Important**: Even in command chains with `&&`, use `rtk`:
+**Important**: Even in command chains with `&&`, use `bdo`:
 ```bash
 # ❌ Wrong
 git add . && git commit -m "msg" && git push
@@ -1662,7 +1662,7 @@ fn run_hermes_mode_at(hermes_home: &Path, ctx: InitContext) -> Result<()> {
         println!("\nBushido configured for Hermes.\n");
         println!("  Plugin: {}", plugin_dir.display());
         println!("  Config: {}", config_path.display());
-        println!("  Hermes will now rewrite terminal commands through rtk.");
+        println!("  Hermes will now rewrite terminal commands through bdo.");
         println!("  Restart Hermes. Test with: git status\n");
     }
 
@@ -3693,11 +3693,11 @@ const COPILOT_HOOK_JSON: &str = r#"{
 const COPILOT_INSTRUCTIONS: &str = r#"<!-- bdo-instructions v2 -->
 # Bushido — Token-Optimized CLI
 
-**rtk** is a CLI proxy that filters and compresses command outputs, saving 60-90% tokens.
+**bdo** is a CLI proxy that filters and compresses command outputs, saving 60-90% tokens.
 
 ## Rule
 
-Always prefix shell commands with `rtk`:
+Always prefix shell commands with `bdo`:
 
 ```bash
 # Instead of:              Use:
@@ -4093,6 +4093,10 @@ mod tests {
         assert!(BDO_INSTRUCTIONS.contains(BDO_BLOCK_START));
         assert!(BDO_INSTRUCTIONS.contains("bdo cargo test"));
         assert!(BDO_INSTRUCTIONS.contains(BDO_BLOCK_END));
+        assert!(
+            !BDO_INSTRUCTIONS.contains("rtk"),
+            "Generated Claude instructions must not contain the legacy rtk command name"
+        );
         assert!(BDO_INSTRUCTIONS.len() > 4000);
     }
 
@@ -6259,6 +6263,10 @@ mod tests {
         assert!(content.contains(BDO_BLOCK_START));
         assert!(content.contains(BDO_BLOCK_END));
         assert!(content.contains("bdo cargo test"));
+        assert!(
+            !content.contains("rtk"),
+            "Generated Copilot instructions must not contain the legacy rtk command name"
+        );
     }
 
     #[test]

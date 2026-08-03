@@ -83,8 +83,7 @@ The following files are considered **high-risk** and trigger mandatory 2-reviewe
 Use the comprehensive security review process:
 
 ```bash
-# If Claude Code available, run the dedicated skill:
-/rtk-pr-security <PR_NUMBER>
+# If a repository security-review skill is configured, run it for the PR.
 
 # Manual review (without Claude):
 gh pr view <PR_NUMBER>

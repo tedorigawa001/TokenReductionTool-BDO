@@ -262,7 +262,7 @@ Command received
 
 ### 3.6 Token Tracking
 
-Every command execution records metrics to SQLite (`~/.local/share/rtk/tracking.db`):
+Every command execution records metrics to SQLite (`~/.local/share/bdo/history.db`):
 
 - Input tokens (raw output size) and output tokens (filtered size)
 - Savings percentage, execution time, project path
@@ -277,7 +277,7 @@ Analytics commands (`bdo gain`, `bdo cc-economics`, `bdo session`) query this da
 
 On command failure (non-zero exit code):
 
-1. Raw unfiltered output is saved to `~/.local/share/rtk/tee/{epoch}_{slug}.log`
+1. Raw unfiltered output is saved to `~/.local/share/bdo/tee/{epoch}_{slug}.log`
 2. A hint line is printed: `[full output: ~/.../tee/1234_cargo_test.log]`
 3. LLM agents can re-read the file instead of re-running the failed command
 

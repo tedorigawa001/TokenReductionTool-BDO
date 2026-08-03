@@ -12,7 +12,7 @@ sidebar:
 | Platform | Path |
 |----------|------|
 | Linux | `~/.config/bdo/config.toml` |
-| macOS | `~/Library/Application Support/rtk/config.toml` |
+| macOS | `~/Library/Application Support/bdo/config.toml` |
 
 ```bash
 bdo config            # show current configuration
@@ -33,7 +33,7 @@ emoji = true                # use emojis in output
 max_width = 120             # maximum output width
 
 [filters]
-# These apply to file-reading commands (ls, find, grep, cat/rtk read).
+# These apply to file-reading commands (ls, find, grep, cat/bdo read).
 # Paths matching these patterns are excluded from output, keeping noise low.
 ignore_dirs = [".git", "node_modules", "target", "__pycache__", ".venv", "vendor"]
 ignore_files = ["*.lock", "*.min.js", "*.min.css"]
@@ -69,7 +69,7 @@ When a command fails, Bushido saves the full raw output to a local file and prin
 
 ```
 FAILED: 2/15 tests
-[full output: ~/.local/share/rtk/tee/1707753600_cargo_test.log]
+[full output: ~/.local/share/bdo/tee/1707753600_cargo_test.log]
 ```
 
 Your AI assistant can then read the file if it needs more detail, without re-running the command.

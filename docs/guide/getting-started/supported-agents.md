@@ -96,7 +96,7 @@ bdo init --global --gemini
 bdo init --global --opencode
 ```
 
-Creates `~/.config/opencode/plugins/rtk.ts`. Uses the `tool.execute.before` hook.
+Creates `~/.config/opencode/plugins/bdo.ts`. Uses the `tool.execute.before` hook.
 
 ### Pi
 
@@ -108,7 +108,7 @@ bdo init --agent pi
 bdo init --agent pi --global
 ```
 
-Creates `.pi/extensions/rtk.ts` (local) or `~/.pi/agent/extensions/rtk.ts` (global). Pi auto-discovers extensions from both paths on startup.
+Creates `.pi/extensions/bdo.ts` (local) or `~/.pi/agent/extensions/bdo.ts` (global). Pi auto-discovers extensions from both paths on startup.
 
 Uninstall:
 
@@ -161,7 +161,7 @@ bdo init --global --codex  # user-global (~/.codex/AGENTS.md)
 ### Kilo Code
 
 ```bash
-bdo init --agent kilocode    # creates .kilocode/rules/rtk-rules.md in current project
+bdo init --agent kilocode    # creates .kilocode/rules/bdo-rules.md in current project
 ```
 
 Kilo Code reads `.kilocode/rules/` as custom instructions. Bushido adds guidance telling Kilo Code to prefer `bdo <cmd>` over raw commands.
@@ -169,7 +169,7 @@ Kilo Code reads `.kilocode/rules/` as custom instructions. Bushido adds guidance
 ### Google Antigravity
 
 ```bash
-bdo init --agent antigravity    # creates .agents/rules/antigravity-rtk-rules.md in current project
+bdo init --agent antigravity    # creates .agents/rules/antigravity-bdo-rules.md in current project
 ```
 
 Antigravity reads `.agents/rules/` as custom instructions. Bushido adds guidance telling Antigravity to prefer `bdo <cmd>` over raw commands.

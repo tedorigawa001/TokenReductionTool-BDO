@@ -137,7 +137,7 @@ SQLite INSERT:
   • savings_pct: 96.0
   • timestamp: now()
 
-Database: ~/.local/share/rtk/history.db
+Database: ~/.local/share/bdo/history.db
 ```
 
 ### Verbosity Levels
@@ -665,7 +665,7 @@ Flow:
 
 4. STORAGE
    ───────
-   Database: ~/.local/share/rtk/history.db
+   Database: ~/.local/share/bdo/history.db
 
    Schema:
    ┌─────────────────────────────────────────┐

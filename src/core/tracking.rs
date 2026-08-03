@@ -6,7 +6,7 @@
 //!
 //! # Architecture
 //!
-//! - Storage: SQLite database (~/.local/share/bdo/tracking.db)
+//! - Storage: SQLite database (~/.local/share/bdo/history.db)
 //! - Retention: 90-day automatic cleanup
 //! - Redaction: known secret formats are masked before persistence (see [`crate::core::redact`])
 //! - Metrics: Input/output tokens, savings %, execution time
@@ -116,9 +116,9 @@ use super::constants::{DEFAULT_HISTORY_DAYS, HISTORY_DB, BDO_DATA_DIR};
 ///
 /// # Database Location
 ///
-/// - Linux: `~/.local/share/bdo/tracking.db`
-/// - macOS: `~/Library/Application Support/rtk/tracking.db`
-/// - Windows: `%APPDATA%\rtk\tracking.db`
+/// - Linux: `~/.local/share/bdo/history.db`
+/// - macOS: `~/Library/Application Support/bdo/history.db`
+/// - Windows: `%APPDATA%\bdo\history.db`
 ///
 /// # Examples
 ///

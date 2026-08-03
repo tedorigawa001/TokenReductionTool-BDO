@@ -8,4 +8,4 @@
 - Intercepts `tool.execute.before` events, calls `bdo rewrite` as a subprocess
 - Uses `.quiet().nothrow()` to silently ignore failures
 - Mutates `args.command` in-place if rewrite differs from original
-- Installed to `~/.config/opencode/plugins/rtk.ts` by `bdo init -g --opencode`
+- Installed to `~/.config/opencode/plugins/bdo.ts` by `bdo init -g --opencode`

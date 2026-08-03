@@ -30,7 +30,7 @@ LLM agent integration layer that installs, validates, and executes command-rewri
 | Cline | `bdo init --agent cline` | `.clinerules` | -- |
 | Codex | `bdo init --codex` | Bushido.md in `$CODEX_HOME` or `~/.codex` | AGENTS.md |
 | Cursor | `bdo init -g --agent cursor` | Cursor hook | hooks.json |
-| Pi | `bdo init --agent pi` | `.pi/extensions/rtk.ts` | -- |
+| Pi | `bdo init --agent pi` | `.pi/extensions/bdo.ts` | -- |
 | Hermes | `bdo init --agent hermes` | Python plugin in `~/.hermes/plugins/bdo-rewrite/` | `config.yaml` `plugins.enabled` |
 
 

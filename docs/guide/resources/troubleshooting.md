@@ -68,9 +68,9 @@ bdo --version
 
 ## Bushido on Windows
 
-### Double-clicking rtk.exe does nothing
+### Double-clicking bdo.exe does nothing
 
-**Symptom:** You double-click `rtk.exe`, a terminal flashes and closes instantly.
+**Symptom:** You double-click `bdo.exe`, a terminal flashes and closes instantly.
 
 **Cause:** Bushido is a command-line tool. With no arguments, it prints usage and exits. The console window opens and closes before you can read anything.
 
@@ -81,18 +81,11 @@ bdo --version
 
 ### Hook not working (no auto-rewrite)
 
-**Symptom:** `bdo init -g` shows "Falling back to --claude-md mode" on Windows.
+**Symptom:** Commands are not rewritten after running `bdo init -g` on Windows.
 
-**Cause:** The auto-rewrite hook (`bdo-rewrite.sh`) requires a Unix shell. Native Windows doesn't have one.
+**Cause:** The native hook requires `bdo.exe` to be available on `PATH`, and the IDE or agent must be restarted after registration.
 
-**Fix:** Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) for full hook support:
-```bash
-# Inside WSL
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/refs/heads/master/install.sh | sh
-bdo init -g    # full hook mode works in WSL
-```
-
-On native Windows, Bushido falls back to CLAUDE.md injection. Your AI assistant gets Bushido instructions but won't auto-rewrite commands. It can still use Bushido manually: `bdo cargo test`, `bdo git status`, etc.
+**Fix:** Confirm `bdo --version` works in the same environment as the IDE, rerun `bdo init -g`, and restart the IDE or agent. WSL remains supported, but is not required for the native binary hook.
 
 ### Node.js tools not found
 

@@ -53,5 +53,5 @@ When Copilot CLI adds `updatedInput` support, only `bdo hook` needs updating —
 | Claude Code           | `PreToolUse` hook with `updatedInput`   | Transparent rewrite      | `hooks/bdo-rewrite.sh`             |
 | VS Code Copilot Chat  | `PreToolUse` hook with `updatedInput`   | Transparent rewrite      | `.github/hooks/bdo-rewrite.json`   |
 | GitHub Copilot CLI    | `PreToolUse` deny-with-suggestion       | Denial + retry           | `.github/hooks/bdo-rewrite.json`   |
-| OpenCode              | Plugin `tool.execute.before`            | Transparent rewrite      | `hooks/opencode-rtk.ts`            |
+| OpenCode              | Plugin `tool.execute.before`            | Transparent rewrite      | `hooks/opencode/bdo.ts`            |
 | (any)                 | Custom instructions                     | Prompt-level guidance    | `.github/copilot-instructions.md`  |

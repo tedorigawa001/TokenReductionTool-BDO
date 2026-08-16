@@ -5,6 +5,36 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.12] (2026-08-16)
+
+### Fixes
+
+- **CLI**: bdo-only subcommands no longer fall back to running their name as
+  an external program when argument parsing fails. `bdo map --badflag` used to
+  report "not found in PATH" (exit 127) instead of clap's usage error; now
+  `map`, `deps`, `json`, `smart`, `telemetry`, `read`, and `log` all show the
+  real error.
+
+  `log` was the notable one: macOS ships an unrelated `/usr/bin/log` (Apple's
+  unified logging), so a mistyped flag on `bdo log` silently invoked a
+  different program with your arguments and exited 0 — reading as success to
+  anything gating on the exit code.
+
+### Chores
+
+- CI now gates on `cargo fmt --all --check`, `cargo clippy --all-targets -D
+  warnings`, and `cargo test`, on Linux and Windows. The Windows leg exists
+  because 0.44.7's release was broken by a Windows-only lint that nothing
+  caught until tag time.
+
+## [0.44.11] (2026-08-03)
+
+### Fixes
+
+- Replaced remaining `rtk` references with `bdo` across docs, comments, and the
+  hook instruction templates written into agent config, with regression tests
+  asserting the generated instructions no longer mention the legacy name.
+
 ## [0.44.10] (2026-07-24)
 
 ### Chores

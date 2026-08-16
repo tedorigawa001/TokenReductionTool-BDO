@@ -63,7 +63,10 @@ pub fn stale_markers() -> Vec<(String, &'static str)> {
             concat!("cargo install ", "bdo").to_string(),
             "wrong crate name (use --git or `bushido`)",
         ),
-        (concat!("rtk", "-rewrite").to_string(), "legacy hook script name"),
+        (
+            concat!("rtk", "-rewrite").to_string(),
+            "legacy hook script name",
+        ),
         (
             concat!("rtk", "-hook-version").to_string(),
             "legacy hook version marker",
@@ -77,7 +80,10 @@ pub fn stale_markers() -> Vec<(String, &'static str)> {
             concat!("blob/", "master").to_string(),
             "stale master-branch URL (default branch is main; use raw for downloads)",
         ),
-        (concat!("feat/", "all-features").to_string(), "obsolete fork branch"),
+        (
+            concat!("feat/", "all-features").to_string(),
+            "obsolete fork branch",
+        ),
     ]
 }
 
@@ -141,7 +147,9 @@ pub fn scan_doc_command_drift(
                 if hits.len() < cap {
                     hits.push((
                         lineno + 1,
-                        format!("`bdo {cmd}` — not a known subcommand (bdo --help doesn't list it)"),
+                        format!(
+                            "`bdo {cmd}` — not a known subcommand (bdo --help doesn't list it)"
+                        ),
                     ));
                 }
             }
@@ -156,8 +164,14 @@ mod tests {
 
     #[test]
     fn test_artifact_reason_dir_segment_vs_substring() {
-        assert_eq!(artifact_reason("a/__pycache__/x.pyc"), Some("python bytecode dir"));
-        assert_eq!(artifact_reason("target/debug/bdo"), Some("cargo build output"));
+        assert_eq!(
+            artifact_reason("a/__pycache__/x.pyc"),
+            Some("python bytecode dir")
+        );
+        assert_eq!(
+            artifact_reason("target/debug/bdo"),
+            Some("cargo build output")
+        );
         assert_eq!(artifact_reason("src/foo.bak"), Some("backup file"));
         // `mytarget/` must not trip the `target/` segment rule.
         assert_eq!(artifact_reason("src/mytarget/x.rs"), None);

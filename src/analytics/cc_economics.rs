@@ -466,7 +466,10 @@ fn display_summary(tracker: &Tracker, verbose: u8) -> Result<()> {
     );
     println!();
 
-    println!("  Bushido commands:                 {}", totals.rtk_commands);
+    println!(
+        "  Bushido commands:                 {}",
+        totals.rtk_commands
+    );
     println!(
         "  Tokens saved:                 {}",
         format_tokens(totals.rtk_saved_tokens)

@@ -1,6 +1,6 @@
 //! Reads user settings from config.toml.
 
-use super::constants::{CONFIG_TOML, DEFAULT_HISTORY_DAYS, BDO_DATA_DIR};
+use super::constants::{BDO_DATA_DIR, CONFIG_TOML, DEFAULT_HISTORY_DAYS};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

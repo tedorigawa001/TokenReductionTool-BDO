@@ -85,7 +85,9 @@ pub fn changed_files(against: Option<&str>, pathspec: Option<&Path>) -> Result<V
 
 /// Absolute path to the repository root (`git rev-parse --show-toplevel`).
 pub fn repo_root() -> Result<PathBuf> {
-    Ok(PathBuf::from(git_stdout(&["rev-parse", "--show-toplevel"])?.trim()))
+    Ok(PathBuf::from(
+        git_stdout(&["rev-parse", "--show-toplevel"])?.trim(),
+    ))
 }
 
 /// Every git-tracked file in the **whole repo** (NUL-safe), as repo-root-relative
@@ -174,11 +176,26 @@ mod tests {
     #[test]
     fn test_rust_test_targets_maps_stems() {
         let changes = vec![
-            Change { status: "M".into(), path: "src/core/outline.rs".into() },
-            Change { status: "M".into(), path: "src/cmds/system/read.rs".into() },
-            Change { status: "M".into(), path: "src/main.rs".into() }, // skipped
-            Change { status: "M".into(), path: "README.md".into() },   // skipped
-            Change { status: "D".into(), path: "src/core/gone.rs".into() }, // deleted, skipped
+            Change {
+                status: "M".into(),
+                path: "src/core/outline.rs".into(),
+            },
+            Change {
+                status: "M".into(),
+                path: "src/cmds/system/read.rs".into(),
+            },
+            Change {
+                status: "M".into(),
+                path: "src/main.rs".into(),
+            }, // skipped
+            Change {
+                status: "M".into(),
+                path: "README.md".into(),
+            }, // skipped
+            Change {
+                status: "D".into(),
+                path: "src/core/gone.rs".into(),
+            }, // deleted, skipped
         ];
         let t = rust_test_targets(&changes);
         assert!(t.contains("outline"));

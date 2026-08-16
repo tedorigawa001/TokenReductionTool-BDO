@@ -22,7 +22,7 @@
 ///   6. head/tail_lines      — keep first/last N lines
 ///   7. max_lines            — absolute line cap
 ///   8. on_empty             — message if result is empty
-use super::constants::{FILTERS_TOML, BDO_DATA_DIR};
+use super::constants::{BDO_DATA_DIR, FILTERS_TOML};
 use lazy_static::lazy_static;
 use regex::{Regex, RegexSet};
 use serde::Deserialize;

@@ -431,7 +431,9 @@ pub fn run_streaming(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| filter.flush()))
                     .unwrap_or_else(|_| {
                         filter_panicked = true;
-                        eprintln!("[bdo] warning: streaming filter flush panicked — skipping summary");
+                        eprintln!(
+                            "[bdo] warning: streaming filter flush panicked — skipping summary"
+                        );
                         String::new()
                     })
             };
@@ -531,13 +533,14 @@ pub fn run_streaming(
     let raw = format!("{}{}", raw_stdout, raw_stderr);
 
     if let Some(mut f) = saved_filter {
-        let post = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            f.on_exit(exit_code, &raw)
-        }))
-        .unwrap_or_else(|_| {
-            eprintln!("[bdo] warning: streaming filter on_exit panicked — skipping summary");
-            None
-        });
+        let post =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f.on_exit(exit_code, &raw)))
+                .unwrap_or_else(|_| {
+                    eprintln!(
+                        "[bdo] warning: streaming filter on_exit panicked — skipping summary"
+                    );
+                    None
+                });
         if let Some(post) = post {
             filtered.push_str(&post);
             let mut dest: Box<dyn Write> = if filter_fd_is_stderr {
@@ -776,7 +779,11 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(result.exit_code, 0, "exit code must survive the panic");
-        assert!(result.filtered.contains("good1"), "got: {}", result.filtered);
+        assert!(
+            result.filtered.contains("good1"),
+            "got: {}",
+            result.filtered
+        );
         assert!(
             result.filtered.contains("BOOM"),
             "panicking line must pass through raw, got: {}",

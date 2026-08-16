@@ -186,28 +186,21 @@ fn decide_from_verdict_for_agent(
     }
 }
 
-fn decide_hook_action_for_agent(
-    cmd: &str,
-    host: permissions::Host,
-    agent: &str,
-) -> HookDecision {
+fn decide_hook_action_for_agent(cmd: &str, host: permissions::Host, agent: &str) -> HookDecision {
     decide_from_verdict_for_agent(cmd, permissions::check_command_for(cmd, host), agent)
 }
 
 fn handle_vscode(cmd: &str) -> Result<()> {
-    let (decision, rewritten) = match decide_hook_action_for_agent(
-        cmd,
-        permissions::Host::Claude,
-        "copilot",
-    ) {
-        HookDecision::Deny => {
-            audit_log("deny", cmd, "");
-            return Ok(());
-        }
-        HookDecision::Defer => return Ok(()),
-        HookDecision::AllowRewrite(r) => ("allow", r),
-        HookDecision::AskRewrite(r) => ("ask", r),
-    };
+    let (decision, rewritten) =
+        match decide_hook_action_for_agent(cmd, permissions::Host::Claude, "copilot") {
+            HookDecision::Deny => {
+                audit_log("deny", cmd, "");
+                return Ok(());
+            }
+            HookDecision::Defer => return Ok(()),
+            HookDecision::AllowRewrite(r) => ("allow", r),
+            HookDecision::AskRewrite(r) => ("ask", r),
+        };
 
     audit_log("rewrite", cmd, &rewritten);
 
@@ -760,7 +753,10 @@ mod tests {
         // the BDO_AGENT attribution (agents following the instructions file
         // type `bdo …` directly and would otherwise show up as direct usage).
         let r = copilot_cli_response("bdo cargo test", &cli_args("bdo cargo test")).unwrap();
-        assert_eq!(r["modifiedArgs"]["command"], "BDO_AGENT=copilot bdo cargo test");
+        assert_eq!(
+            r["modifiedArgs"]["command"],
+            "BDO_AGENT=copilot bdo cargo test"
+        );
     }
 
     #[test]
@@ -783,7 +779,10 @@ mod tests {
     #[cfg(not(windows))]
     fn test_copilot_cli_rewrite_carries_attribution() {
         let r = copilot_cli_response("cargo test", &cli_args("cargo test")).unwrap();
-        assert_eq!(r["modifiedArgs"]["command"], "BDO_AGENT=copilot bdo cargo test");
+        assert_eq!(
+            r["modifiedArgs"]["command"],
+            "BDO_AGENT=copilot bdo cargo test"
+        );
     }
 
     #[test]
@@ -917,7 +916,10 @@ mod tests {
     #[test]
     fn test_gemini_rewrite_json_omits_decision_and_merges_command() {
         let v: Value = serde_json::from_str(&gemini_rewrite_json("bdo git status")).unwrap();
-        assert!(v.get("decision").is_none(), "rewrite must not set a decision");
+        assert!(
+            v.get("decision").is_none(),
+            "rewrite must not set a decision"
+        );
         assert_eq!(
             v["hookSpecificOutput"]["tool_input"]["command"],
             "bdo git status"

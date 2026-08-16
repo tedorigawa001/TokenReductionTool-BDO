@@ -438,8 +438,18 @@ mod tests {
         )
         .expect("tee file");
 
-        assert_eq!(std::fs::metadata(tmpdir.path()).unwrap().permissions().mode() & 0o777, 0o700);
-        assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(tmpdir.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     // An overridden tee dir (BDO_TEE_DIR / config) is user-managed: its mode
@@ -461,8 +471,18 @@ mod tests {
         )
         .expect("tee file");
 
-        assert_eq!(std::fs::metadata(tmpdir.path()).unwrap().permissions().mode() & 0o777, 0o755);
-        assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(tmpdir.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     // Raw output is recovery data, but secrets are deliberately not
@@ -490,7 +510,10 @@ mod tests {
             "token persisted unredacted"
         );
         assert!(written.contains("[REDACTED]"));
-        assert!(written.contains("padding line"), "non-secret content must survive");
+        assert!(
+            written.contains("padding line"),
+            "non-secret content must survive"
+        );
     }
 
     #[test]
@@ -498,7 +521,14 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let big_output = "x".repeat(2000);
         // Set max_file_size to 1000 bytes
-        let result = write_tee_file(&big_output, "test", tmpdir.path(), 1000, 20, PathSource::Default);
+        let result = write_tee_file(
+            &big_output,
+            "test",
+            tmpdir.path(),
+            1000,
+            20,
+            PathSource::Default,
+        );
         assert!(result.is_some());
 
         let path = result.unwrap();
@@ -518,7 +548,14 @@ mod tests {
         assert_eq!(japanese.len(), 999);
 
         // Truncate at 998 — falls in the middle of the 333rd character
-        let result = write_tee_file(&japanese, "test_utf8", tmpdir.path(), 998, 20, PathSource::Default);
+        let result = write_tee_file(
+            &japanese,
+            "test_utf8",
+            tmpdir.path(),
+            998,
+            20,
+            PathSource::Default,
+        );
         assert!(result.is_some());
 
         let path = result.unwrap();
@@ -536,7 +573,14 @@ mod tests {
         assert_eq!(emojis.len(), 400);
 
         // Truncate at 201 — falls mid-emoji (4-byte boundary is at 200, 204)
-        let result = write_tee_file(&emojis, "test_emoji", tmpdir.path(), 201, 20, PathSource::Default);
+        let result = write_tee_file(
+            &emojis,
+            "test_emoji",
+            tmpdir.path(),
+            201,
+            20,
+            PathSource::Default,
+        );
         assert!(result.is_some());
 
         let path = result.unwrap();

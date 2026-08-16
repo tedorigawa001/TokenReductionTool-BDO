@@ -729,10 +729,14 @@ pub fn uninstall(
     let rtk_md_path = claude_dir.join(BDO_MD);
     if rtk_md_path.exists() {
         if dry_run {
-            println!("[dry-run] would remove Bushido.md: {}", rtk_md_path.display());
+            println!(
+                "[dry-run] would remove Bushido.md: {}",
+                rtk_md_path.display()
+            );
         } else {
-            fs::remove_file(&rtk_md_path)
-                .with_context(|| format!("Failed to remove Bushido.md: {}", rtk_md_path.display()))?;
+            fs::remove_file(&rtk_md_path).with_context(|| {
+                format!("Failed to remove Bushido.md: {}", rtk_md_path.display())
+            })?;
         }
         removed.push(format!("Bushido.md: {}", rtk_md_path.display()));
     }
@@ -882,10 +886,14 @@ fn uninstall_codex_at(codex_dir: &Path, ctx: InitContext) -> Result<Vec<String>>
     let rtk_md_path = codex_dir.join(BDO_MD);
     if rtk_md_path.exists() {
         if dry_run {
-            println!("[dry-run] would remove Bushido.md: {}", rtk_md_path.display());
+            println!(
+                "[dry-run] would remove Bushido.md: {}",
+                rtk_md_path.display()
+            );
         } else {
-            fs::remove_file(&rtk_md_path)
-                .with_context(|| format!("Failed to remove Bushido.md: {}", rtk_md_path.display()))?;
+            fs::remove_file(&rtk_md_path).with_context(|| {
+                format!("Failed to remove Bushido.md: {}", rtk_md_path.display())
+            })?;
             if verbose > 0 {
                 eprintln!("Removed Bushido.md: {}", rtk_md_path.display());
             }
@@ -2169,8 +2177,9 @@ fn run_codex_mode_with_paths(
                 agents_md_path.display()
             );
         } else {
-            atomic_write(&agents_md_path, &new_content)
-                .with_context(|| format!("Failed to write AGENTS.md: {}", agents_md_path.display()))?;
+            atomic_write(&agents_md_path, &new_content).with_context(|| {
+                format!("Failed to write AGENTS.md: {}", agents_md_path.display())
+            })?;
         }
     }
 
@@ -3310,7 +3319,9 @@ fn show_claude_config() -> Result<()> {
 
     println!("\nUsage:");
     println!("  bdo init              # Full injection into local CLAUDE.md");
-    println!("  bdo init -g           # Hook + Bushido.md + @Bushido.md + settings.json (recommended)");
+    println!(
+        "  bdo init -g           # Hook + Bushido.md + @Bushido.md + settings.json (recommended)"
+    );
     println!("  bdo init -g --auto-patch    # Same as above but no prompt");
     println!("  bdo init -g --no-patch      # Skip settings.json (manual setup)");
     println!("  bdo init -g --uninstall     # Remove all Bushido artifacts");
@@ -3524,7 +3535,10 @@ fn patch_gemini_settings(
                 settings_path.display()
             );
         } else {
-            print!("Patch {} with Bushido hook? [y/N] ", settings_path.display());
+            print!(
+                "Patch {} with Bushido hook? [y/N] ",
+                settings_path.display()
+            );
             std::io::Write::flush(&mut std::io::stdout())?;
             let mut answer = String::new();
             std::io::stdin().read_line(&mut answer)?;
@@ -4220,19 +4234,35 @@ mod tests {
         fs::write(&agents, "# Team rules\n\n@/abs/path/Bushido.md\n").unwrap();
         fs::write(&bushido, "stale separate file").unwrap();
 
-        run_codex_mode_with_paths(agents.clone(), bushido.clone(), true, InitContext::default())
-            .unwrap();
+        run_codex_mode_with_paths(
+            agents.clone(),
+            bushido.clone(),
+            true,
+            InitContext::default(),
+        )
+        .unwrap();
 
         let content = fs::read_to_string(&agents).unwrap();
-        assert!(content.contains(BDO_BLOCK_START), "inline block added: {content}");
+        assert!(
+            content.contains(BDO_BLOCK_START),
+            "inline block added: {content}"
+        );
         assert!(content.contains(BDO_BLOCK_END));
-        assert!(!content.contains("@/abs/path/Bushido.md"), "legacy @ref removed");
+        assert!(
+            !content.contains("@/abs/path/Bushido.md"),
+            "legacy @ref removed"
+        );
         assert!(content.contains("# Team rules"), "user content preserved");
         assert!(!bushido.exists(), "legacy separate Bushido.md removed");
 
         // Idempotent: a second run leaves the file unchanged.
-        run_codex_mode_with_paths(agents.clone(), bushido.clone(), true, InitContext::default())
-            .unwrap();
+        run_codex_mode_with_paths(
+            agents.clone(),
+            bushido.clone(),
+            true,
+            InitContext::default(),
+        )
+        .unwrap();
         assert_eq!(content, fs::read_to_string(&agents).unwrap());
     }
 
@@ -4244,7 +4274,10 @@ mod tests {
         let rules_path = temp.path().join(".kilocode/rules/bdo-rules.md");
         assert!(rules_path.exists(), "Rules file should be created");
         let content = fs::read_to_string(&rules_path).unwrap();
-        assert!(content.contains("Bushido"), "Rules file should contain Bushido");
+        assert!(
+            content.contains("Bushido"),
+            "Rules file should contain Bushido"
+        );
     }
 
     #[test]
@@ -4269,7 +4302,10 @@ mod tests {
         let rules_path = temp.path().join(".agents/rules/antigravity-bdo-rules.md");
         assert!(rules_path.exists(), "Rules file should be created");
         let content = fs::read_to_string(&rules_path).unwrap();
-        assert!(content.contains("Bushido"), "Rules file should contain Bushido");
+        assert!(
+            content.contains("Bushido"),
+            "Rules file should contain Bushido"
+        );
     }
 
     #[test]
@@ -5511,7 +5547,6 @@ mod tests {
 
     // ─── Legacy migration tests ──────────────────────────────────────
 
-
     #[test]
     fn test_remove_legacy_cursor_entries_strips_old_script() {
         let mut root = serde_json::json!({
@@ -5593,7 +5628,10 @@ mod tests {
         with_claude_dir_override(&tmp, |claude_dir| {
             run_default_mode(true, PatchMode::Auto, false, InitContext::default()).unwrap();
 
-            assert!(claude_dir.join(BDO_MD).exists(), "Bushido.md must be created");
+            assert!(
+                claude_dir.join(BDO_MD).exists(),
+                "Bushido.md must be created"
+            );
             assert!(
                 claude_dir.join(CLAUDE_MD).exists(),
                 "CLAUDE.md must be created"
@@ -5616,7 +5654,10 @@ mod tests {
             run_default_mode(true, PatchMode::Auto, false, InitContext::default()).unwrap();
             uninstall(true, false, false, false, false, InitContext::default()).unwrap();
 
-            assert!(!claude_dir.join(BDO_MD).exists(), "Bushido.md must be removed");
+            assert!(
+                !claude_dir.join(BDO_MD).exists(),
+                "Bushido.md must be removed"
+            );
             let settings_content =
                 fs::read_to_string(claude_dir.join(SETTINGS_JSON)).unwrap_or_default();
             assert!(
@@ -5652,7 +5693,10 @@ mod tests {
 
             run_default_mode(true, PatchMode::Auto, false, InitContext::default()).unwrap();
 
-            assert!(claude_dir.join(BDO_MD).exists(), "Bushido.md must be created");
+            assert!(
+                claude_dir.join(BDO_MD).exists(),
+                "Bushido.md must be created"
+            );
             let settings = fs::read_to_string(claude_dir.join(SETTINGS_JSON)).unwrap();
             assert!(
                 settings.contains(CLAUDE_HOOK_COMMAND),
@@ -5802,7 +5846,10 @@ mod tests {
 
     #[test]
     fn test_uninstall_handles_both_artifacts() {
-        let content = format!("# Config\n\n@Bushido.md\n\n{}\n\nMore stuff", BDO_INSTRUCTIONS);
+        let content = format!(
+            "# Config\n\n@Bushido.md\n\n{}\n\nMore stuff",
+            BDO_INSTRUCTIONS
+        );
 
         let after_at_removal: String = content
             .lines()
@@ -6544,7 +6591,10 @@ mod tests {
         fs::create_dir_all(&github_dir).unwrap();
 
         let instructions_path = github_dir.join("copilot-instructions.md");
-        let malformed = format!("# My rules\n\n{}\nincomplete Bushido block\n", BDO_BLOCK_START);
+        let malformed = format!(
+            "# My rules\n\n{}\nincomplete Bushido block\n",
+            BDO_BLOCK_START
+        );
         fs::write(&instructions_path, &malformed).unwrap();
 
         let result = run_copilot_at(temp.path(), InitContext::default());
@@ -6569,7 +6619,10 @@ mod tests {
         fs::create_dir_all(&github_dir).unwrap();
 
         let instructions_path = github_dir.join("copilot-instructions.md");
-        let malformed = format!("# My rules\n\n{}\nincomplete Bushido block\n", BDO_BLOCK_START);
+        let malformed = format!(
+            "# My rules\n\n{}\nincomplete Bushido block\n",
+            BDO_BLOCK_START
+        );
         fs::write(&instructions_path, &malformed).unwrap();
 
         let hook_path = github_dir.join("hooks").join("bdo-rewrite.json");

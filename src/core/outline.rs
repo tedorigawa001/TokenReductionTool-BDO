@@ -574,7 +574,10 @@ pub fn multi(
 ";
         let o = signatures(src, &Language::Rust).unwrap();
         // The whole signature is exactly one line (no leftover param lines).
-        assert_eq!(o.trim(), "pub fn multi(a: T, b: U) -> Result<StreamResult> { … }");
+        assert_eq!(
+            o.trim(),
+            "pub fn multi(a: T, b: U) -> Result<StreamResult> { … }"
+        );
         assert_eq!(o.lines().count(), 1, "must be a single line: {o:?}");
     }
 
@@ -593,10 +596,16 @@ pub fn after() -> u32 {
 ";
         let o = signatures(src, &Language::Rust).unwrap();
         assert!(o.contains("pub fn empty() { … }"), "empty one-liner: {o}");
-        assert!(o.contains("pub fn one(a: u32) -> u32 { … }"), "one-liner body: {o}");
+        assert!(
+            o.contains("pub fn one(a: u32) -> u32 { … }"),
+            "one-liner body: {o}"
+        );
         assert!(o.contains("impl Marker { … }"), "one-line impl: {o}");
         // The following multi-line fn must still be picked up (no state leak).
-        assert!(o.contains("pub fn after() -> u32 { … }"), "next decl intact: {o}");
+        assert!(
+            o.contains("pub fn after() -> u32 { … }"),
+            "next decl intact: {o}"
+        );
         // No stray body content leaks through.
         assert!(!o.contains("a }"), "body elided: {o}");
     }
@@ -613,10 +622,17 @@ pub struct Wrap {
 }
 ";
         let o = signatures(src, &Language::Rust).unwrap();
-        assert!(o.contains("pub fn guard(x: u32) -> u32 { … }"), "nested braces: {o}");
+        assert!(
+            o.contains("pub fn guard(x: u32) -> u32 { … }"),
+            "nested braces: {o}"
+        );
         assert!(o.contains("pub struct Wrap { … }"), "struct intact: {o}");
         // The struct's closing `}` line must not turn into a stray ` { … }`.
-        assert_eq!(o.matches("{ … }").count(), 2, "exactly two collapsed blocks: {o}");
+        assert_eq!(
+            o.matches("{ … }").count(),
+            2,
+            "exactly two collapsed blocks: {o}"
+        );
     }
 
     // A top-level `const …; // comment` must not merge with the next decl: the
@@ -685,7 +701,10 @@ pub fn foo(x: u32) -> u32 {
 ";
         let o = outline(src, &Language::Rust).unwrap();
         assert!(o.contains("/// Doc for foo."), "doc kept: {o}");
-        assert!(o.contains("pub fn foo(x: u32) -> u32 { … }"), "sig+elision: {o}");
+        assert!(
+            o.contains("pub fn foo(x: u32) -> u32 { … }"),
+            "sig+elision: {o}"
+        );
         assert!(!o.contains("let y"), "body dropped: {o}");
     }
 
@@ -736,7 +755,10 @@ pub trait Shape {
         let o = outline(src, &Language::Rust).unwrap();
         assert!(o.contains("pub trait Shape {"), "{o}");
         assert!(o.contains("fn area(&self) -> f64;"), "decl-only kept: {o}");
-        assert!(o.contains("fn name(&self) -> &str { … }"), "default elided: {o}");
+        assert!(
+            o.contains("fn name(&self) -> &str { … }"),
+            "default elided: {o}"
+        );
         assert!(!o.contains("\"shape\""), "body dropped: {o}");
     }
 
@@ -769,7 +791,10 @@ impl<'a> Opts<'a> {
 }
 ";
         let o = outline(src, &Language::Rust).unwrap();
-        assert!(o.contains("pub fn with(label: &'a str) -> Self { … }"), "{o}");
+        assert!(
+            o.contains("pub fn with(label: &'a str) -> Self { … }"),
+            "{o}"
+        );
         assert!(!o.contains("Self { label }"), "body must be elided: {o}");
     }
 
@@ -787,7 +812,10 @@ pub fn after() -> u32 {
 ";
         let o = outline(src, &Language::Rust).unwrap();
         assert!(o.contains("pub fn open() -> char { … }"), "{o}");
-        assert!(o.contains("pub fn after() -> u32 { … }"), "after survived: {o}");
+        assert!(
+            o.contains("pub fn after() -> u32 { … }"),
+            "after survived: {o}"
+        );
     }
 
     #[test]
@@ -802,7 +830,10 @@ pub fn run_streaming(
 ";
         let o = outline(src, &Language::Rust).unwrap();
         assert!(o.contains("cmd: &mut Command,"), "params kept: {o}");
-        assert!(o.contains("-> Result<StreamResult> { … }"), "body elided: {o}");
+        assert!(
+            o.contains("-> Result<StreamResult> { … }"),
+            "body elided: {o}"
+        );
         assert!(!o.contains("do_work"), "body dropped: {o}");
     }
 
@@ -905,7 +936,10 @@ def has_colon(x=\"a:b\"):
         assert!(o.contains("def add(a, b): …"), "comment dropped: {o}");
         assert!(!o.contains("returns the sum"), "comment dropped: {o}");
         // A `:` inside a string default must not be mistaken for the header colon.
-        assert!(o.contains("def has_colon(x=\"a:b\"): …"), "string colon ignored: {o}");
+        assert!(
+            o.contains("def has_colon(x=\"a:b\"): …"),
+            "string colon ignored: {o}"
+        );
     }
 
     // In map mode a class collapses too: `class C: …` with its methods dropped.

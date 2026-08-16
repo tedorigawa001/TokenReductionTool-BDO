@@ -1014,10 +1014,7 @@ mod tests {
     fn test_attribute_agent_rejects_unsafe_agent_name() {
         // Never let a weird agent string turn into shell syntax.
         assert_eq!(attribute_agent("bdo git status", "a b"), "bdo git status");
-        assert_eq!(
-            attribute_agent("bdo git status", "x;rm"),
-            "bdo git status"
-        );
+        assert_eq!(attribute_agent("bdo git status", "x;rm"), "bdo git status");
         assert_eq!(attribute_agent("bdo git status", ""), "bdo git status");
     }
 

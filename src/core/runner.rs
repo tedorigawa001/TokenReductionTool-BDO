@@ -158,13 +158,9 @@ pub fn run(
     let cmd_label = format!("{} {}", tool_name, args_display);
 
     match mode {
-        RunMode::Filtered(filter_fn) => run_captured_filter(
-            cmd,
-            &cmd_label,
-            move |text, _| filter_fn(text),
-            opts,
-            timer,
-        ),
+        RunMode::Filtered(filter_fn) => {
+            run_captured_filter(cmd, &cmd_label, move |text, _| filter_fn(text), opts, timer)
+        }
         RunMode::FilteredWithExit(filter_fn) => run_captured_filter(
             cmd,
             &cmd_label,

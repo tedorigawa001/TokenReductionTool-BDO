@@ -45,7 +45,10 @@ fn review_respects_bdostaleignore() {
 
     // Without an ignore file, the marker in CHANGELOG.md is flagged.
     let before = run();
-    assert!(before.contains("CHANGELOG.md"), "changed list (before): {before}");
+    assert!(
+        before.contains("CHANGELOG.md"),
+        "changed list (before): {before}"
+    );
     assert!(
         before.contains("STALE MARKERS (1)"),
         "marker must be flagged before ignore: {before}"
@@ -55,7 +58,10 @@ fn review_respects_bdostaleignore() {
     // file is still reported in the CHANGED list (detection isn't hidden).
     fs::write(p.join(".bdostaleignore"), "CHANGELOG.md\n").unwrap();
     let after = run();
-    assert!(after.contains("CHANGELOG.md"), "still listed as changed (after): {after}");
+    assert!(
+        after.contains("CHANGELOG.md"),
+        "still listed as changed (after): {after}"
+    );
     assert!(
         after.contains("STALE MARKERS (0)"),
         "marker must be suppressed after ignore: {after}"

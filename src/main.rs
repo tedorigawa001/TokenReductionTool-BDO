@@ -2763,11 +2763,8 @@ mod tests {
     #[test]
     fn test_resolve_test_changed_clap_against_takes_precedence() {
         // A clap-parsed --against wins over a trailing one.
-        let (changed, against, _cmd) = resolve_test_changed_args(
-            true,
-            Some("main".to_string()),
-            sv(&["--against", "dev"]),
-        );
+        let (changed, against, _cmd) =
+            resolve_test_changed_args(true, Some("main".to_string()), sv(&["--against", "dev"]));
         assert!(changed);
         assert_eq!(against.as_deref(), Some("main"));
     }
@@ -2794,7 +2791,10 @@ mod tests {
         // Regression: `bdo grep pat path --all` sweeps --all into extra_args.
         let (all, args) = normalize_grep_args(false, false, sv(&["-i", "--all"]));
         assert!(all);
-        assert!(!args.iter().any(|a| a == "--all"), "must not forward --all to rg");
+        assert!(
+            !args.iter().any(|a| a == "--all"),
+            "must not forward --all to rg"
+        );
         assert_eq!(args, sv(&["-i"]));
     }
 

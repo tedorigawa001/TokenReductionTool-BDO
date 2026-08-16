@@ -55,7 +55,9 @@ fn run_status() -> Result<()> {
 
     println!();
     println!("Data controller: Bushido (github.com/tedorigawa001/TokenReductionTool)");
-    println!("Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md");
+    println!(
+        "Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md"
+    );
 
     Ok(())
 }

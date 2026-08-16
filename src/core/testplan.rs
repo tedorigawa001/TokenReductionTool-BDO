@@ -35,9 +35,7 @@ pub struct TestCommand {
 }
 
 /// JS/TS source extensions that a `*.test.*` file may cover.
-const JS_EXTS: &[&str] = &[
-    ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs",
-];
+const JS_EXTS: &[&str] = &[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"];
 
 /// Single-quote one value for the human-readable `display` string so paths or
 /// stems containing spaces still read as one token. This is cosmetic only —
@@ -202,7 +200,10 @@ pub fn js_test_cmd(changes: &[Change], root: &Path) -> Option<(String, Vec<Strin
         return None;
     }
     let (mut args, prefix) = match js_runner(root) {
-        JsRunner::Jest => (vec!["jest".to_string(), "--findRelatedTests".to_string()], "npx jest --findRelatedTests"),
+        JsRunner::Jest => (
+            vec!["jest".to_string(), "--findRelatedTests".to_string()],
+            "npx jest --findRelatedTests",
+        ),
         JsRunner::Vitest => (
             vec![
                 "vitest".to_string(),
@@ -252,9 +253,9 @@ mod tests {
             ch("M", "cmd/app/main.go"),
             ch("A", "cmd/app/handler.go"), // same package — deduped
             ch("M", "internal/store/db.go"),
-            ch("M", "root.go"),            // repo-root package → "."
-            ch("D", "old/gone.go"),        // deleted — skipped
-            ch("M", "README.md"),          // non-go — skipped
+            ch("M", "root.go"),     // repo-root package → "."
+            ch("D", "old/gone.go"), // deleted — skipped
+            ch("M", "README.md"),   // non-go — skipped
         ];
         let pkgs = go_test_packages(&changes);
         assert!(pkgs.contains("./cmd/app"));
@@ -378,7 +379,11 @@ mod tests {
         let py = &plan.iter().find(|t| t.lang == "python").unwrap();
         // Display wraps space-bearing paths so logs read as one token...
         assert!(go.display.contains("'./cmd/my app'"), "go: {}", go.display);
-        assert!(js.display.contains("'web/my view.ts'"), "js: {}", js.display);
+        assert!(
+            js.display.contains("'web/my view.ts'"),
+            "js: {}",
+            js.display
+        );
         assert!(
             py.display.contains("'tests/test my thing.py'"),
             "py: {}",

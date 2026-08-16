@@ -1207,6 +1207,16 @@ const BDO_META_COMMANDS: &[&str] = &[
     "hook-audit",
     "pipe",
     "cc-economics",
+    "map",
+    "deps",
+    "json",
+    "smart",
+    "telemetry",
+    "read",
+    // `bdo log` filters log files. macOS ships an unrelated /usr/bin/log
+    // (Apple's unified logging), so without this a mistyped flag doesn't
+    // just fail — it silently runs a different program, and exits 0.
+    "log",
     "verify",
     "trust",
     "untrust",

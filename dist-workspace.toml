@@ -20,6 +20,14 @@ npm-package = "bdo-cli"
 # installer only needs `detect-libc`/`prettier`'s existing semver ranges —
 # skip generating the lockfile rather than keep re-justifying the warning.
 npm-shrinkwrap = false
+# release.yml is hand-hardened after generation: every action is pinned to a
+# commit SHA and both pipe-to-shell installs are gone. dist refuses to release
+# while the file differs from its template ("out of date contents"), so opt the
+# CI file out of that check. The trade-off is that dist can no longer keep
+# release.yml current on its own — after a dist upgrade, regenerate it
+# deliberately and re-apply the hardening, which
+# scripts/check-release-hardening.sh verifies in CI.
+allow-dirty = ["ci"]
 # Publish the Homebrew formula and the npm package from CI.
 # Requires repo secrets: HOMEBREW_TAP_TOKEN (PAT with write access to the
 # tap repo) and NPM_TOKEN (npm automation token).

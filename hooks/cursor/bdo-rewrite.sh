@@ -49,6 +49,5 @@ if [ "$CMD" = "$REWRITTEN" ]; then
 fi
 
 jq -n --arg cmd "$REWRITTEN" '{
-  "permission": "allow",
   "updated_input": { "command": $cmd }
 }'

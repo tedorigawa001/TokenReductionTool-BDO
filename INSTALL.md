@@ -24,7 +24,7 @@ If `bdo gain` works, Bushido is installed. **DO NOT reinstall**. Skip to "Projec
 ### Quick Install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```
 
 After installation, **verify you have the correct bdo**:

@@ -10,6 +10,22 @@ permissions:
   contents: read
 
 jobs:
+  release-hardening:
+    name: Release workflow hardening
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      # release.yml is cargo-dist-generated, so `dist generate` silently
+      # reverts its manual hardening. Catch that here rather than at the next
+      # release, when the workflow still works — just unpinned.
+      - name: Check release workflow hardening
+        run: sh scripts/check-release-hardening.sh
+
+      - name: Check installer hardening
+        run: sh scripts/test-install.sh
+
   fmt:
     name: Rust formatting
     runs-on: ubuntu-latest

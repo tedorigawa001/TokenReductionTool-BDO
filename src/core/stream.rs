@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
@@ -583,15 +583,57 @@ impl CaptureResult {
 
 pub fn exec_capture(cmd: &mut Command) -> Result<CaptureResult> {
     cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let prog = program_name(cmd);
-    let output = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| anyhow::anyhow!(crate::core::utils::spawn_error(&prog, &e)))?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("child stdout pipe was not available")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("child stderr pipe was not available")?;
+    let stdout_reader = std::thread::spawn(move || read_bounded(stdout, EXEC_CAPTURE_LIMIT));
+    let stderr_reader = std::thread::spawn(move || read_bounded(stderr, EXEC_CAPTURE_LIMIT));
+    let status = child.wait()?;
+    let (stdout, stdout_exceeded) = stdout_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("stdout reader thread panicked"))??;
+    let (stderr, stderr_exceeded) = stderr_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("stderr reader thread panicked"))??;
+    anyhow::ensure!(
+        !stdout_exceeded && !stderr_exceeded,
+        "child output exceeded the {} byte per-stream capture limit",
+        EXEC_CAPTURE_LIMIT
+    );
     Ok(CaptureResult {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: status_to_exit_code(output.status),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        exit_code: status_to_exit_code(status),
     })
+}
+
+const EXEC_CAPTURE_LIMIT: usize = 16 * 1024 * 1024;
+
+fn read_bounded<R: Read>(mut reader: R, limit: usize) -> io::Result<(Vec<u8>, bool)> {
+    let mut output = Vec::with_capacity(limit.min(64 * 1024));
+    let mut exceeded = false;
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(output.len());
+        let keep = read.min(remaining);
+        output.extend_from_slice(&chunk[..keep]);
+        exceeded |= keep < read;
+    }
+    Ok((output, exceeded))
 }
 
 #[cfg(test)]
@@ -918,6 +960,14 @@ pub(crate) mod tests {
         let combined = result.combined();
         assert!(combined.contains("out_msg"));
         assert!(combined.contains("err_msg"));
+    }
+
+    #[test]
+    fn test_read_bounded_reports_overflow_without_growing_past_limit() {
+        let input = vec![b'x'; 1024];
+        let (captured, exceeded) = read_bounded(input.as_slice(), 128).unwrap();
+        assert!(exceeded);
+        assert_eq!(captured.len(), 128);
     }
 
     #[test]

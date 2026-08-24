@@ -190,17 +190,23 @@ fn decide_hook_action_for_agent(cmd: &str, host: permissions::Host, agent: &str)
     decide_from_verdict_for_agent(cmd, permissions::check_command_for(cmd, host), agent)
 }
 
+/// Copilot currently exposes no Bushido-owned permission file. Rewrites must
+/// therefore preserve Copilot's native confirmation boundary instead of
+/// borrowing another agent's allow rules.
+fn decide_copilot_action(cmd: &str) -> HookDecision {
+    decide_from_verdict_for_agent(cmd, PermissionVerdict::Default, "copilot")
+}
+
 fn handle_vscode(cmd: &str) -> Result<()> {
-    let (decision, rewritten) =
-        match decide_hook_action_for_agent(cmd, permissions::Host::Claude, "copilot") {
-            HookDecision::Deny => {
-                audit_log("deny", cmd, "");
-                return Ok(());
-            }
-            HookDecision::Defer => return Ok(()),
-            HookDecision::AllowRewrite(r) => ("allow", r),
-            HookDecision::AskRewrite(r) => ("ask", r),
-        };
+    let (decision, rewritten) = match decide_copilot_action(cmd) {
+        HookDecision::Deny => {
+            audit_log("deny", cmd, "");
+            return Ok(());
+        }
+        HookDecision::Defer => return Ok(()),
+        HookDecision::AllowRewrite(r) => ("allow", r),
+        HookDecision::AskRewrite(r) => ("ask", r),
+    };
 
     audit_log("rewrite", cmd, &rewritten);
 
@@ -224,11 +230,7 @@ fn handle_copilot_cli(cmd: &str, args: &Value) -> Result<()> {
 }
 
 fn copilot_cli_response(cmd: &str, args: &Value) -> Option<Value> {
-    copilot_cli_response_from_decision(
-        args,
-        decide_hook_action_for_agent(cmd, permissions::Host::Claude, "copilot"),
-        cmd,
-    )
+    copilot_cli_response_from_decision(args, decide_copilot_action(cmd), cmd)
 }
 
 fn copilot_cli_response_from_decision(
@@ -349,6 +351,32 @@ fn sanitize_log_field(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
+fn prepare_audit_field(s: &str) -> String {
+    sanitize_log_field(&crate::core::redact::redact_secrets(s))
+}
+
+fn open_private_audit_log(path: &std::path::Path) -> Option<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return None;
+    }
+    let file = options.open(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .ok()?;
+    }
+    Some(file)
+}
+
 fn audit_log_inner(action: &str, original: &str, rewritten: &str) -> Option<()> {
     // Resolve via the shared helper so the writer honors BDO_AUDIT_DIR and stays
     // aligned with the reader (`bdo hook-audit`).
@@ -356,19 +384,15 @@ fn audit_log_inner(action: &str, original: &str, rewritten: &str) -> Option<()> 
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).ok()?;
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .ok()?;
+    let mut file = open_private_audit_log(&path)?;
     let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
     writeln!(
         file,
         "{} | {} | {} | {}",
         ts,
         action,
-        sanitize_log_field(original),
-        sanitize_log_field(rewritten)
+        prepare_audit_field(original),
+        prepare_audit_field(rewritten)
     )
     .ok()
 }
@@ -783,6 +807,18 @@ mod tests {
             r["modifiedArgs"]["command"],
             "BDO_AGENT=copilot bdo cargo test"
         );
+        assert!(
+            r.get("permissionDecision").is_none(),
+            "Copilot rewrites must preserve the host's native confirmation"
+        );
+    }
+
+    #[test]
+    fn test_copilot_decision_never_borrows_allow_rules() {
+        assert!(matches!(
+            decide_copilot_action("cargo test"),
+            HookDecision::AskRewrite(_)
+        ));
     }
 
     #[test]
@@ -1301,6 +1337,30 @@ mod tests {
             sanitized
         );
         assert!(sanitized.contains("\\|"));
+    }
+
+    #[test]
+    fn test_audit_field_redacts_secrets() {
+        let field = prepare_audit_field(
+            "curl -H 'Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz012345'",
+        );
+        assert!(!field.contains("ghp_abcdefghijklmnopqrstuvwxyz012345"));
+        assert!(field.contains("[REDACTED]"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_audit_writer_refuses_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        let link = dir.path().join("hook-audit.log");
+        std::fs::write(&victim, "safe").unwrap();
+        symlink(&victim, &link).unwrap();
+
+        assert!(open_private_audit_log(&link).is_none());
+        assert_eq!(std::fs::read_to_string(victim).unwrap(), "safe");
     }
 
     #[test]

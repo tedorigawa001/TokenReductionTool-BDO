@@ -383,6 +383,52 @@ fn write_if_changed(path: &Path, content: &str, name: &str, ctx: InitContext) ->
     }
 }
 
+/// Reject repository-controlled symlinks before a project-scoped write.
+/// Global user configuration deliberately retains its existing symlink behavior.
+fn ensure_project_path_safe(base: &Path, target: &Path) -> Result<()> {
+    let base = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(base)
+    };
+    let target = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        base.join(target)
+    };
+    let relative = target.strip_prefix(&base).with_context(|| {
+        format!(
+            "Refusing project write outside {}: {}",
+            base.display(),
+            target.display()
+        )
+    })?;
+
+    let mut current = base;
+    for component in relative.components() {
+        use std::path::Component;
+        match component {
+            Component::Normal(part) => current.push(part),
+            Component::CurDir => continue,
+            _ => anyhow::bail!("Refusing non-local project path: {}", target.display()),
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "Refusing project write through symlink: {}",
+                    current.display()
+                )
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err).with_context(|| format!("Failed to inspect {}", current.display()))
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Resolve the final write target: if `path` is a symlink, follow it so
 /// the atomic rename lands on the real file and the symlink is preserved.
 fn resolve_atomic_target(path: &Path) -> PathBuf {
@@ -1231,6 +1277,8 @@ fn generate_project_filters_template(ctx: InitContext) -> Result<()> {
         return Ok(());
     }
 
+    ensure_project_path_safe(Path::new("."), &path)?;
+
     fs::create_dir_all(rtk_dir)
         .with_context(|| format!("Failed to create directory: {}", rtk_dir.display()))?;
     fs::write(&path, FILTERS_TEMPLATE)
@@ -1353,6 +1401,10 @@ fn run_claude_md_mode(global: bool, install_opencode: bool, ctx: InitContext) ->
         PathBuf::from(CLAUDE_MD)
     };
 
+    if !global {
+        ensure_project_path_safe(Path::new("."), &path)?;
+    }
+
     if global && !dry_run {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -1416,6 +1468,7 @@ fn run_cline_mode(ctx: InitContext) -> Result<()> {
     let InitContext { verbose, dry_run } = ctx;
     // Cline reads .clinerules from the project root (workspace-scoped)
     let rules_path = PathBuf::from(".clinerules");
+    ensure_project_path_safe(Path::new("."), &rules_path)?;
 
     let existing = fs::read_to_string(&rules_path).unwrap_or_default();
     if existing.contains("BDO") || existing.contains("bdo") {
@@ -1461,6 +1514,7 @@ fn run_windsurf_mode(ctx: InitContext) -> Result<()> {
     // Windsurf reads .windsurfrules from the project root (workspace-scoped).
     // Global rules (~/.codeium/windsurf/memories/global_rules.md) are unreliable.
     let rules_path = PathBuf::from(".windsurfrules");
+    ensure_project_path_safe(Path::new("."), &rules_path)?;
 
     let existing = fs::read_to_string(&rules_path).unwrap_or_default();
     if existing.contains("BDO") || existing.contains("bdo") {
@@ -1514,6 +1568,7 @@ fn run_kilocode_mode_at(base_dir: &Path, ctx: InitContext) -> Result<()> {
     // Kilo Code reads .kilocode/rules/ from the project root (workspace-scoped)
     let target_dir = base_dir.join(".kilocode/rules");
     let rules_path = target_dir.join("bdo-rules.md");
+    ensure_project_path_safe(base_dir, &rules_path)?;
 
     let existing = fs::read_to_string(&rules_path).unwrap_or_default();
     if existing.contains("BDO") || existing.contains("bdo") {
@@ -1572,6 +1627,7 @@ fn run_antigravity_mode_at(base_dir: &Path, ctx: InitContext) -> Result<()> {
     // Antigravity reads .agents/rules/ from the project root (workspace-scoped)
     let target_dir = base_dir.join(".agents/rules");
     let rules_path = target_dir.join("antigravity-bdo-rules.md");
+    ensure_project_path_safe(base_dir, &rules_path)?;
 
     let existing = fs::read_to_string(&rules_path).unwrap_or_default();
     if existing.contains("BDO") || existing.contains("bdo") {
@@ -2133,6 +2189,10 @@ fn run_codex_mode_with_paths(
     ctx: InitContext,
 ) -> Result<()> {
     let InitContext { dry_run, .. } = ctx;
+    if !global {
+        ensure_project_path_safe(Path::new("."), &agents_md_path)?;
+        ensure_project_path_safe(Path::new("."), &rtk_md_path)?;
+    }
     if global && !dry_run {
         if let Some(parent) = agents_md_path.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -3748,6 +3808,10 @@ fn run_copilot_at(base: &Path, ctx: InitContext) -> Result<()> {
     let InitContext { dry_run, .. } = ctx;
     let github_dir = base.join(GITHUB_DIR);
     let hooks_dir = github_dir.join(HOOKS_SUBDIR);
+    let instructions_path = github_dir.join(COPILOT_INSTRUCTIONS_FILE);
+    let hook_path = hooks_dir.join(COPILOT_HOOK_FILE);
+    ensure_project_path_safe(base, &instructions_path)?;
+    ensure_project_path_safe(base, &hook_path)?;
 
     if !dry_run {
         fs::create_dir_all(&hooks_dir)
@@ -3757,7 +3821,6 @@ fn run_copilot_at(base: &Path, ctx: InitContext) -> Result<()> {
     // 1. Upsert Bushido marker block in copilot-instructions.md (preserves user content).
     //    Done BEFORE writing the hook config so a malformed file aborts the install
     //    without leaving a stale hook on disk.
-    let instructions_path = github_dir.join(COPILOT_INSTRUCTIONS_FILE);
     write_rtk_block(
         &instructions_path,
         COPILOT_INSTRUCTIONS,
@@ -3767,7 +3830,6 @@ fn run_copilot_at(base: &Path, ctx: InitContext) -> Result<()> {
     )?;
 
     // 2. Write hook config (only reached if the upsert above succeeded).
-    let hook_path = hooks_dir.join(COPILOT_HOOK_FILE);
     write_if_changed(&hook_path, COPILOT_HOOK_JSON, "Copilot hook config", ctx)?;
 
     if dry_run {
@@ -5233,6 +5295,35 @@ mod tests {
         assert!(file_path.exists());
         let written = fs::read_to_string(&file_path).unwrap();
         assert_eq!(written, content);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_project_write_rejects_target_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let target = temp.path().join("AGENTS.md");
+        symlink(outside.path().join("victim"), &target).unwrap();
+
+        let err = ensure_project_path_safe(temp.path(), &target).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_project_write_rejects_parent_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let linked_dir = temp.path().join(".github");
+        symlink(outside.path(), &linked_dir).unwrap();
+        let target = linked_dir.join("copilot-instructions.md");
+
+        let err = ensure_project_path_safe(temp.path(), &target).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
     }
 
     #[cfg(unix)]

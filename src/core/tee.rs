@@ -128,8 +128,11 @@ fn write_tee_file(
     let epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
-        .as_secs();
-    let filename = format!("{}_{}.log", epoch, slug);
+        .as_nanos();
+    let mut nonce = [0_u8; 8];
+    getrandom::fill(&mut nonce).ok()?;
+    let nonce = u64::from_ne_bytes(nonce);
+    let filename = format!("{}_{}_{:016x}.log", epoch, slug, nonce);
     let filepath = tee_dir.join(filename);
 
     // Tee files exist for lossless recovery, but secrets are the one thing
@@ -162,11 +165,8 @@ fn write_tee_file(
     Some(filepath)
 }
 
-/// Write `content` to `path` with the file created owner-only (0o600) from
-/// the start, so raw output is never world-readable even for the instant a
-/// separate chmod would leave open — this matters when an override points the
-/// tee dir at a shared location. A pre-existing file keeps its old mode
-/// (`create` doesn't re-apply it), so tighten it afterwards as well.
+/// Write `content` to a new owner-only file. Exclusive creation refuses every
+/// pre-existing filesystem object, including symlinks and hardlinks.
 fn write_private_file(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -174,15 +174,21 @@ fn write_private_file(path: &std::path::Path, content: &str) -> std::io::Result<
         use std::os::unix::fs::OpenOptionsExt;
         let mut f = std::fs::OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(path)?;
         f.write_all(content.as_bytes())?;
     }
     #[cfg(not(unix))]
-    std::fs::write(path, content)?;
-    let _ = set_private_file_permissions(path);
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        use std::io::Write;
+        f.write_all(content.as_bytes())?;
+    }
+    set_private_file_permissions(path)?;
     Ok(())
 }
 
@@ -420,6 +426,31 @@ mod tests {
         assert!(path.exists());
         let written = fs::read_to_string(&path).unwrap();
         assert!(written.contains("error: test failed"));
+    }
+
+    #[test]
+    fn test_private_writer_refuses_preexisting_path() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let path = tmpdir.path().join("existing.log");
+        fs::write(&path, "do not replace").unwrap();
+
+        assert!(write_private_file(&path, "replacement").is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), "do not replace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_private_writer_refuses_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let victim = tmpdir.path().join("victim");
+        let link = tmpdir.path().join("output.log");
+        fs::write(&victim, "safe").unwrap();
+        symlink(&victim, &link).unwrap();
+
+        assert!(write_private_file(&link, "replacement").is_err());
+        assert_eq!(fs::read_to_string(victim).unwrap(), "safe");
     }
 
     #[cfg(unix)]

@@ -19,7 +19,7 @@ Bushido must be installed and available in `$PATH`:
 ```bash
 brew install bdo
 # or
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/refs/heads/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```
 
 ### Install the plugin

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # bdo installer - https://github.com/tedorigawa001/TokenReductionTool
-# Usage: curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/refs/heads/master/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 
 set -e
 
@@ -92,10 +92,33 @@ install() {
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}-${TARGET}.tar.gz"
     TEMP_DIR=$(mktemp -d)
     ARCHIVE="${TEMP_DIR}/${BINARY_NAME}.tar.gz"
+    CHECKSUM="${ARCHIVE}.sha256"
 
     info "Downloading from: $DOWNLOAD_URL"
     if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"; then
         error "Failed to download binary"
+    fi
+
+    info "Downloading checksum..."
+    if ! curl -fsSL "${DOWNLOAD_URL}.sha256" -o "$CHECKSUM"; then
+        error "Failed to download checksum — refusing unauthenticated binary"
+    fi
+    EXPECTED_SHA256=$(awk 'NR == 1 { print $1 }' "$CHECKSUM")
+    case "$EXPECTED_SHA256" in
+        *[!0-9a-fA-F]*|'') error "Invalid SHA-256 checksum file" ;;
+    esac
+    if [ "${#EXPECTED_SHA256}" -ne 64 ]; then
+        error "Invalid SHA-256 checksum length"
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL_SHA256=$(sha256sum "$ARCHIVE" | awk '{ print $1 }')
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL_SHA256=$(shasum -a 256 "$ARCHIVE" | awk '{ print $1 }')
+    else
+        error "SHA-256 tool not found (need sha256sum or shasum)"
+    fi
+    if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+        error "Checksum verification failed — refusing to install"
     fi
 
     # Verify archive contents before extraction (CWE-22 path traversal).

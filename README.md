@@ -59,7 +59,7 @@ brew tap tedorigawa001/tap && brew install bdo
 ### Quick Install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/refs/heads/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```
 
 > Installs to `~/.local/bin`. Add to PATH if needed:
@@ -85,7 +85,7 @@ Download from [releases](https://github.com/tedorigawa001/TokenReductionTool/rel
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.44.11"
+bdo --version   # Should show "bdo 0.44.12"
 bdo gain        # Should show token savings stats
 ```
 
@@ -448,7 +448,7 @@ For the best experience, use [WSL](https://learn.microsoft.com/en-us/windows/wsl
 
 ```bash
 # Inside WSL
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/refs/heads/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 bdo init -g
 ```
 

@@ -105,7 +105,7 @@ fn project_filter_params(project_path: Option<&str>) -> (Option<String>, Option<
     }
 }
 
-use super::constants::{BDO_DATA_DIR, DEFAULT_HISTORY_DAYS, HISTORY_DB};
+use super::constants::{BDO_DATA_DIR, HISTORY_DB};
 
 /// Main tracking interface for recording and querying command history.
 ///
@@ -134,6 +134,8 @@ use super::constants::{BDO_DATA_DIR, DEFAULT_HISTORY_DAYS, HISTORY_DB};
 /// ```
 pub struct Tracker {
     conn: Connection,
+    tracking_enabled: bool,
+    history_days: u32,
 }
 
 /// Individual command record from tracking history.
@@ -291,7 +293,11 @@ impl Tracker {
     /// # Ok::<(), anyhow::Error>(())
     /// ```
     pub fn new() -> Result<Self> {
+        let tracking = crate::core::config::Config::load()
+            .map(|config| config.tracking)
+            .unwrap_or_default();
         let (db_path, source) = get_db_path_with_source()?;
+        validate_database_path(&db_path)?;
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
             // Lock down bdo's own data dir. An overridden location
@@ -299,6 +305,16 @@ impl Tracker {
             // the user manages — changing its mode is not bdo's call.
             if source == crate::core::utils::PathSource::Default {
                 set_private_directory_permissions(parent)?;
+            }
+            #[cfg(unix)]
+            if source == crate::core::utils::PathSource::Override {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(parent)?.permissions().mode();
+                anyhow::ensure!(
+                    mode & 0o022 == 0,
+                    "Refusing tracking database in group/other-writable directory: {}",
+                    parent.display()
+                );
             }
         }
 
@@ -309,11 +325,8 @@ impl Tracker {
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;",
         );
-        // The DB file itself is bdo's wherever it lives, so tighten it in both
-        // cases — but best-effort: the enforced 0o700 on the default dir above
-        // is the primary barrier, and a chmod failure (e.g. a non-POSIX
-        // filesystem at an override path) must not take tracking down.
-        let _ = set_private_sqlite_permissions(&db_path);
+        // Permission hardening is part of the privacy boundary, not best effort.
+        set_private_sqlite_permissions(&db_path)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS commands (
                 id INTEGER PRIMARY KEY,
@@ -381,14 +394,22 @@ impl Tracker {
             [],
         )?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            tracking_enabled: tracking.enabled,
+            history_days: tracking.history_days,
+        })
     }
 
     /// Create an isolated in-memory tracker for tests.
     #[cfg(test)]
     pub fn new_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().context("Failed to open in-memory DB")?;
-        let tracker = Self { conn };
+        let tracker = Self {
+            conn,
+            tracking_enabled: true,
+            history_days: super::constants::DEFAULT_HISTORY_DAYS as u32,
+        };
         tracker.init_schema()?;
         Ok(tracker)
     }
@@ -466,6 +487,9 @@ impl Tracker {
         output_tokens: usize,
         exec_time_ms: u64,
     ) -> Result<()> {
+        if !self.tracking_enabled {
+            return Ok(());
+        }
         let saved = input_tokens.saturating_sub(output_tokens);
         let pct = if input_tokens > 0 {
             (saved as f64 / input_tokens as f64) * 100.0
@@ -503,7 +527,7 @@ impl Tracker {
     }
 
     fn cleanup_old(&self) -> Result<()> {
-        let cutoff = Utc::now() - chrono::Duration::days(DEFAULT_HISTORY_DAYS);
+        let cutoff = Utc::now() - chrono::Duration::days(i64::from(self.history_days));
         self.conn.execute(
             "DELETE FROM commands WHERE timestamp < ?1",
             params![cutoff.to_rfc3339()],
@@ -535,6 +559,9 @@ impl Tracker {
         error_message: &str,
         fallback_succeeded: bool,
     ) -> Result<()> {
+        if !self.tracking_enabled {
+            return Ok(());
+        }
         // Failed commands are stored verbatim for diagnostics, and parser
         // errors often echo the offending input — mask secrets in both.
         let raw_command = crate::core::redact::redact_secrets(raw_command);
@@ -1325,6 +1352,38 @@ fn get_db_path_with_source() -> Result<(PathBuf, crate::core::utils::PathSource)
     Ok(resolve_db_path(env_override, config_override))
 }
 
+fn validate_database_path(path: &std::path::Path) -> Result<()> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "Refusing tracking database path through symlink: {}",
+                    current.display()
+                )
+            }
+            Ok(meta) if current == absolute && !meta.file_type().is_file() => {
+                anyhow::bail!(
+                    "Tracking database is not a regular file: {}",
+                    path.display()
+                )
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err).with_context(|| format!("Failed to inspect {}", current.display()))
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Pure resolution of the DB path and where it came from (testable without
 /// touching process-global env). Priority: `BDO_DB_PATH` env var, then the
 /// config file's `database_path`, then the platform data dir. The source
@@ -1404,6 +1463,12 @@ pub struct ParseFailureSummary {
 /// Record a parse failure without ever crashing.
 /// Silently ignores all errors — used in the fallback path.
 pub fn record_parse_failure_silent(raw_command: &str, error_message: &str, succeeded: bool) {
+    if crate::core::config::Config::load()
+        .map(|config| !config.tracking.enabled)
+        .unwrap_or(false)
+    {
+        return;
+    }
     if let Ok(tracker) = Tracker::new() {
         let _ = tracker.record_parse_failure(raw_command, error_message, succeeded);
     }
@@ -1505,14 +1570,16 @@ impl TimedExecution {
         let input_tokens = estimate_tokens(input);
         let output_tokens = estimate_tokens(output);
 
-        if let Ok(tracker) = Tracker::new() {
-            let _ = tracker.record(
-                original_cmd,
-                rtk_cmd,
-                input_tokens,
-                output_tokens,
-                elapsed_ms,
-            );
+        if tracking_is_enabled() {
+            if let Ok(tracker) = Tracker::new() {
+                let _ = tracker.record(
+                    original_cmd,
+                    rtk_cmd,
+                    input_tokens,
+                    output_tokens,
+                    elapsed_ms,
+                );
+            }
         }
     }
 
@@ -1539,10 +1606,18 @@ impl TimedExecution {
     pub fn track_passthrough(&self, original_cmd: &str, rtk_cmd: &str) {
         let elapsed_ms = self.start.elapsed().as_millis() as u64;
         // input_tokens=0, output_tokens=0 won't dilute savings statistics
-        if let Ok(tracker) = Tracker::new() {
-            let _ = tracker.record(original_cmd, rtk_cmd, 0, 0, elapsed_ms);
+        if tracking_is_enabled() {
+            if let Ok(tracker) = Tracker::new() {
+                let _ = tracker.record(original_cmd, rtk_cmd, 0, 0, elapsed_ms);
+            }
         }
     }
+}
+
+fn tracking_is_enabled() -> bool {
+    crate::core::config::Config::load()
+        .map(|config| config.tracking.enabled)
+        .unwrap_or(true)
 }
 
 /// Format OsString args for tracking display.
@@ -1686,6 +1761,58 @@ mod tests {
             "token persisted unredacted: {stored}"
         );
         assert!(stored.contains("[REDACTED]"), "{stored}");
+    }
+
+    #[test]
+    fn test_tracking_disabled_does_not_record() {
+        let mut tracker = Tracker::new_in_memory().unwrap();
+        tracker.tracking_enabled = false;
+
+        tracker
+            .record("git status", "bdo git status", 100, 20, 5)
+            .unwrap();
+
+        let count: i64 = tracker
+            .conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_cleanup_uses_configured_history_days() {
+        let mut tracker = Tracker::new_in_memory().unwrap();
+        tracker.history_days = 1;
+        tracker
+            .conn
+            .execute(
+                "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens, output_tokens, saved_tokens, savings_pct) VALUES (?1, 'x', 'bdo x', 1, 1, 0, 0)",
+                params![(Utc::now() - chrono::Duration::days(2)).to_rfc3339()],
+            )
+            .unwrap();
+
+        tracker.cleanup_old().unwrap();
+
+        let count: i64 = tracker
+            .conn
+            .query_row("SELECT COUNT(*) FROM commands", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_database_path_rejects_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let victim = temp.path().join("victim.db");
+        let link = temp.path().join("history.db");
+        std::fs::write(&victim, "safe").unwrap();
+        symlink(&victim, &link).unwrap();
+
+        assert!(validate_database_path(&link).is_err());
+        assert_eq!(std::fs::read_to_string(victim).unwrap(), "safe");
     }
 
     // 4. track_passthrough doesn't dilute stats (input=0, output=0)

@@ -50,7 +50,7 @@ brew tap tedorigawa001/tap && brew install bdo
 ### クイックインストール（Linux/macOS）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/refs/heads/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```
 
 ### Cargo
@@ -62,7 +62,7 @@ cargo install --git https://github.com/tedorigawa001/TokenReductionTool
 ### 確認
 
 ```bash
-bdo --version   # "bdo 0.43.0" と表示されるはず
+bdo --version   # "bdo 0.44.12" と表示されるはず
 bdo gain        # トークン節約統計が表示されるはず
 ```
 

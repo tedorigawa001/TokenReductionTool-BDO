@@ -89,29 +89,12 @@ fn binary_exists() -> bool {
     tool_exists("ccusage")
 }
 
-/// Build the ccusage command, falling back to npx if binary not in PATH
+/// Build the ccusage command only when the explicitly installed binary exists.
+/// Never fetch and execute a mutable registry package as an analytics side effect.
 fn build_command() -> Option<Command> {
     if binary_exists() {
         return Some(resolved_command("ccusage"));
     }
-
-    // Fallback: try npx
-    eprintln!("[info] ccusage not installed globally, fetching via npx...");
-    let npx_check = resolved_command("npx")
-        .arg("--yes")
-        .arg("ccusage")
-        .arg("--help")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    if npx_check.map(|s| s.success()).unwrap_or(false) {
-        let mut cmd = resolved_command("npx");
-        cmd.arg("--yes");
-        cmd.arg("ccusage");
-        return Some(cmd);
-    }
-
     None
 }
 
@@ -124,7 +107,9 @@ pub fn fetch(granularity: Granularity) -> Result<Option<Vec<CcusagePeriod>>> {
     let mut cmd = match build_command() {
         Some(cmd) => cmd,
         None => {
-            eprintln!("[warn] ccusage not found. Install: npm i -g ccusage (or use npx ccusage)");
+            eprintln!(
+                "[warn] ccusage not found. Install an audited, pinned version explicitly before using economics reports"
+            );
             return Ok(None);
         }
     };

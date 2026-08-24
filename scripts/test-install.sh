@@ -6,6 +6,7 @@
 #   2. Archives with absolute paths are rejected pre-extraction.
 #   3. Archives with ".." components are rejected pre-extraction.
 #   4. The check is still present in install.sh (regression guard).
+#   5. The installer requires and verifies a SHA-256 sidecar.
 
 set -eu
 
@@ -86,6 +87,14 @@ if grep -qF 'tar -tzf' "$INSTALL_SH" && grep -qF '\.\.' "$INSTALL_SH"; then
     pass "install.sh still contains the path-traversal check"
 else
     fail "install.sh is missing the path-traversal check — was it removed?"
+fi
+
+if grep -qF '${DOWNLOAD_URL}.sha256' "$INSTALL_SH" \
+    && grep -qF 'ACTUAL_SHA256' "$INSTALL_SH" \
+    && grep -qF 'Checksum verification failed' "$INSTALL_SH"; then
+    pass "install.sh verifies the release checksum before extraction"
+else
+    fail "install.sh is missing mandatory SHA-256 verification"
 fi
 
 echo ""

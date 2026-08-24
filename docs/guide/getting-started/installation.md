@@ -19,7 +19,7 @@ If both commands work, Bushido is already installed. Skip to [Project initializa
 ## Quick install (Linux and macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```
 
 ## Homebrew (macOS and Linux)

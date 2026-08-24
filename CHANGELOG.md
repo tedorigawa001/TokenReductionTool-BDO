@@ -5,6 +5,62 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] (2026-08-16)
+
+A security release. Two changes alter behavior you may notice — see
+**Breaking** below.
+
+### Breaking
+
+- **Copilot no longer inherits Claude's allow rules.** Copilot rewrites were
+  evaluated against `permissions::Host::Claude`, so a command you allow-listed
+  in Claude Code was auto-approved in Copilot — which never granted it.
+  Copilot now keeps its own confirmation boundary, meaning commands that used
+  to run unprompted there will ask.
+- **The legacy Cursor shell hook no longer emits `"permission": "allow"`**,
+  restoring Cursor's native confirmation for the same reason.
+- **`bdo cc-economics` no longer falls back to `npx --yes ccusage`.** Fetching
+  and executing a mutable registry package as a side effect of an analytics
+  report is not something a report should do. Install `ccusage` explicitly
+  (pinned) to keep using economics reports.
+
+### Security
+
+- **Installer integrity**: `install.sh` now downloads the release's SHA-256
+  sidecar and verifies the archive before extracting. Previously a tampered
+  or truncated download was installed unchecked.
+- **Release workflow**: every action is pinned to a commit SHA, and both
+  pipe-to-shell installs (cargo-dist, rustup) are gone — replaced by
+  `cargo install --locked` and a pinned, checksum-verified `rustup-init`.
+- **Tee files** are created with `O_EXCL` and a random nonce in the filename.
+  A pre-planted path — symlink or hardlink included — can no longer be
+  written through, nor left at permissions bdo doesn't own.
+- **Tracking database**: the path is rejected if any component is a symlink,
+  or if an overridden parent directory is group/other-writable. Permission
+  tightening is enforced rather than best-effort.
+- **Hook audit log** opens `O_NOFOLLOW` at 0600 and redacts secrets, matching
+  the protection the tracking DB and tee files already had.
+- **Child output capture** is bounded per stream instead of buffered without
+  limit.
+
+### Fixes
+
+- **The documented one-line install was broken**, and had been since the repo
+  rename: every copy pointed at `refs/heads/master`, but the default branch is
+  `main`. Because `curl -f` yields an empty body on 404, piping to `sh` was a
+  silent no-op rather than a visible error. Fixed in all 7 places.
+- `tracking.enabled` and `tracking.history_days` from the config file are now
+  honored; tracking previously recorded unconditionally on a hardcoded 90-day
+  retention.
+
+### Chores
+
+- CI guards the release workflow's hardening (`scripts/check-release-hardening.sh`)
+  and the installer's checksum check. `release.yml` is cargo-dist-generated, so
+  `dist generate` reverts its hardening wholesale — and the workflow keeps
+  working afterward, just unpinned, which is exactly the kind of regression
+  that otherwise surfaces at the next release.
+
 ## [0.44.12] (2026-08-16)
 
 ### Fixes

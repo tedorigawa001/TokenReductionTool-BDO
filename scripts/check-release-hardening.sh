@@ -23,13 +23,21 @@ fi
 
 echo "==> Release workflow hardening"
 
-# 1. Third-party actions must be pinned to a commit SHA. A mutable tag (@v6)
-#    lets whoever controls the tag change what runs in a job holding our
-#    publish tokens.
-if grep -nE '^\s*(-\s*)?uses:\s*[^@]+@v[0-9]' "$WORKFLOW" >/dev/null 2>&1; then
+# 1. Third-party actions must be pinned to a commit SHA. Any mutable ref —
+#    a tag (@v6), a branch (@main), @latest — lets whoever controls it change
+#    what runs in a job holding our publish tokens.
+#
+#    This asserts the allowed shape rather than blocklisting known-bad ones:
+#    a blocklist of "@v<digit>" silently passes @main, @latest and @1.2.3,
+#    which is worse than no check because CI then reports "intact".
+UNPINNED=$(
+    grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:' "$WORKFLOW" |
+        grep -vE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' || true
+)
+if [ -n "$UNPINNED" ]; then
     echo "    unpinned:"
-    grep -nE '^\s*(-\s*)?uses:\s*[^@]+@v[0-9]' "$WORKFLOW" | sed 's/^/      /'
-    fail "actions must be pinned to a 40-char commit SHA, not a mutable tag"
+    echo "$UNPINNED" | sed 's/^/      /'
+    fail "every action must be pinned to a 40-char commit SHA"
 else
     pass "all actions pinned to commit SHAs"
 fi

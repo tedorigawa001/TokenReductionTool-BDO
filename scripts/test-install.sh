@@ -83,7 +83,7 @@ done
 
 echo "==> Regression guard"
 
-if grep -qF 'tar -tzf' "$INSTALL_SH" && grep -qF '\.\.' "$INSTALL_SH"; then
+if grep -qF 'tar -tf' "$INSTALL_SH" && grep -qF '\.\.' "$INSTALL_SH"; then
     pass "install.sh still contains the path-traversal check"
 else
     fail "install.sh is missing the path-traversal check — was it removed?"
@@ -95,6 +95,32 @@ if grep -qF '${DOWNLOAD_URL}.sha256' "$INSTALL_SH" \
     pass "install.sh verifies the release checksum before extraction"
 else
     fail "install.sh is missing mandatory SHA-256 verification"
+fi
+
+# The archive is named after the crate and compressed with xz. Getting either
+# wrong makes every download 404 — which is how this went unnoticed until the
+# checksum work put the download path under scrutiny.
+if grep -qF '${CRATE_NAME}-${TARGET}.tar.xz' "$INSTALL_SH"; then
+    pass "install.sh builds the cargo-dist archive name"
+else
+    fail "install.sh archive name does not match the published release assets"
+fi
+
+# An explicit -z/-J is applied literally by GNU tar and fails on a valid
+# archive compressed the other way; both tars auto-detect without one.
+if grep -qE 'tar -[tx]zf|tar -[tx]Jf' "$INSTALL_SH"; then
+    fail "install.sh forces a tar compression flag instead of auto-detecting"
+else
+    pass "install.sh lets tar auto-detect compression"
+fi
+
+# Verify the binary just installed, by path — resolving through PATH reports
+# whatever other copy shadows it, which reads as a failed upgrade.
+if grep -qF '"$INSTALLED_BIN" --version' "$INSTALL_SH" \
+    && grep -qF 'not the copy just installed' "$INSTALL_SH"; then
+    pass "install.sh verifies by path and warns on PATH shadowing"
+else
+    fail "install.sh verification can report a different binary than it installed"
 fi
 
 echo ""

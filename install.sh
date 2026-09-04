@@ -4,8 +4,10 @@
 
 set -e
 
-REPO="tedorigawa001/TokenReductionTool"
+REPO="tedorigawa001/TokenReductionTool-BDO"
 BINARY_NAME="bdo"
+# The crate, and therefore the release archive prefix, differs from the binary.
+CRATE_NAME="bushido"
 INSTALL_DIR="${BDO_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Colors
@@ -89,9 +91,12 @@ install() {
     info "Target: $TARGET"
     info "Version: $VERSION"
 
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}-${TARGET}.tar.gz"
+    # Release archives are produced by cargo-dist and are named after the
+    # crate (bushido), not the binary (bdo), and compressed with xz.
+    ARCHIVE_NAME="${CRATE_NAME}-${TARGET}.tar.xz"
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
     TEMP_DIR=$(mktemp -d)
-    ARCHIVE="${TEMP_DIR}/${BINARY_NAME}.tar.gz"
+    ARCHIVE="${TEMP_DIR}/${ARCHIVE_NAME}"
     CHECKSUM="${ARCHIVE}.sha256"
 
     info "Downloading from: $DOWNLOAD_URL"
@@ -123,16 +128,25 @@ install() {
 
     # Verify archive contents before extraction (CWE-22 path traversal).
     # Reject any entry with an absolute path or a ".." component.
+    # No -z/-J: GNU tar applies an explicit compression flag literally, so
+    # naming the wrong one fails on a valid archive. Both tars auto-detect.
     info "Verifying archive..."
-    if tar -tzf "$ARCHIVE" | grep -qE '^/|(^|/)\.\.(/|$)'; then
+    if tar -tf "$ARCHIVE" | grep -qE '^/|(^|/)\.\.(/|$)'; then
         error "Archive contains unsafe paths (absolute or directory traversal) — refusing to extract"
     fi
 
     info "Extracting..."
-    tar -xzf "$ARCHIVE" -C "$TEMP_DIR"
+    tar -xf "$ARCHIVE" -C "$TEMP_DIR"
+
+    # cargo-dist archives hold a <crate>-<target>/ directory, with the binary
+    # inside it — not at the archive root.
+    EXTRACTED_BIN="${TEMP_DIR}/${CRATE_NAME}-${TARGET}/${BINARY_NAME}"
+    if [ ! -f "$EXTRACTED_BIN" ]; then
+        error "Archive did not contain ${BINARY_NAME} at the expected path"
+    fi
 
     mkdir -p "$INSTALL_DIR"
-    mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/"
+    mv "$EXTRACTED_BIN" "${INSTALL_DIR}/"
 
     chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -144,11 +158,21 @@ install() {
 
 # Verify installation
 verify() {
-    if command -v "$BINARY_NAME" >/dev/null 2>&1; then
-        info "Verification: $($BINARY_NAME --version)"
-    else
+    INSTALLED_BIN="${INSTALL_DIR}/${BINARY_NAME}"
+
+    # Report the binary we just installed, by path. Resolving the name through
+    # PATH instead would print whatever version some *other* copy reports —
+    # which reads as a failed upgrade, and hides the shadowing below.
+    info "Verification: $("$INSTALLED_BIN" --version)"
+
+    RESOLVED=$(command -v "$BINARY_NAME" 2>/dev/null || true)
+    if [ -z "$RESOLVED" ]; then
         warn "Binary installed but not in PATH. Add to your shell profile:"
-        warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        warn "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+    elif [ "$RESOLVED" != "$INSTALLED_BIN" ]; then
+        warn "'${BINARY_NAME}' resolves to ${RESOLVED}, not the copy just installed."
+        warn "  That one runs instead: $("$RESOLVED" --version 2>/dev/null || echo 'unknown version')"
+        warn "  Remove it, or put ${INSTALL_DIR} earlier in PATH."
     fi
 }
 

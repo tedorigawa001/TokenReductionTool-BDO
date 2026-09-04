@@ -76,16 +76,19 @@ cargo install --git https://github.com/tedorigawa001/TokenReductionTool
 ### Pre-built Binaries
 
 Download from [releases](https://github.com/tedorigawa001/TokenReductionTool/releases):
-- macOS: `bdo-x86_64-apple-darwin.tar.gz` / `bdo-aarch64-apple-darwin.tar.gz`
-- Linux: `bdo-x86_64-unknown-linux-musl.tar.gz` / `bdo-aarch64-unknown-linux-gnu.tar.gz`
-- Windows: `bdo-x86_64-pc-windows-msvc.zip`
+Archives are named after the crate (`bushido`); the binary inside is `bdo`.
+Each has a `.sha256` sidecar — verify before extracting.
+
+- macOS: `bushido-x86_64-apple-darwin.tar.xz` / `bushido-aarch64-apple-darwin.tar.xz`
+- Linux: `bushido-x86_64-unknown-linux-gnu.tar.xz` / `bushido-aarch64-unknown-linux-gnu.tar.xz`
+- Windows: `bushido-x86_64-pc-windows-msvc.zip`
 
 > **Windows users**: Extract the zip and place `bdo.exe` somewhere in your PATH (e.g. `C:\Users\<you>\.local\bin`). Run Bushido from **Command Prompt**, **PowerShell**, or **Windows Terminal** — do not double-click the `.exe` (it will flash and close). For the best experience, use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) where the full hook system works natively. See [Windows setup](#windows) below for details.
 
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.45.0"
+bdo --version   # Should show "bdo 0.45.1"
 bdo gain        # Should show token savings stats
 ```
 

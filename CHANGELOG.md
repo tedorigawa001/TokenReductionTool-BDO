@@ -5,6 +5,33 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.1] (2026-09-05)
+
+The `bdo` binary is unchanged from 0.45.0 — this release fixes the installer
+and the CI guard around it.
+
+### Fixes
+
+- **`install.sh` could never install anything.** It requested
+  `bdo-<target>.tar.gz`, but releases publish `bushido-<target>.tar.xz` — the
+  archive is named after the crate, not the binary, and compressed with xz, so
+  every download 404'd. Adding checksum verification in 0.45.0 didn't reveal
+  this because the failure happens a step earlier. Alongside the name: the
+  explicit `-z` is gone (GNU tar applies a compression flag literally and fails
+  on a valid archive; both tars auto-detect), and the binary is now taken from
+  the `<crate>-<target>/` directory the archive actually contains rather than
+  the archive root.
+- **The installer reported the wrong binary.** `verify()` resolved `bdo`
+  through `PATH`, so another copy shadowing the install directory printed its
+  version — making a good install read as a failed upgrade. It now reports the
+  binary it just installed, by path, and warns when something else on `PATH`
+  will run instead.
+- **`scripts/check-release-hardening.sh` passed mutable action refs.** It
+  blocklisted `@v<digit>` instead of requiring a 40-char commit SHA, so
+  `@main`, `@latest` and `@1.2.3` all reported "hardening intact" — false
+  assurance about the workflow that holds the publish tokens. It now asserts
+  the allowed shape.
+
 ## [0.45.0] (2026-08-16)
 
 A security release. Two changes alter behavior you may notice — see

@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  audit-check:
+    name: audit-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The audit tool is independent of the project's MSRV toolchain.
+      - name: Install Rust toolchain for audit
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      # Fetch the current RustSec database; do not filter out other platforms.
+      - name: Audit locked dependencies
+        run: cargo audit --file Cargo.lock --deny warnings
+
   release-hardening:
     name: Release workflow hardening
     runs-on: ubuntu-latest

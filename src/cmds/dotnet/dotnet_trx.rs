@@ -21,7 +21,9 @@ fn extract_attr_value(
             continue;
         }
 
-        if let Ok(value) = attr.decode_and_unescape_value(reader.decoder()) {
+        if let Ok(value) =
+            attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+        {
             return Some(value.into_owned());
         }
     }
@@ -212,7 +214,6 @@ fn parse_trx_content(content: &str) -> Option<TestSummary> {
     }
 
     let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut summary = TestSummary::default();
     let mut saw_test_run = false;
@@ -306,6 +307,15 @@ fn parse_trx_content(content: &str) -> Option<TestSummary> {
                     None => {}
                 }
             }
+            Ok(Event::GeneralRef(e)) if in_failed_result => {
+                // Preserve escaped text as before quick-xml split references into events.
+                let text = format!("&{};", String::from_utf8_lossy(e.as_ref()));
+                match capture_field {
+                    Some(CaptureField::Message) => message_buf.push_str(&text),
+                    Some(CaptureField::StackTrace) => stack_buf.push_str(&text),
+                    None => {}
+                }
+            }
             Ok(Event::CData(e)) => {
                 if !in_failed_result {
                     buf.clear();
@@ -386,6 +396,14 @@ fn parse_trx_content(content: &str) -> Option<TestSummary> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn test_parse_trx_content_preserves_references_and_spacing() {
+        let trx = r#"<TestRun><Results><UnitTestResult testName="A &amp; B &#x43;" outcome="Failed"><Output><ErrorInfo><Message>Expected &lt;5&gt; &amp; actual &#52;</Message><StackTrace>at A &amp; B</StackTrace></ErrorInfo></Output></UnitTestResult></Results><ResultSummary><Counters total="1" failed="1" /></ResultSummary></TestRun>"#;
+        let summary = parse_trx_content(trx).unwrap();
+        assert_eq!(summary.failed_tests[0].name, "A & B C");
+        assert_eq!(summary.failed_tests[0].details, vec!["Expected &lt;5&gt; &amp; actual &#52;", "at A &amp; B"]);
+    }
 
     #[test]
     fn test_parse_trx_content_extracts_passed_counts() {

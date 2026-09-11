@@ -593,9 +593,9 @@ fn scan_mtp_kind_in_file(path: &Path) -> MtpProjectKind {
     };
 
     let mut reader = Reader::from_str(&content);
-    reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut inside_mtp_element = false;
+    let mut property_text = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -609,15 +609,27 @@ fn scan_mtp_kind_in_file(path: &Path) -> MtpProjectKind {
                         | b"usetestingplatformrunner"
                         | b"testingplatformdotnettestsupport"
                 );
+                property_text.clear();
             }
             Ok(Event::Text(e)) if inside_mtp_element => {
-                if let Ok(text) = e.unescape() {
-                    if text.trim().eq_ignore_ascii_case("true") {
-                        return MtpProjectKind::VsTestBridge;
-                    }
+                if let Ok(text) = e.decode() {
+                    property_text.push_str(&text);
                 }
             }
-            Ok(Event::End(_)) => inside_mtp_element = false,
+            Ok(Event::GeneralRef(e)) if inside_mtp_element => {
+                property_text.push('&');
+                property_text.push_str(&String::from_utf8_lossy(e.as_ref()));
+                property_text.push(';');
+            }
+            Ok(Event::End(_)) => {
+                if inside_mtp_element
+                    && quick_xml::escape::unescape(&property_text)
+                        .is_ok_and(|text| text.trim().eq_ignore_ascii_case("true"))
+                {
+                    return MtpProjectKind::VsTestBridge;
+                }
+                inside_mtp_element = false;
+            }
             Ok(Event::Eof) => break,
             Err(_) => break,
             _ => {}
@@ -1929,6 +1941,21 @@ mod tests {
         assert!(injected
             .windows(2)
             .any(|w| w[0] == "--results-directory" && w[1] == "/custom/results"));
+    }
+
+    #[test]
+    fn test_scan_mtp_kind_handles_character_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.csproj");
+        for (value, expected) in [
+            ("tr&#117;e", MtpProjectKind::VsTestBridge),
+            (" &#x74;rue ", MtpProjectKind::VsTestBridge),
+            ("true&#x20;false", MtpProjectKind::None),
+            ("true&unknown;", MtpProjectKind::None),
+        ] {
+            std::fs::write(&path, format!("<Project><UseTestingPlatformRunner>{value}</UseTestingPlatformRunner></Project>")).unwrap();
+            assert_eq!(scan_mtp_kind_in_file(&path), expected, "{value}");
+        }
     }
 
     #[test]

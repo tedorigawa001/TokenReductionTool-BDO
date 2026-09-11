@@ -5,6 +5,22 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.2] (2026-09-11)
+
+### Security
+
+- **Dependency audit**: `quick-xml` 0.37 → 0.41, `anyhow` 1.0.103,
+  `crossbeam-epoch` 0.9.20. The quick-xml jump changed its event model
+  (entity references now arrive as separate events); both XML consumers —
+  `.csproj` project-kind detection and TRX test-result parsing — were
+  migrated so their output is byte-for-byte unchanged, with tests locking
+  that in.
+
+### Chores
+
+- CI now runs `cargo audit` against `Cargo.lock` on every push and PR, with
+  warnings (including unmaintained crates) treated as failures.
+
 ## [0.45.1] (2026-09-05)
 
 The `bdo` binary is unchanged from 0.45.0 — this release fixes the installer

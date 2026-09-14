@@ -97,6 +97,32 @@ bash scripts/check-test-presence.sh
 - トークン削減より正しさを優先しているか
 - テストまたは手動確認コマンドを記録したか
 
+## 変更の取り込みとリリース手順（2026-09-14〜、ブランチ保護後）
+
+`main` はブランチ保護下にある: PR 必須（approvals 0 — ソロで自己マージ可）、
+CI の全7ジョブが必須チェック、管理者にも適用、force push・削除禁止。
+**`main` への直接 push は拒否される**ので、以下の流れで進める。
+
+1. ブランチを切って作業し、コミットする
+2. ブランチを push して PR を作る（`gh pr create`）
+3. 7チェック（fmt / clippy×2 / tests×2 / audit-check / release-hardening）が
+   通るのを待ってマージする
+4. **リリースする場合はマージ後に**: `git checkout main && git pull` してから
+   `main` 上の実コミットに `git tag vX.Y.Z` → `git push origin vX.Y.Z`
+
+### 4. の順序を守る理由
+
+マージ方式によって `main` 上のコミット SHA はローカルのものと変わる。マージ前に
+ローカルで打ったタグは `main` に存在しないコミットを指し、dist の plan が
+「nothing to Release」で即死する（v0.44.5 で踏んだのと同じ症状）。タグは必ず
+pull 後の `main` に対して打つ。タグ push 自体はブランチ保護の対象外。
+
+### バージョン bump の置き場所
+
+bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバージョン例）
+も PR に含めてマージし、そのマージ結果にタグを打つ。タグと `Cargo.toml` の
+`version` が一致していないと plan が落ちるのは従来どおり。
+
 ## 実施記録
 
 ### 2026-06-13 — fail-safe 修正 + bdo リネーム（フェーズ1: コマンド層）

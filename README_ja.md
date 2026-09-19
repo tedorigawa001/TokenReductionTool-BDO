@@ -62,7 +62,7 @@ cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 ### 確認
 
 ```bash
-bdo --version   # "bdo 0.45.3" と表示されるはず
+bdo --version   # "bdo 0.45.4" と表示されるはず
 bdo gain        # トークン節約統計が表示されるはず
 ```
 

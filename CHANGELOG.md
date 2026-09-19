@@ -5,6 +5,36 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.4] (2026-09-19)
+
+### Security
+
+- **`bdo err` / `bdo test` command injection.** Both joined their argument
+  vector with spaces and handed the string to `sh -c`. An argument containing
+  a space was split into several, and shell metacharacters inside an argument
+  became executable — `bdo err grep 'x; touch F' file` ran `touch`. Both now
+  exec via argv, the shell path is removed, and an empty wrapped command is an
+  error instead of `sh -c ""` exiting 0.
+
+  **Behavior change**: packing shell syntax into a single argument
+  (`bdo test "cargo test && echo ok"`) no longer works — that form and the
+  injection were the same code path. Ask for a shell explicitly and it is
+  delivered intact: `bdo test sh -c 'cargo test && echo ok'`. Every documented
+  usage (`bdo err cargo build`, `bdo test cargo test`) is unaffected.
+
+### Fixes
+
+- **`bdo find <dir>`** — the most common native form, and what the hook
+  produces — was read as a glob pattern searched under `.`, a different command
+  that usually found nothing. A lone argument with a path separator and no glob
+  characters is now the start path. A missing start path exits 1 with find's
+  message instead of reporting zero matches and exiting 0, so `bdo find … &&`
+  chains stop where native find would.
+
+  Together these close the ledger's "compound command / exit code
+  interference" item: the interference was bdo running a different command
+  than the one asked for, not a harness artifact.
+
 ## [0.45.3] (2026-09-19)
 
 ### Security

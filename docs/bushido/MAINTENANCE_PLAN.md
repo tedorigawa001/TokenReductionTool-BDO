@@ -299,12 +299,10 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   0600/0700 のパーミッション層が受ける設計（fail-safe で誤検知しない側に倒した結果）。
 
 ### 既知の不具合（軽微・未修正）
-- **README のバッジが 404**: `README.md` / `README_ja.md` 冒頭の CI バッジが
-  `workflows/Security%20Check/badge.svg` を参照しているが、そのワークフローは存在
-  しない（実在は `CI` と `Release`）。画像が壊れて表示される。正しくは
-  `actions/workflows/ci.yml/badge.svg`（"passing" を返すことを確認済み）。
-  併せてバッジ・リンク類が旧リポジトリ名 `TokenReductionTool` を指している
-  （リダイレクトで動くが `TokenReductionTool-BDO` に揃えるべき）。
+- ✅ ~~README のバッジが 404~~（0.45.3 で修正）: CI バッジを
+  `actions/workflows/ci.yml/badge.svg` に、`README.md` / `README_ja.md` 内の
+  GitHub / shields.io / starmapper のリポジトリ名を `TokenReductionTool-BDO` に、
+  `tree/master` を `tree/main` に統一。
 
 ### チップ（Claude Code 上で1クリック着手可）
 - **`task_0bbc6dfb`**: tracking の flaky テスト（実ユーザー DB + env 共有のレース）。

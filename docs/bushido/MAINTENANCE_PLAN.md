@@ -281,3 +281,32 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 ### 要切り分け
 - **複合コマンド/パイプ堅牢性**: `cmd && echo` 連鎖の出力切れ・exit code 干渉の事象あり。フィルタが stdout/exit code を変えない保証（ハーネス側要因の可能性もあり要調査）。
 - **`cat f | shasum` 等パイプ時の raw passthrough**: エージェントは常にパイプ実行のためフィルタが広範に無効化される副作用があり要設計判断（選択肢C）。
+
+### セキュリティ残余（認識済み・意図的に未対応、2026-09-19 時点）
+v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。実害の可能性が低い、
+または対応コストが見合わないと判断して据え置いているもの。状況が変わったら再評価する。
+- **Windows の ACL 未対応**: パーミッション系は全て `#[cfg(unix)]`。Windows では
+  tracking DB / tee / 監査ログが OS デフォルト権限のまま。対応するなら `icacls`
+  相当か ACL クレートが必要。Windows でのマルチユーザー運用が現実になったら着手。
+- **override パス配下の既存ファイル遡及なし**: `BDO_DB_PATH` / `BDO_TEE_DIR` /
+  config で指定したディレクトリでは、修正前に作られたファイルの権限に手を入れない
+  （共有ディレクトリを壊さないため、意図的）。新規作成分は保護される。
+- **`ci.yml` のアクション未 pin**: `release.yml` は SHA pin 済みだが `ci.yml` は
+  `@v6` / `@1.91` のまま。`permissions: contents: read` かつシークレット無しなので
+  トークン漏洩経路にはならず、優先度は低い。揃えるなら `check-release-hardening.sh`
+  の対象に `ci.yml` を足すだけでガードも効く。
+- **パターン外の秘密は平文**: `core::redact` は高確度パターンのみ。取り逃しは
+  0600/0700 のパーミッション層が受ける設計（fail-safe で誤検知しない側に倒した結果）。
+
+### 既知の不具合（軽微・未修正）
+- **README のバッジが 404**: `README.md` / `README_ja.md` 冒頭の CI バッジが
+  `workflows/Security%20Check/badge.svg` を参照しているが、そのワークフローは存在
+  しない（実在は `CI` と `Release`）。画像が壊れて表示される。正しくは
+  `actions/workflows/ci.yml/badge.svg`（"passing" を返すことを確認済み）。
+  併せてバッジ・リンク類が旧リポジトリ名 `TokenReductionTool` を指している
+  （リダイレクトで動くが `TokenReductionTool-BDO` に揃えるべき）。
+
+### チップ（Claude Code 上で1クリック着手可）
+- **`task_0bbc6dfb`**: tracking の flaky テスト（実ユーザー DB + env 共有のレース）。
+  CI では Linux / Windows とも今のところ一度も赤くなっていないが、レース自体は残る。
+  散発的に落ち始めたら消化のタイミング。

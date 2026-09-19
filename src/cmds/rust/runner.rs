@@ -102,52 +102,29 @@ impl StreamFilter for ErrorStreamFilter {
     }
 }
 
-fn build_shell_command(command: &str) -> Command {
-    if cfg!(target_os = "windows") {
-        let mut c = Command::new("cmd");
-        c.args(["/C", command]);
-        c
-    } else {
-        let mut c = Command::new("sh");
-        c.args(["-c", command]);
-        c
-    }
-}
-
 fn build_argv_command(program: &str, args: &[String]) -> Command {
     let mut c = Command::new(program);
     c.args(args);
     c
 }
 
-/// Run a command and filter output to show only errors/warnings
-pub fn run_err(command: &str, verbose: u8) -> Result<i32> {
+/// Run a command via argv and filter output to show only errors/warnings.
+///
+/// argv, never `sh -c`: `bdo err` receives the user's already-split argument
+/// vector, and re-joining it into a shell string destroyed the boundaries —
+/// `'a b'` became two arguments — and let shell metacharacters inside an
+/// argument execute. `display` is for logs/headers only; it is never run.
+pub fn run_err_argv(program: &str, args: &[String], display: &str, verbose: u8) -> Result<i32> {
     if verbose > 0 {
-        eprintln!("Running: {}", command);
+        eprintln!("Running: {}", display);
     }
-    let cmd = build_shell_command(command);
+    let cmd = build_argv_command(program, args);
     crate::core::runner::run_streamed(
         cmd,
         "err",
-        command,
+        display,
         Box::new(ErrorStreamFilter::new()),
         crate::core::runner::RunOptions::with_tee("err"),
-    )
-}
-
-/// Run tests and show only failures
-pub fn run_test(command: &str, verbose: u8) -> Result<i32> {
-    if verbose > 0 {
-        eprintln!("Running tests: {}", command);
-    }
-    let cmd = build_shell_command(command);
-    let command_owned = command.to_string();
-    crate::core::runner::run_filtered(
-        cmd,
-        "test",
-        command,
-        move |raw| extract_test_summary(raw, &command_owned),
-        crate::core::runner::RunOptions::with_tee("test"),
     )
 }
 

@@ -154,17 +154,33 @@ fn parse_native_find_args(args: &[String]) -> Result<FindArgs> {
 }
 
 /// Parse Bushido syntax: `find <pattern> [path] [-m max] [-t type]`
-fn parse_rtk_find_args(args: &[String]) -> Result<FindArgs> {
-    let mut parsed = FindArgs {
-        pattern: args[0].clone(),
-        ..FindArgs::default()
-    };
-    let mut i = 1;
+/// A bare first argument that reads as a path, not a glob: it has a directory
+/// separator and no glob metacharacters. Native `find /some/dir` means "start
+/// there"; treating it as a pattern searched under `.` silently runs a
+/// different command (and, for a missing dir, exits 0 instead of 1).
+fn looks_like_path(arg: &str) -> bool {
+    (arg.contains('/') || arg.contains(std::path::MAIN_SEPARATOR))
+        && !arg.contains(['*', '?', '['])
+}
 
-    // Second positional arg (if not a flag) is the path
-    if i < args.len() && !args[i].starts_with('-') {
-        parsed.path = args[i].clone();
+fn parse_rtk_find_args(args: &[String]) -> Result<FindArgs> {
+    let mut parsed = FindArgs::default();
+    let mut i = 0;
+
+    // `bdo find <path>` with no pattern: keep native find's meaning (list
+    // everything under <path>) rather than re-reading the path as a glob.
+    if looks_like_path(&args[0]) && (args.len() == 1 || args[1].starts_with('-')) {
+        parsed.path = args[0].clone();
+        parsed.pattern = "*".to_string();
+        i = 1;
+    } else {
+        parsed.pattern = args[0].clone();
         i += 1;
+        // Second positional arg (if not a flag) is the path
+        if i < args.len() && !args[i].starts_with('-') {
+            parsed.path = args[i].clone();
+            i += 1;
+        }
     }
 
     while i < args.len() {
@@ -214,6 +230,14 @@ pub fn run(
     verbose: u8,
 ) -> Result<()> {
     let timer = tracking::TimedExecution::start();
+
+    // bdo walks the tree itself rather than proxying `find`, so a missing
+    // starting point would otherwise be indistinguishable from "no matches"
+    // and exit 0. Native find reports it and exits 1; match that, since a
+    // caller chaining `bdo find … && …` relies on the status.
+    if !std::path::Path::new(path).exists() {
+        anyhow::bail!("find: {path}: No such file or directory");
+    }
 
     // Treat "." as match-all
     let effective_pattern = if pattern == "." { "*" } else { pattern };

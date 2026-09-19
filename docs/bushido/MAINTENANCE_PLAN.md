@@ -279,7 +279,25 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 - **`bdo map` シンボルフィルタ / ドリルダウン**: `bdo map --grep <sym>`、map から特定ファイルを outline へ。
 
 ### 要切り分け
-- **複合コマンド/パイプ堅牢性**: `cmd && echo` 連鎖の出力切れ・exit code 干渉の事象あり。フィルタが stdout/exit code を変えない保証（ハーネス側要因の可能性もあり要調査）。
+- ✅ ~~**複合コマンド/パイプ堅牢性**~~（2026-09-19 調査・修正）: **bdo 側の問題だった**。
+  ハーネスは無関係。`bdo proxy`（素通し）を正解に exit code を総当たりで比較して特定。
+  - **根本原因①** `bdo err` / `bdo test` が引数を `join(" ")` → `sh -c` で再実行していた
+    （`runner.rs` の `build_shell_command`）。`'a b'` が2引数に分割され、引数内の
+    `;` `$()` がシェルに解釈される — **コマンドインジェクション**（`touch` の実行を実証）。
+    別のコマンドが走るので出力も exit code も変わる。これが台帳の症状の正体。
+    同じファイルに argv 実行の `build_argv_command` が既にあり（`3214d05` で
+    `test --changed` だけ移行済み）、素の `err`/`test` が取り残されていた。
+    → 両方を argv 実行に切り替え、`build_shell_command` を削除。空コマンドは
+    `sh -c ""` で exit 0 していたのを明示エラーに。シェル構文が要るなら
+    `bdo test sh -c '...'` と書けば1引数として正しく届く。
+  - **根本原因②** `bdo find` は自前走査のため存在しないパスで exit 0（native は 1）。
+    さらに hook が `find <dir>` を `bdo find <dir>` に書き換えると、`<dir>` を
+    **glob パターンとして cwd を検索**していた（native の「`<dir>` 配下を列挙」と
+    意味が違う）。→ 区切り文字を含み glob 文字を含まない単独引数はパス扱いに、
+    パス不在は native と同じメッセージで exit 1 に。
+  - 統合テスト `tests/wrapped_command_argv.rs`（7件、実バイナリ）で固定。
+  - **スコープ外として残す**: `bdo find <path> <pattern>`（パス→パターン順）は
+    元から未対応で今回も未対応。ドキュメント上の順序は `<pattern> <path>`。
 - **`cat f | shasum` 等パイプ時の raw passthrough**: エージェントは常にパイプ実行のためフィルタが広範に無効化される副作用があり要設計判断（選択肢C）。
 
 ### セキュリティ残余（認識済み・意図的に未対応、2026-09-19 時点）

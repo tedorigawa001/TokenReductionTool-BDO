@@ -1405,6 +1405,27 @@ fn shell_split(input: &str) -> Vec<String> {
     discover::lexer::shell_split(input)
 }
 
+/// Split a wrapped command (`bdo err <cmd...>` / `bdo test <cmd...>`) into
+/// the program to exec, its argv, and a display string for logs.
+///
+/// The argv is passed straight to `Command::args` — never re-joined and fed to
+/// `sh -c`. Joining destroyed argument boundaries (`'a b'` became two args) and
+/// turned shell metacharacters inside an argument into executable syntax; both
+/// changed which command actually ran, which is how "wrong exit code / missing
+/// output" surfaced. Shell semantics remain available explicitly:
+/// `bdo test sh -c '...'` now passes the quoted string through intact.
+fn split_wrapped_command<'a>(
+    subcommand: &str,
+    command: &'a [String],
+) -> Result<(&'a str, &'a [String], String)> {
+    let Some((program, args)) = command.split_first() else {
+        anyhow::bail!(
+            "bdo {subcommand}: no command given (usage: bdo {subcommand} <cmd> [args...])"
+        );
+    };
+    Ok((program.as_str(), args, command.join(" ")))
+}
+
 /// Recover `--changed`/`--against` for `bdo test` from the trailing command.
 ///
 /// `trailing_var_arg` sweeps any flags after the test command into `command`
@@ -1805,8 +1826,8 @@ fn run_cli() -> Result<i32> {
         }
 
         Commands::Err { command } => {
-            let cmd = command.join(" ");
-            runner::run_err(&cmd, cli.verbose)?
+            let (program, args, display) = split_wrapped_command("err", &command)?;
+            runner::run_err_argv(program, args, &display, cli.verbose)?
         }
 
         Commands::Test {
@@ -1820,8 +1841,8 @@ fn run_cli() -> Result<i32> {
             if changed {
                 ci::run_changed_tests(against.as_deref(), &command, cli.verbose)?
             } else {
-                let cmd = command.join(" ");
-                runner::run_test(&cmd, cli.verbose)?
+                let (program, args, display) = split_wrapped_command("test", &command)?;
+                runner::run_test_argv(program, args, &display, cli.verbose)?
             }
         }
 

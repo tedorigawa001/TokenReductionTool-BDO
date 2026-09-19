@@ -7,13 +7,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/tedorigawa001/TokenReductionTool/actions"><img src="https://github.com/tedorigawa001/TokenReductionTool/workflows/Security%20Check/badge.svg" alt="CI"></a>
-  <a href="https://github.com/tedorigawa001/TokenReductionTool/releases"><img src="https://img.shields.io/github/v/release/tedorigawa001/TokenReductionTool" alt="Release"></a>
+  <a href="https://github.com/tedorigawa001/TokenReductionTool-BDO/actions"><img src="https://github.com/tedorigawa001/TokenReductionTool-BDO/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/tedorigawa001/TokenReductionTool-BDO/releases"><img src="https://img.shields.io/github/v/release/tedorigawa001/TokenReductionTool-BDO" alt="Release"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/tedorigawa001/TokenReductionTool">ウェブサイト</a> &bull;
+  <a href="https://github.com/tedorigawa001/TokenReductionTool-BDO">ウェブサイト</a> &bull;
   <a href="#インストール">インストール</a> &bull;
   <a href="docs/guide/resources/troubleshooting.md">トラブルシューティング</a> &bull;
   <a href="docs/contributing/ARCHITECTURE.md">アーキテクチャ</a>
@@ -56,13 +56,13 @@ curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BD
 ### Cargo
 
 ```bash
-cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 ```
 
 ### 確認
 
 ```bash
-bdo --version   # "bdo 0.45.2" と表示されるはず
+bdo --version   # "bdo 0.45.3" と表示されるはず
 bdo gain        # トークン節約統計が表示されるはず
 ```
 

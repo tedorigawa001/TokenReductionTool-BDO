@@ -7,13 +7,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/tedorigawa001/TokenReductionTool/actions"><img src="https://github.com/tedorigawa001/TokenReductionTool/workflows/Security%20Check/badge.svg" alt="CI"></a>
-  <a href="https://github.com/tedorigawa001/TokenReductionTool/releases"><img src="https://img.shields.io/github/v/release/tedorigawa001/TokenReductionTool" alt="Release"></a>
+  <a href="https://github.com/tedorigawa001/TokenReductionTool-BDO/actions"><img src="https://github.com/tedorigawa001/TokenReductionTool-BDO/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/tedorigawa001/TokenReductionTool-BDO/releases"><img src="https://img.shields.io/github/v/release/tedorigawa001/TokenReductionTool-BDO" alt="Release"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/tedorigawa001/TokenReductionTool">Website</a> &bull;
+  <a href="https://github.com/tedorigawa001/TokenReductionTool-BDO">Website</a> &bull;
   <a href="#installation">Install</a> &bull;
   <a href="docs/guide/resources/troubleshooting.md">Troubleshooting</a> &bull;
   <a href="docs/contributing/ARCHITECTURE.md">Architecture</a>
@@ -70,12 +70,12 @@ curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BD
 ### Cargo
 
 ```bash
-cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 ```
 
 ### Pre-built Binaries
 
-Download from [releases](https://github.com/tedorigawa001/TokenReductionTool/releases):
+Download from [releases](https://github.com/tedorigawa001/TokenReductionTool-BDO/releases):
 Archives are named after the crate (`bushido`); the binary inside is `bdo`.
 Each has a `.sha256` sidecar — verify before extracting.
 
@@ -88,7 +88,7 @@ Each has a `.sha256` sidecar — verify before extracting.
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.45.2"
+bdo --version   # Should show "bdo 0.45.3"
 bdo gain        # Should show token savings stats
 ```
 
@@ -496,7 +496,7 @@ Bushido supports 14 AI coding tools. Each integration rewrites shell commands to
 | **OpenClaw** | `openclaw plugins install ./openclaw` | Plugin TS (before_tool_call) |
 | **Pi** | `bdo init -g --agent pi` (global) | TypeScript extension (tool_call) |
 | **Hermes** | `bdo init --agent hermes` | Python plugin adapter (terminal command mutation via `bdo rewrite`) |
-| **Mistral Vibe** | Planned ([#800](https://github.com/tedorigawa001/TokenReductionTool/issues/800)) | Blocked on upstream |
+| **Mistral Vibe** | Planned ([#800](https://github.com/tedorigawa001/TokenReductionTool-BDO/issues/800)) | Blocked on upstream |
 | **Kilo Code** | `bdo init --agent kilocode` | .kilocode/rules/bdo-rules.md (project-scoped) |
 | **Google Antigravity** | `bdo init --agent antigravity` | .agents/rules/antigravity-bdo-rules.md (project-scoped) |
 
@@ -534,7 +534,7 @@ brew uninstall bdo           # If installed via Homebrew
 
 ## Documentation
 
-- **[docs/guide](https://github.com/tedorigawa001/TokenReductionTool/tree/master/docs/guide)** — full user guide (installation, supported agents, what gets optimized, analytics, configuration, troubleshooting)
+- **[docs/guide](https://github.com/tedorigawa001/TokenReductionTool-BDO/tree/main/docs/guide)** — full user guide (installation, supported agents, what gets optimized, analytics, configuration, troubleshooting)
 - **[INSTALL.md](INSTALL.md)** — detailed installation reference
 - **[ARCHITECTURE.md](docs/contributing/ARCHITECTURE.md)** — system design and technical decisions
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — contribution guide
@@ -588,11 +588,11 @@ export BDO_TELEMETRY_DISABLED=1   # Blocks telemetry regardless of consent
 
 ## StarMapper
 
-<a href="https://starmapper.bruniaux.com/tedorigawa001/TokenReductionTool">
+<a href="https://starmapper.bruniaux.com/tedorigawa001/TokenReductionTool-BDO">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool?theme=dark" />
     <source media="(prefers-color-scheme: light)" srcset="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool?theme=light" />
-    <img alt="StarMapper" src="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool" />
+    <img alt="StarMapper" src="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool-BDO" />
   </picture>
 </a>
 

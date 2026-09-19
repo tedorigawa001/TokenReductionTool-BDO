@@ -5,6 +5,24 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.3] (2026-09-19)
+
+### Security
+
+- **RUSTSEC-2026-0285**: `rustls` 0.23.37 → 0.23.45 (transitive, via `ureq`
+  for telemetry). TLS 1.3 handshake messages were incorrectly accepted across
+  encryption level boundaries. Only reachable when telemetry is enabled, which
+  is off by default. Caught by the `cargo audit` CI gate on an unrelated
+  docs-only PR five days after the advisory was published.
+
+### Fixes
+
+- **README badge**: the CI badge pointed at a `Security Check` workflow that
+  does not exist and rendered as a broken image. Now points at `ci.yml`.
+  Repository links in both READMEs updated from the pre-rename
+  `TokenReductionTool` to `TokenReductionTool-BDO`, and a stale
+  `tree/master` link to `tree/main`.
+
 ## [0.45.2] (2026-09-11)
 
 ### Security

@@ -12,7 +12,9 @@ use std::process::Command;
 
 /// A script that echoes each argv element bracketed on its own line and exits
 /// with a distinctive code, so a test can see both what the child received and
-/// whether bdo propagated its status.
+/// whether bdo propagated its status. Only the unix tests use it — without
+/// this gate it is dead code on Windows, and `-D warnings` fails the build.
+#[cfg(unix)]
 fn argv_probe(dir: &Path) -> std::path::PathBuf {
     let p = dir.join("probe.sh");
     fs::write(

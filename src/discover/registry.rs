@@ -556,21 +556,15 @@ fn rewrite_compound(
                 }
             }
             TokenKind::Pipe => {
+                // A segment that feeds a pipe is consumed by the next program,
+                // not by the agent — the agent only ever sees the pipeline's
+                // final output. Filtering here can't save a token; it can only
+                // change what the consumer receives (`cat f | wc -l` counted
+                // bdo's truncated view, not the file). Leave it exactly as
+                // written. This generalizes the old find/fd-only exemption
+                // (#439): the incompatibility was never specific to those two.
                 let seg = cmd[seg_start..tok.offset].trim();
-                let is_pipe_incompatible = seg.starts_with("find ")
-                    || seg == "find"
-                    || seg.starts_with("fd ")
-                    || seg == "fd";
-                let rewritten = if is_pipe_incompatible {
-                    seg.to_string()
-                } else {
-                    rewrite_segment(seg, excluded, transparent_prefixes)
-                        .unwrap_or_else(|| seg.to_string())
-                };
-                if rewritten != seg {
-                    any_changed = true;
-                }
-                result.push_str(&rewritten);
+                result.push_str(seg);
 
                 let pipe_group_end = tokens.iter().find(|t| {
                     t.offset > tok.offset
@@ -1622,18 +1616,30 @@ mod tests {
     }
 
     #[test]
-    fn test_rewrite_pipe_first_only() {
-        // After a pipe, the filter command stays raw
+    fn test_rewrite_into_pipe_skipped() {
+        // A segment feeding a pipe is consumed by the next program, not the
+        // agent, so filtering it can only change what that program receives.
+        // `git log | wc -l` counted bdo's 50-entry cap instead of the real
+        // history. Nothing on the left of a pipe is rewritten.
         assert_eq!(
             rewrite_command_no_prefixes("git log -10 | grep feat", &[]),
-            Some("bdo git log -10 | grep feat".into())
+            None
+        );
+        assert_eq!(
+            rewrite_command_no_prefixes("cat src/main.rs | wc -l", &[]),
+            None
+        );
+        assert_eq!(
+            rewrite_command_no_prefixes("git log --oneline | wc -l", &[]),
+            None
         );
     }
 
     #[test]
     fn test_rewrite_find_pipe_skipped() {
-        // find in a pipe should NOT be rewritten — rtk find output format
-        // is incompatible with pipe consumers like xargs (#439)
+        // find was the first command exempted from pipe rewriting (#439: its
+        // tree output broke xargs). The exemption is now universal; this pins
+        // that find is still covered by it.
         assert_eq!(
             rewrite_command_no_prefixes("find . -name '*.rs' | xargs grep 'fn run'", &[]),
             None
@@ -1815,7 +1821,7 @@ mod tests {
     fn test_rewrite_redirect_2_gt_amp_1_with_pipe() {
         assert_eq!(
             rewrite_command_no_prefixes("cargo test 2>&1 | head", &[]),
-            Some("bdo cargo test 2>&1 | head".into())
+            None // feeds a pipe: left as written
         );
     }
 
@@ -3388,18 +3394,20 @@ mod tests {
 
     #[test]
     fn test_rewrite_compound_pipe_raw_filter() {
-        // Pipe: rewrite first segment only, pass through rest unchanged
+        // Pipe: the whole pipeline passes through unchanged — grep consumes
+        // cargo's output, not the agent.
         assert_eq!(
             rewrite_command_no_prefixes("cargo test | grep FAILED", &[]),
-            Some("bdo cargo test | grep FAILED".into())
+            None
         );
     }
 
     #[test]
     fn test_rewrite_compound_pipe_git_grep() {
+        // The pipe's left side is consumed by grep, not the agent — untouched.
         assert_eq!(
             rewrite_command_no_prefixes("git log -10 | grep feat", &[]),
-            Some("bdo git log -10 | grep feat".into())
+            None
         );
     }
 
@@ -4129,11 +4137,14 @@ mod tests {
 
     // --- Pipe + operator rewrite ---
 
+    // In a compound command, only the segment that feeds a pipe is left alone;
+    // segments whose output reaches the agent directly are still rewritten.
+
     #[test]
     fn test_rewrite_pipe_then_and() {
         assert_eq!(
             rewrite_command_no_prefixes("git log | head -5 && git stash", &[]),
-            Some("bdo git log | head -5 && bdo git stash".into())
+            Some("git log | head -5 && bdo git stash".into())
         );
     }
 
@@ -4141,7 +4152,7 @@ mod tests {
     fn test_rewrite_pipe_then_semicolon() {
         assert_eq!(
             rewrite_command_no_prefixes("cargo test | head; git status", &[]),
-            Some("bdo cargo test | head; bdo git status".into())
+            Some("cargo test | head; bdo git status".into())
         );
     }
 
@@ -4149,7 +4160,7 @@ mod tests {
     fn test_rewrite_pipe_then_or() {
         assert_eq!(
             rewrite_command_no_prefixes("cargo test | grep FAIL || git stash", &[]),
-            Some("bdo cargo test | grep FAIL || bdo git stash".into())
+            Some("cargo test | grep FAIL || bdo git stash".into())
         );
     }
 
@@ -4160,7 +4171,7 @@ mod tests {
                 "RUST_BACKTRACE=1 cargo test 2>&1 | grep FAILED && git stash",
                 &[]
             ),
-            Some("RUST_BACKTRACE=1 bdo cargo test 2>&1 | grep FAILED && bdo git stash".into())
+            Some("RUST_BACKTRACE=1 cargo test 2>&1 | grep FAILED && bdo git stash".into())
         );
     }
 
@@ -4168,7 +4179,7 @@ mod tests {
     fn test_rewrite_and_then_pipe() {
         assert_eq!(
             rewrite_command_no_prefixes("git status && cargo test | grep FAIL", &[]),
-            Some("bdo git status && bdo cargo test | grep FAIL".into())
+            Some("bdo git status && cargo test | grep FAIL".into())
         );
     }
 
@@ -4176,7 +4187,7 @@ mod tests {
     fn test_rewrite_multi_pipe_then_and() {
         assert_eq!(
             rewrite_command_no_prefixes("git log | head | tail && git status", &[]),
-            Some("bdo git log | head | tail && bdo git status".into())
+            Some("git log | head | tail && bdo git status".into())
         );
     }
 

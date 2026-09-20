@@ -5,6 +5,31 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.5] (2026-09-20)
+
+### Fixes
+
+- **The hook no longer rewrites a command that feeds a pipe.** The agent
+  only ever sees a pipeline's final output, so rewriting the left side to
+  `bdo …` never saved a token — it only changed what the next program
+  received. `cat src/main.rs | wc -l` counted bdo's truncated view (400)
+  instead of the file (3614); `git log --oneline | wc -l` reported the
+  50-entry cap, not the real 105 commits. Every command is now left exactly
+  as written when a `|` follows it; in a compound, only that segment is
+  exempt (`git status && cat f | wc -l` still becomes
+  `bdo git status && cat f | wc -l`). This generalizes the `find`/`fd`-only
+  exemption from #439.
+
+  **Visible side effect**: commands on the left of a pipe no longer appear
+  in `bdo gain` — bdo isn't in that path anymore. The filtered command whose
+  output the agent actually reads (the pipeline's last, or any unpiped
+  command) is tracked as before.
+
+- **`bdo test --changed`** aborted the whole plan when one language's runner
+  was missing — a machine without `go` never ran the Python tests, with no
+  error beyond the printed plan header. That language now fails and the
+  rest still run.
+
 ## [0.45.4] (2026-09-19)
 
 ### Security

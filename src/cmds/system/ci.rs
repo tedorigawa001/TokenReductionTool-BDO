@@ -42,11 +42,20 @@ pub fn run_changed_tests(against: Option<&str>, command: &[String], verbose: u8)
         return Ok(0);
     }
     // Run each language's tests in turn; surface the first non-zero exit so a
-    // later pass can't mask an earlier failure.
+    // later pass can't mask an earlier failure. A runner that can't even
+    // start (`go` not installed) is a failure for *that* language, not a
+    // reason to abandon the others — a missing Go toolchain must not stop
+    // the Python tests from running.
     let mut worst = 0;
     for tc in &plan {
         println!("bdo test --changed [{}]: {}", tc.lang, tc.display);
-        let code = runner::run_test_argv(&tc.program, &tc.args, &tc.display, verbose)?;
+        let code = match runner::run_test_argv(&tc.program, &tc.args, &tc.display, verbose) {
+            Ok(code) => code,
+            Err(e) => {
+                eprintln!("bdo test --changed [{}]: {:#}", tc.lang, e);
+                1
+            }
+        };
         if code != 0 && worst == 0 {
             worst = code;
         }

@@ -5,6 +5,38 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.7] (2026-09-26)
+
+### Features
+
+- **`bdo stale` / `bdo review` flag package-manager commands that use the
+  binary name.** Homebrew, cargo, and the tap all key on the package name —
+  `bushido` — not the binary, `bdo`, so `brew install bdo`,
+  `cargo uninstall bdo`, `tap/bdo` and friends fail outright. Only
+  `cargo install bdo` was caught before. The npm form is deliberately not a
+  marker: it would also match the correct `bdo-cli`.
+
+### Fixes
+
+- **Documented install commands.** Every Homebrew instruction said
+  `brew install bdo`, which fails with "No available formula" — the formula is
+  `bushido`. Uninstall lines, including `cargo uninstall`, had the same
+  problem. Fixed in both READMEs, the installation guide, `INSTALL.md`, and
+  the OpenClaw README.
+- **`brew upgrade` silently not upgrading.** Recent Homebrew skips untrusted
+  third-party taps during `brew update` without an error, so the local
+  formula goes stale and `brew upgrade bushido` reports up to date. Install
+  instructions now run `brew trust --formula tedorigawa001/tap/bushido`
+  first; existing users should run it once, then
+  `brew update && brew upgrade bushido`.
+
+### Chores
+
+- Removed `Formula/bdo.rb`, an unreferenced hand-written formula from before
+  the cargo-dist pipeline (version 0.1.0, placeholder checksums). The
+  published formula is generated into the tap as `bushido.rb`. Found by the
+  new markers on their first run.
+
 ## [0.45.6] (2026-09-26)
 
 ### Features

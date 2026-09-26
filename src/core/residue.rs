@@ -63,6 +63,38 @@ pub fn stale_markers() -> Vec<(String, &'static str)> {
             concat!("cargo install ", "bdo").to_string(),
             "wrong crate name (use --git or `bushido`)",
         ),
+        // Package managers take the package name, which is the crate
+        // (`bushido`), not the binary (`bdo`). Each of these fails outright —
+        // Homebrew finds no formula by the binary's name. Matching is by
+        // substring, so only forms with no valid `bdo…` continuation are
+        // listed: there is no `bdo-*` formula or crate, whereas the npm
+        // install form would also hit the correct `bdo-cli` package and is
+        // deliberately left out. (This comment avoids spelling the markers
+        // out, or the audit would flag its own source.)
+        (
+            concat!("cargo un", "install bdo").to_string(),
+            "cargo takes the package name (`cargo uninstall bushido`)",
+        ),
+        (
+            concat!("brew install ", "bdo").to_string(),
+            "no such formula (`brew install bushido`)",
+        ),
+        (
+            concat!("brew uninstall ", "bdo").to_string(),
+            "no such formula (`brew uninstall bushido`)",
+        ),
+        (
+            concat!("brew upgrade ", "bdo").to_string(),
+            "no such formula (`brew upgrade bushido`)",
+        ),
+        (
+            concat!("brew reinstall ", "bdo").to_string(),
+            "no such formula (`brew reinstall bushido`)",
+        ),
+        (
+            concat!("tap/", "bdo").to_string(),
+            "no such formula in the tap (`tedorigawa001/tap/bushido`)",
+        ),
         (
             concat!("rtk", "-rewrite").to_string(),
             "legacy hook script name",
@@ -193,6 +225,39 @@ mod tests {
     #[test]
     fn test_scan_stale_clean_content() {
         assert!(scan_stale("a perfectly normal file\nwith no residue\n").is_empty());
+    }
+
+    #[test]
+    fn test_scan_stale_flags_binary_name_as_package_name() {
+        // Each of these fails outright: the formula and crate are `bushido`.
+        for wrong in [
+            concat!("brew install ", "bdo"),
+            concat!("brew uninstall ", "bdo"),
+            concat!("brew upgrade ", "bdo"),
+            concat!("brew reinstall ", "bdo"),
+            concat!("brew install tedorigawa001/tap/", "bdo"),
+            concat!("cargo un", "install bdo"),
+        ] {
+            assert_eq!(scan_stale(wrong).len(), 1, "must flag: {wrong}");
+        }
+    }
+
+    #[test]
+    fn test_scan_stale_leaves_correct_install_commands_alone() {
+        // The substring markers must not catch the forms the docs should use,
+        // or the command the tool itself is invoked as.
+        for right in [
+            "brew install bushido",
+            "brew install tedorigawa001/tap/bushido",
+            "brew trust --formula tedorigawa001/tap/bushido",
+            "brew upgrade bushido",
+            "cargo uninstall bushido",
+            "npm install -g bdo-cli",
+            "bdo --version",
+            "brew install bushido && bdo init -g",
+        ] {
+            assert!(scan_stale(right).is_empty(), "must not flag: {right}");
+        }
     }
 
     #[test]

@@ -25,8 +25,13 @@ curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BD
 ## Homebrew (macOS and Linux)
 
 ```bash
-brew install tedorigawa001/tap/bdo
+brew trust --formula tedorigawa001/tap/bushido
+brew install tedorigawa001/tap/bushido
 ```
+
+The formula is named after the crate (`bushido`); it installs the `bdo` command.
+Recent Homebrew silently skips untrusted third-party taps during `brew update`,
+so without the `brew trust` line `brew upgrade` never sees new versions.
 
 ## Cargo
 
@@ -69,6 +74,6 @@ bdo init --global
 
 ```bash
 bdo init -g --uninstall    # remove hook, Bushido.md, and settings.json entry
-cargo uninstall bdo         # remove binary (if installed via Cargo)
-brew uninstall bdo          # remove binary (if installed via Homebrew)
+cargo uninstall bushido     # remove binary (if installed via Cargo)
+brew uninstall bushido      # remove binary (if installed via Homebrew)
 ```

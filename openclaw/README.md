@@ -17,7 +17,8 @@ All rewrite logic lives in Bushido itself (`bdo rewrite`). This plugin is a thin
 Bushido must be installed and available in `$PATH`:
 
 ```bash
-brew install bdo
+brew trust --formula tedorigawa001/tap/bushido
+brew install tedorigawa001/tap/bushido
 # or
 curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```

@@ -238,13 +238,13 @@ bdo init -g --uninstall
 ### Binary Removal
 
 ```bash
-# If installed via cargo
-cargo uninstall bdo
+# If installed via cargo (the package is the crate, `bushido`)
+cargo uninstall bushido
 
-# If installed via package manager
-brew uninstall bdo          # macOS Homebrew
-sudo apt remove bdo         # Debian/Ubuntu
-sudo dnf remove bdo         # Fedora/RHEL
+# If installed via package manager (packages are named after the crate too)
+brew uninstall bushido      # macOS Homebrew
+sudo apt remove bushido     # Debian/Ubuntu (self-built via `cargo deb`)
+sudo dnf remove bushido     # Fedora/RHEL (self-built via `cargo generate-rpm`)
 ```
 
 ### Restore from Backup (if needed)

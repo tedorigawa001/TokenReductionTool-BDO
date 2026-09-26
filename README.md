@@ -381,8 +381,8 @@ bdo session                     # Show Bushido adoption across recent sessions
 ```
 
 `--by-agent` attributes each command to the AI agent that ran it — auto-detected
-from the agent's environment (Claude Code, Gemini CLI, Copilot, Cursor), or set
-explicitly via `BDO_AGENT=<name>`. Commands with no detectable agent show as
+from the agent's environment (Claude Code, Codex, Gemini CLI, Google
+Antigravity, Copilot, Cursor), or set explicitly via `BDO_AGENT=<name>`. Commands with no detectable agent show as
 `(other/direct)`.
 
 ## Global Flags

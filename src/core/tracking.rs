@@ -75,6 +75,10 @@ fn classify_agent(explicit: Option<&str>, env_keys: &[String]) -> String {
     let has_prefix = |p: &str| env_keys.iter().any(|k| k.starts_with(p));
     if has("CLAUDECODE") || has_prefix("CLAUDE_CODE") {
         "claude".to_string()
+    } else if has("CODEX_THREAD_ID") || has("CODEX_SESSION_ID") {
+        // Runtime markers observed in Codex agent shells. Configuration-only
+        // variables such as CODEX_HOME must not classify a human shell as Codex.
+        "codex".to_string()
     } else if has_prefix("ANTIGRAVITY") {
         // Google Antigravity (Gemini's successor IDE): its agent shell exports
         // ANTIGRAVITY_AGENT=1 plus ANTIGRAVITY_{TRAJECTORY,CONVERSATION,…}_ID.
@@ -1658,6 +1662,26 @@ mod tests {
         );
         // Blank explicit value falls through to sniffing.
         assert_eq!(classify_agent(Some("  "), &keys(&["CLAUDECODE"])), "claude");
+    }
+
+    #[test]
+    fn test_classify_agent_codex() {
+        for marker in ["CODEX_THREAD_ID", "CODEX_SESSION_ID"] {
+            assert_eq!(classify_agent(None, &keys(&[marker, "PATH"])), "codex");
+            assert_eq!(classify_agent(Some("  "), &keys(&[marker])), "codex");
+            assert_eq!(classify_agent(Some("custom"), &keys(&[marker])), "custom");
+        }
+    }
+
+    #[test]
+    fn test_classify_agent_codex_requires_runtime_marker() {
+        assert_eq!(
+            classify_agent(
+                None,
+                &keys(&["CODEX_HOME", "CODEX_VERSION", "CODEX_THREAD_ID_EXTRA"])
+            ),
+            ""
+        );
     }
 
     #[test]

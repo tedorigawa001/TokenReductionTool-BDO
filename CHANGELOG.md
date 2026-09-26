@@ -5,6 +5,17 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.6] (2026-09-26)
+
+### Features
+
+- **`bdo gain --by-agent` recognizes Codex.** Commands run from a Codex
+  agent shell are now attributed to `codex` instead of `(other/direct)`,
+  detected from `CODEX_THREAD_ID` (or `CODEX_SESSION_ID`), which Codex
+  exports into the shells it spawns. Configuration variables such as
+  `CODEX_HOME` deliberately don't count — they're set in ordinary human
+  shells too.
+
 ## [0.45.5] (2026-09-20)
 
 ### Fixes

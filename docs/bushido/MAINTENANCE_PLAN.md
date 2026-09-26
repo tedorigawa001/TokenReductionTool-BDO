@@ -352,6 +352,22 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   `actions/workflows/ci.yml/badge.svg` に、`README.md` / `README_ja.md` 内の
   GitHub / shields.io / starmapper のリポジトリ名を `TokenReductionTool-BDO` に、
   `tree/master` を `tree/main` に統一。
+- ✅ ~~ドキュメントの Homebrew / Cargo コマンドが失敗する~~（2026-09-26 修正）:
+  README ×2・installation.md・INSTALL.md・openclaw の計10箇所が、パッケージ名
+  ではなく**バイナリ名 `bdo`** を使っていた。`brew install bdo` は
+  `No available formula with the name "bdo"` で失敗（formula は `bushido.rb` のみ）、
+  `cargo uninstall bdo` もパッケージ名を取るので失敗。Homebrew・Cargo・deb・rpm
+  いずれもクレート名 `bushido` に統一。install.sh（`bdo-*.tar.gz` を要求していた、
+  v0.45.1 で修正）と同じ「バイナリ名とクレート名の取り違え」パターン。
+- **Homebrew の Tap Trust で `brew upgrade` が黙って止まる**（2026-09-26 記録）:
+  最近の Homebrew は信頼されていないサードパーティのタップを `brew update` の対象
+  から**エラーなしで**外す。ローカルの formula が古いままなので `brew upgrade` は
+  「最新」と判断し、`bdo --version` は上がらない。v0.45.6 で実際に踏んだ。
+  対処は `brew trust --formula tedorigawa001/tap/bushido` を一度実行してから
+  `brew update && brew upgrade bushido`。README ×2・installation.md・openclaw の
+  インストール手順に trust の行と注意書きを追加済み。**症状は PATH shadowing
+  （別の場所の古い bdo が優先される）と同じ「バージョンが上がらない」なので、
+  まず `brew list --versions bushido` とタップ側 formula の version を比べて切り分ける。**
 
 ### チップ（Claude Code 上で1クリック着手可）
 - **`task_0bbc6dfb`**: tracking の flaky テスト（実ユーザー DB + env 共有のレース）。

@@ -44,8 +44,16 @@ bdo はコマンド出力を LLM コンテキストに届く前にフィルタ�
 ### Homebrew
 
 ```bash
-brew tap tedorigawa001/tap && brew install bdo
+brew tap tedorigawa001/tap
+brew trust --formula tedorigawa001/tap/bushido
+brew install bushido
 ```
+
+formula 名はクレート名の `bushido` です(インストールされるコマンドは `bdo`)。
+
+> **`brew upgrade` でバージョンが上がらない場合**: 最近の Homebrew は信頼されていない
+> サードパーティのタップを `brew update` の対象から**エラーを出さずに**外します。
+> 上の `brew trust` を一度実行してから `brew update && brew upgrade bushido` してください。
 
 ### クイックインストール（Linux/macOS）
 

@@ -53,8 +53,17 @@ bdo filters and compresses command outputs before they reach your LLM context. S
 ### Homebrew
 
 ```bash
-brew tap tedorigawa001/tap && brew install bdo
+brew tap tedorigawa001/tap
+brew trust --formula tedorigawa001/tap/bushido
+brew install bushido
 ```
+
+The formula is named after the crate (`bushido`); it installs the `bdo` command.
+
+> **`brew upgrade` not picking up new versions?** Recent Homebrew skips
+> untrusted third-party taps during `brew update` — silently, so `bdo --version`
+> just stays put. Run the `brew trust` line above once, then
+> `brew update && brew upgrade bushido`.
 
 ### Quick Install (Linux/macOS)
 
@@ -528,8 +537,8 @@ For the full config reference (all sections, env vars, per-project filters), see
 
 ```bash
 bdo init -g --uninstall     # Remove hook, Bushido.md, settings.json entry
-cargo uninstall bdo          # Remove binary
-brew uninstall bdo           # If installed via Homebrew
+cargo uninstall bushido      # Remove binary (if installed via Cargo)
+brew uninstall bushido       # If installed via Homebrew
 ```
 
 ## Documentation

@@ -97,7 +97,7 @@ Each has a `.sha256` sidecar — verify before extracting.
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.45.6"
+bdo --version   # Should show "bdo 0.45.7"
 bdo gain        # Should show token savings stats
 ```
 

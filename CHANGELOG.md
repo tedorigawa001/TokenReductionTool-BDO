@@ -5,6 +5,51 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] (2026-10-04)
+
+### Features
+
+- **`--raw` / `BDO_RAW=1`: unreduced output for every command.** One switch
+  replaces the per-command escape hatches, meaning "run as if bdo weren't
+  there":
+
+  ```bash
+  bdo --raw git log            # identical to `git log`, byte for byte, same exit code
+  bdo --raw read src/main.rs   # the whole file
+  BDO_RAW=1 bdo cargo test     # env form, e.g. for a whole session
+  ```
+
+  A command with a same-named program runs it with your arguments unchanged;
+  `err` / `test` / `summary` run what they wrap; `read` shows the full file;
+  commands that run a differently named tool (`lint`, `format`, `vitest`,
+  `jest`, `prisma`, `playwright`) do the same work with bdo's output
+  reduction and parsing-only flags (`--reporter=json` and the like) removed —
+  but keep flags that change what runs, such as vitest's `run` and black's
+  `--check`, so raw mode never hangs in watch mode or rewrites files.
+  bdo-only commands (`gain`, `map`, …) run as usual. Raw runs are tracked at
+  0% savings.
+
+  Put `--raw` before the subcommand; `BDO_RAW=1` works anywhere and leaves the
+  hook's rewriting unchanged. `bdo read -l none`, `BDO_NO_TOML=1` and
+  `bdo proxy` keep working, and `bdo read`'s reduced-view hint now suggests
+  `bdo --raw read <file>`.
+
+### Fixes
+
+- **`bdo lint` mangled output-format options.** `bdo lint ruff check
+  --output-format text .` ran `ruff text .` — `check` and the option were
+  dropped, the option's value left behind. `bdo lint eslint -f stylish` passed
+  `-f json -f stylish`, so eslint used stylish and bdo's JSON parse failed.
+  Each linter's format option is now handled as one unit, in either spelling.
+- **`bdo --raw` or `bdo -v` with no subcommand** tried to run `--raw` / `-v`
+  as a program and exited 127. It's now a usage error.
+
+### Chores
+
+- The dependency audit (`cargo audit`) runs daily in CI, not only on push —
+  a new advisory against a locked dependency no longer waits for the next
+  commit to surface.
+
 ## [0.45.7] (2026-09-26)
 
 ### Features

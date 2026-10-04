@@ -245,6 +245,24 @@ where
     )
 }
 
+/// Raw-mode exit for modules that execute their command themselves (via
+/// `exec_capture`) instead of through [`run`], and so would otherwise filter
+/// regardless of `--raw` / `BDO_RAW=1`. Use as
+/// `if raw::is_active() { return runner::run_raw(cmd, …); }` right before
+/// capturing, with the command built *without* the output-format flags the
+/// module injects for parsing (`--reporter=json` and the like) — but keeping
+/// the ones that change what the command does (`run`, `--check`, a default
+/// `.`), because raw means the same work with unreduced output.
+pub fn run_raw(cmd: Command, tool: &str, args_display: &str) -> Result<i32> {
+    run(
+        cmd,
+        tool,
+        args_display,
+        RunMode::Passthrough,
+        RunOptions::default(),
+    )
+}
+
 pub fn run_passthrough(tool: &str, args: &[std::ffi::OsString], verbose: u8) -> Result<i32> {
     if verbose > 0 {
         eprintln!("{} passthrough: {:?}", tool, args);

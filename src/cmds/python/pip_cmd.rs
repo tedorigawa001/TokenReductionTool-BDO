@@ -33,6 +33,24 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     // Detect subcommand
     let subcommand = args.first().map(|s| s.as_str()).unwrap_or("");
 
+    // Raw mode reaches here only when `pip` itself isn't on PATH (otherwise
+    // `bdo --raw pip …` execs pip directly before clap). Run the same pip/uv
+    // command without the `--format=json` that `list`/`outdated` add for
+    // bdo's parser. `outdated` is bdo's name for `list --outdated` — a
+    // different command, not a format — so it is kept.
+    if crate::core::raw::is_active() {
+        let mut cmd = crate::core::utils::resolved_command(base_cmd);
+        if use_uv {
+            cmd.arg("pip");
+        }
+        if subcommand == "outdated" {
+            cmd.arg("list").arg("--outdated").args(&args[1..]);
+        } else {
+            cmd.args(args);
+        }
+        return crate::core::runner::run_raw(cmd, "pip", &args.join(" "));
+    }
+
     let (cmd_str, filtered, exit_code) = match subcommand {
         "list" => run_list(base_cmd, &args[1..], verbose)?,
         "outdated" => run_outdated(base_cmd, &args[1..], verbose)?,

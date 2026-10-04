@@ -18,9 +18,12 @@
 //! - bdo-only commands (`gain`, `map`, …) have no unfiltered form and run
 //!   as usual.
 //!
-//! Anything that still reaches the core runner while raw mode is active —
-//! a bdo command whose tool has a different name, such as `lint` — runs in
-//! passthrough mode, so bdo never reduces its output.
+//! A command routed `Normal` still reaches its module. A module that runs
+//! through the core runner gets passthrough mode there automatically. A module
+//! that executes on its own (`exec_capture`) must check [`is_active`] and call
+//! `runner::run_raw` itself — it would otherwise filter regardless. That
+//! applies to the commands reachable here: `lint`, `format`, `vitest`/`jest`,
+//! `prisma`, `playwright`, and `pip` in uv-only environments.
 
 use std::ffi::{OsStr, OsString};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -87,6 +90,13 @@ pub fn split_leading_globals(args: &[OsString]) -> Globals {
     g
 }
 
+/// bdo commands named for what they do rather than for the program they run
+/// (`lint` → eslint/ruff/…, `format` → prettier/black/…). A same-named program
+/// on PATH, if one exists, is unrelated — Windows ships `format.com`, the disk
+/// formatter — so these must never be routed to PATH. Their modules honor raw
+/// mode themselves.
+const BDO_NAMED_COMMANDS: &[&str] = &["lint", "format"];
+
 /// Where a raw-mode invocation goes.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Route {
@@ -127,6 +137,7 @@ pub fn route(rest: &[OsString], bdo_only: &[&str], on_path: impl Fn(&OsStr) -> b
         // No `read` program exists; `read` itself honors raw mode.
         Some("read") => Route::Normal,
         Some(s) if bdo_only.contains(&s) || s.starts_with('-') => Route::Normal,
+        Some(s) if BDO_NAMED_COMMANDS.contains(&s) => Route::Normal,
         _ if on_path(sub) => Route::Native {
             program: sub.clone(),
             args: rest[1..].to_vec(),
@@ -228,11 +239,24 @@ mod tests {
 
     #[test]
     fn test_route_tool_without_same_named_program_stays_normal() {
-        // `bdo lint` runs eslint; there is no `lint` program. The runner's
-        // passthrough handles it instead.
+        // `bdo lint` runs eslint; there is no `lint` program. The module
+        // honors raw mode itself.
         assert_eq!(
             route(&os(&["lint"]), BDO_ONLY, exists(&["eslint"])),
             Route::Normal
         );
+    }
+
+    #[test]
+    fn test_route_bdo_named_commands_never_go_to_path() {
+        // Windows ships format.com, the disk formatter. `bdo --raw format`
+        // must reach bdo's formatter wrapper, never that.
+        for c in ["format", "lint"] {
+            assert_eq!(
+                route(&os(&[c, "."]), BDO_ONLY, exists(&["format", "lint"])),
+                Route::Normal,
+                "{c}"
+            );
+        }
     }
 }

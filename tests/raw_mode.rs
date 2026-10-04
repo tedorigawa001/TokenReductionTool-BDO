@@ -163,3 +163,134 @@ fn hook_rewrite_is_unchanged_under_bdo_raw() {
         String::from_utf8_lossy(&raw.stderr)
     );
 }
+
+/// Modules that execute their tool themselves (instead of through the core
+/// runner) used to keep filtering under `--raw`: `bdo --raw lint ruff check .`
+/// still injected `--output-format=json` and printed bdo's summary. Fake tools
+/// on PATH echo the argv they receive, so each test sees exactly what bdo ran.
+#[cfg(unix)]
+mod modules_that_exec_on_their_own {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A dir with fake `ruff`, `black`, `npx` and `uv` that print their argv
+    /// and exit 7. Real JS tools and `pip` are absent from PATH, so bdo reaches
+    /// its own modules (npx / uv fallbacks) rather than routing to PATH.
+    fn fakebin(dir: &Path) -> std::path::PathBuf {
+        let bin = dir.join("fakebin");
+        fs::create_dir(&bin).unwrap();
+        for tool in ["ruff", "black", "npx", "uv"] {
+            let p = bin.join(tool);
+            // `black` also prints a line its bdo filter compresses, so a
+            // filtered run is distinguishable from a raw one.
+            let extra = if tool == "black" {
+                "echo 'would reformat: a.py'\n"
+            } else {
+                ""
+            };
+            fs::write(
+                &p,
+                format!("#!/bin/sh\necho \"{tool} ARGV:$*\"\n{extra}exit 7\n"),
+            )
+            .unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        bin
+    }
+
+    fn run(dir: &Path, bin: &Path, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_bdo"))
+            .current_dir(dir)
+            .args(args)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("BDO_DB_PATH", dir.join("track.db"))
+            .env("BDO_TELEMETRY_DISABLED", "1")
+            .env_remove("BDO_RAW")
+            .output()
+            .expect("spawn bdo")
+    }
+
+    fn first_line(o: &Output) -> String {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    #[test]
+    fn raw_lint_runs_the_linter_without_json_flags_and_unfiltered() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+
+        let normal = run(dir.path(), &bin, &["lint", "ruff", "check", "."]);
+        assert_ne!(
+            first_line(&normal),
+            "ruff ARGV:check .",
+            "normal mode should still filter"
+        );
+
+        let raw = run(dir.path(), &bin, &["--raw", "lint", "ruff", "check", "."]);
+        assert_eq!(first_line(&raw), "ruff ARGV:check .");
+        assert_eq!(raw.status.code(), Some(7));
+    }
+
+    #[test]
+    fn raw_format_keeps_check_mode() {
+        // --check is what keeps `bdo format` from rewriting files; raw mode
+        // must not drop it along with bdo's output reduction.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        let normal = run(dir.path(), &bin, &["format", "black"]);
+        assert_ne!(
+            String::from_utf8_lossy(&normal.stdout),
+            "black ARGV:--check .\nwould reformat: a.py\n",
+            "normal mode should still filter"
+        );
+
+        let raw = run(dir.path(), &bin, &["--raw", "format", "black"]);
+        assert_eq!(
+            String::from_utf8_lossy(&raw.stdout),
+            "black ARGV:--check .\nwould reformat: a.py\n"
+        );
+        assert_eq!(raw.status.code(), Some(7));
+    }
+
+    #[test]
+    fn raw_js_tools_keep_non_watch_and_drop_json_reporters() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        for (args, expected) in [
+            (
+                &["--raw", "vitest"][..],
+                "npx ARGV:--no-install -- vitest run",
+            ),
+            (
+                &["--raw", "jest"][..],
+                "npx ARGV:--no-install -- jest --no-watch",
+            ),
+            (
+                &["--raw", "prisma", "generate"][..],
+                "npx ARGV:prisma generate",
+            ),
+            (
+                &["--raw", "playwright", "test", "--reporter=line"][..],
+                "npx ARGV:--no-install -- playwright test --reporter=line",
+            ),
+        ] {
+            let out = run(dir.path(), &bin, args);
+            assert_eq!(first_line(&out), expected, "{args:?}");
+            assert_eq!(out.status.code(), Some(7), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn raw_pip_via_uv_drops_json_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        let list = run(dir.path(), &bin, &["--raw", "pip", "list"]);
+        assert_eq!(first_line(&list), "uv ARGV:pip list");
+        let outdated = run(dir.path(), &bin, &["--raw", "pip", "outdated"]);
+        assert_eq!(first_line(&outdated), "uv ARGV:pip list --outdated");
+    }
+}

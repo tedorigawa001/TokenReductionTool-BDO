@@ -103,17 +103,25 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         package_manager_exec(linter)
     };
 
+    // Raw mode (`--raw` / BDO_RAW=1): run the same check, but without the
+    // machine-readable output flags below, which exist only for bdo's parser.
+    let raw = crate::core::raw::is_active();
+
     // Add format flags based on linter
     match linter {
-        "eslint" => {
+        "eslint" if !raw => {
             cmd.arg("-f").arg("json");
         }
-        // Force JSON output for ruff check
+        // Force JSON output for ruff check. `check` itself is the actual
+        // subcommand and stays in raw mode.
         "ruff" if !effective_args.contains(&"--output-format".to_string()) => {
-            cmd.arg("check").arg("--output-format=json");
+            cmd.arg("check");
+            if !raw {
+                cmd.arg("--output-format=json");
+            }
         }
         // Force JSON2 output for pylint
-        "pylint" if !effective_args.contains(&"--output-format".to_string()) => {
+        "pylint" if !raw && !effective_args.contains(&"--output-format".to_string()) => {
             cmd.arg("--output-format=json2");
         }
         "mypy" => {
@@ -139,11 +147,9 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     };
 
     for arg in &effective_args[start_idx..] {
-        // Skip --output-format if we already added it
-        if linter == "ruff" && arg.starts_with("--output-format") {
-            continue;
-        }
-        if linter == "pylint" && arg.starts_with("--output-format") {
+        // Skip --output-format if we already added it (raw mode added none,
+        // so the user's own choice passes through)
+        if !raw && matches!(linter, "ruff" | "pylint") && arg.starts_with("--output-format") {
             continue;
         }
         cmd.arg(arg);
@@ -158,6 +164,10 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         if !has_path {
             cmd.arg(".");
         }
+    }
+
+    if raw {
+        return crate::core::runner::run_raw(cmd, "lint", &effective_args.join(" "));
     }
 
     if verbose > 0 {

@@ -285,8 +285,26 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   - `read` → `-l none` 相当（`-m`/`--tail-lines` は残す — `head -5` の書き換え先なので）
   - bdo 固有（`gain`/`map` …、`BDO_META_COMMANDS`）→ 通常実行。`--raw` 明示時のみ
     「効果なし」を注記（`BDO_RAW=1` はグローバル設定され得るので、hook 毎回に出ないよう黙る）
-  - 上記以外で runner に来るもの（`lint` のように実行ツール名が異なるもの）→ runner が
-    Passthrough に切り替えて削減しない
+  - 上記以外でモジュールに来るもの → core runner 経由なら runner が Passthrough に切り替える。
+    **自前で実行するモジュール（`exec_capture`）は runner を通らない**ので、各自が
+    `raw::is_active()` を見て `runner::run_raw` を呼ぶ必要がある。
+  - **初版のバグ（2026-10-04 報告・修正）**: 上の「runner が素通しにする」を、**まさに lint を
+    例に挙げて**書いていたが、lint は `exec_capture` で自前実行していた。`bdo --raw lint ruff
+    check .` でも `--output-format=json` を注入して圧縮し、削減トークンも計上していた。
+    runner を通らないモジュールは19個あり、raw 時に到達する（同名プログラムが PATH に無い）
+    ものを洗い出して修正: **lint / format / vitest・jest / prisma / playwright / pip（uv のみ環境）**。
+    原則は「**同じ仕事をして、出力は整形しない**」— 出力形式フラグ（`--reporter=json` 等）は
+    外し、意味を持つ引数（vitest の `run`、jest の `--no-watch`、black の `--check`、ruff の
+    `check`、既定の `.`）は残す。外すと watch モードで止まる・ファイルを書き換える等の実害。
+    playwright はユーザー指定の `--reporter` を raw 時に消していたのも修正。
+  - **Windows の `format.com`**: 「同名プログラムが PATH にあれば実行」の規則で、`bdo --raw
+    format` がディスクフォーマッタに振り向けられ得た。`lint`/`format` は bdo が付けた名前
+    （`BDO_NAMED_COMMANDS`）として PATH 判定の対象外にした。
+  - 偽ツール（引数を echo する `ruff`/`black`/`npx`/`uv`）を PATH 先頭に置く統合テストで固定。
+    4件とも修正前のソースで失敗することを確認済み。
+  - **残余**: `grep` が PATH に無い環境（grep の無い Windows のネイティブシェル）では
+    `bdo --raw grep` がモジュールに来て、ripgrep に翻訳した引数で検索・圧縮する。引数翻訳が
+    4経路あり raw 割り込みの変更が大きいので未対応。Unix・Git Bash では発生しない。
   - TOML フォールバックも `BDO_NO_TOML` 同様にバイパス
   - `--raw` はサブコマンドの**前**に置く（後ろは trailing_var_arg で包んだコマンドの引数になる。
     `git log --raw` は git 自身の正規オプション）。`BDO_RAW=1` は位置不問で、hook の書き換えは不変

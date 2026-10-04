@@ -106,7 +106,7 @@ pub fn run(
 
     if reduced_view {
         eprintln!(
-            "bdo: {}: reduced view — full raw content: bdo read {} -l none",
+            "bdo: {}: reduced view — full raw content: bdo --raw read {}",
             file.display(),
             file.display()
         );

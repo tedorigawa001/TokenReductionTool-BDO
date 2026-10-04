@@ -274,7 +274,27 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 ### 新規候補（assistant の欲しい機能・残）
 
 ### 地味だが効く
-- **共通 raw バイパスの統一**: `-l none` / `BDO_NO_TOML` / passthrough が散在。全コマンド共通の `--raw` / `BDO_RAW=1` に集約し学習コスト減。
+- ✅ ~~**共通 raw バイパスの統一**~~（2026-10-04 実装、方針 (a) 旧フラグと共存）:
+  `--raw` / `BDO_RAW=1` = 「bdo がいなかったらこう動く」。`core::raw` が **clap より前に**
+  argv で振り分ける。runner でフィルタを止めるだけの案は不採用 — 9モジュールが
+  `--format json` 等の機械可読フラグをコマンドに注入しており、フィルタだけ止めると
+  生の JSON が出て「生出力」にならないため。
+  - 同名の実コマンドがある（`git`/`ls`/`cargo`/`grep` …）→ 引数を変えず実行（= `bdo proxy`、
+    バイト単位で一致・exit code も一致を統合テストで確認）
+  - ラッパー（`err`/`test`/`summary`）→ 中身を実行。`test --changed` は対象外
+  - `read` → `-l none` 相当（`-m`/`--tail-lines` は残す — `head -5` の書き換え先なので）
+  - bdo 固有（`gain`/`map` …、`BDO_META_COMMANDS`）→ 通常実行。`--raw` 明示時のみ
+    「効果なし」を注記（`BDO_RAW=1` はグローバル設定され得るので、hook 毎回に出ないよう黙る）
+  - 上記以外で runner に来るもの（`lint` のように実行ツール名が異なるもの）→ runner が
+    Passthrough に切り替えて削減しない
+  - TOML フォールバックも `BDO_NO_TOML` 同様にバイパス
+  - `--raw` はサブコマンドの**前**に置く（後ろは trailing_var_arg で包んだコマンドの引数になる。
+    `git log --raw` は git 自身の正規オプション）。`BDO_RAW=1` は位置不問で、hook の書き換えは不変
+  - `bdo read` の reduced-view ヒントを `bdo --raw read <file>` に変更。エージェント向け
+    ガイダンスの `bdo proxy <cmd>` は今も正しいのでそのまま
+  - 副産物: `bdo --raw` / `bdo -v` 単独（サブコマンド無し）がフォールバックで「`--raw` という
+    コマンド」を実行し exit 127 になっていた（`-v` は元から）。`-` 始まりは clap の usage エラーに
+  - テスト: `core::raw` ユニット7件 + `tests/raw_mode.rs` 統合7件
 - **`BDO_QUIET=1`**: reduced-view ヒント等の stderr 補助メッセージを抑制。
 - **`bdo map` シンボルフィルタ / ドリルダウン**: `bdo map --grep <sym>`、map から特定ファイルを outline へ。
 

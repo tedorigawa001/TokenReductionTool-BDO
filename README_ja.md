@@ -215,6 +215,24 @@ bdo gain --graph                # ASCII グラフ（30日間）
 bdo discover                    # 見逃した節約機会を発見
 ```
 
+### 生出力（`--raw` / `BDO_RAW=1`）
+
+チェックサムや正確な件数など、削減されていない出力そのものが必要な時は、全コマンド共通の
+スイッチ1つで取れます。
+
+```bash
+bdo --raw git log            # `git log` とバイト単位で同一、終了コードも同じ
+bdo --raw read src/main.rs   # ファイル全文
+BDO_RAW=1 bdo cargo test     # 環境変数版（セッション全体に効かせる時など）
+```
+
+同名の実コマンドがあるもの（`git`・`ls`・`cargo`・`grep` など）は引数を変えずにそのコマンドを
+実行し、`err`/`test`/`summary` は包んでいるコマンドを、`read` は全文を出します。`gain`・`map`
+など bdo 固有のコマンドは通常どおり動きます。`--raw` は**サブコマンドの前**に置いてください
+（後ろに置くと、包まれたコマンド自身の引数になります）。`BDO_RAW=1` は位置を問わず、hook の
+書き換えにも影響しません。従来の `bdo read -l none`・`BDO_NO_TOML=1`・`bdo proxy` も引き続き
+使えます。
+
 ## ドキュメント
 
 - **[troubleshooting.md](docs/guide/resources/troubleshooting.md)** - よくある問題の解決

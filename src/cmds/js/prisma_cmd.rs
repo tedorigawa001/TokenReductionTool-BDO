@@ -53,6 +53,12 @@ fn run_generate(args: &[String], verbose: u8) -> Result<i32> {
         eprintln!("Running: prisma generate");
     }
 
+    // Raw mode: prisma's arguments carry no output-format flags, so only
+    // bdo's reduction is skipped.
+    if crate::core::raw::is_active() {
+        return crate::core::runner::run_raw(cmd, "prisma", &format!("generate {}", args.join(" ")));
+    }
+
     let result = exec_capture(&mut cmd)
         .context("Failed to run prisma generate (try: npm install -g prisma)")?;
 
@@ -108,6 +114,12 @@ fn run_migrate(subcommand: MigrateSubcommand, args: &[String], verbose: u8) -> R
         eprintln!("Running: {}", cmd_name);
     }
 
+    // Raw mode: prisma's arguments carry no output-format flags, so only
+    // bdo's reduction is skipped.
+    if crate::core::raw::is_active() {
+        return crate::core::runner::run_raw(cmd, "prisma", &format!("migrate {}", args.join(" ")));
+    }
+
     let result = exec_capture(&mut cmd).context("Failed to run prisma migrate")?;
 
     let raw = format!("{}\n{}", result.stdout, result.stderr);
@@ -147,6 +159,12 @@ fn run_db_push(args: &[String], verbose: u8) -> Result<i32> {
 
     if verbose > 0 {
         eprintln!("Running: prisma db push");
+    }
+
+    // Raw mode: prisma's arguments carry no output-format flags, so only
+    // bdo's reduction is skipped.
+    if crate::core::raw::is_active() {
+        return crate::core::runner::run_raw(cmd, "prisma", &format!("db push {}", args.join(" ")));
     }
 
     let result = exec_capture(&mut cmd).context("Failed to run prisma db push")?;

@@ -163,3 +163,187 @@ fn hook_rewrite_is_unchanged_under_bdo_raw() {
         String::from_utf8_lossy(&raw.stderr)
     );
 }
+
+/// Modules that execute their tool themselves (instead of through the core
+/// runner) used to keep filtering under `--raw`: `bdo --raw lint ruff check .`
+/// still injected `--output-format=json` and printed bdo's summary. Fake tools
+/// on PATH echo the argv they receive, so each test sees exactly what bdo ran.
+#[cfg(unix)]
+mod modules_that_exec_on_their_own {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A dir with fake `ruff`, `black`, `npx` and `uv` that print their argv
+    /// and exit 7. PATH holds nothing else, so real JS tools and `pip` are
+    /// absent and bdo reaches its own modules (npx / uv fallbacks) rather than
+    /// routing to PATH.
+    fn fakebin(dir: &Path) -> std::path::PathBuf {
+        let bin = dir.join("fakebin");
+        fs::create_dir(&bin).unwrap();
+        for tool in ["ruff", "black", "npx", "uv"] {
+            let p = bin.join(tool);
+            // `black` also prints a line its bdo filter compresses, so a
+            // filtered run is distinguishable from a raw one.
+            let extra = if tool == "black" {
+                "echo 'would reformat: a.py'\n"
+            } else {
+                ""
+            };
+            // Also record argv to <tool>.argv: in normal mode bdo filters
+            // stdout, so the file is the only way to see what it ran.
+            let log = bin.join(format!("{tool}.argv"));
+            fs::write(
+                &p,
+                format!(
+                    "#!/bin/sh\necho \"$*\" > '{}'\necho \"{tool} ARGV:$*\"\n{extra}exit 7\n",
+                    log.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        bin
+    }
+
+    fn run(dir: &Path, bin: &Path, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_bdo"))
+            .current_dir(dir)
+            .args(args)
+            // Only the fakes: a system dir would leak real tools into the
+            // test (GitHub's Ubuntu runners ship /usr/bin/pip, which raw
+            // mode rightly execs directly). The fakes' `#!/bin/sh` is an
+            // absolute path, so they need nothing else on PATH.
+            .env("PATH", bin)
+            .env("BDO_DB_PATH", dir.join("track.db"))
+            .env("BDO_TELEMETRY_DISABLED", "1")
+            .env_remove("BDO_RAW")
+            .output()
+            .expect("spawn bdo")
+    }
+
+    fn argv_seen(bin: &Path, tool: &str) -> String {
+        fs::read_to_string(bin.join(format!("{tool}.argv")))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string()
+    }
+
+    fn first_line(o: &Output) -> String {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    #[test]
+    fn raw_lint_runs_the_linter_without_json_flags_and_unfiltered() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+
+        let normal = run(dir.path(), &bin, &["lint", "ruff", "check", "."]);
+        assert_ne!(
+            first_line(&normal),
+            "ruff ARGV:check .",
+            "normal mode should still filter"
+        );
+
+        let raw = run(dir.path(), &bin, &["--raw", "lint", "ruff", "check", "."]);
+        assert_eq!(first_line(&raw), "ruff ARGV:check .");
+        assert_eq!(raw.status.code(), Some(7));
+    }
+
+    #[test]
+    fn raw_format_keeps_check_mode() {
+        // --check is what keeps `bdo format` from rewriting files; raw mode
+        // must not drop it along with bdo's output reduction.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        let normal = run(dir.path(), &bin, &["format", "black"]);
+        assert_ne!(
+            String::from_utf8_lossy(&normal.stdout),
+            "black ARGV:--check .\nwould reformat: a.py\n",
+            "normal mode should still filter"
+        );
+
+        let raw = run(dir.path(), &bin, &["--raw", "format", "black"]);
+        assert_eq!(
+            String::from_utf8_lossy(&raw.stdout),
+            "black ARGV:--check .\nwould reformat: a.py\n"
+        );
+        assert_eq!(raw.status.code(), Some(7));
+    }
+
+    #[test]
+    fn raw_js_tools_keep_non_watch_and_drop_json_reporters() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        for (args, expected) in [
+            (
+                &["--raw", "vitest"][..],
+                "npx ARGV:--no-install -- vitest run",
+            ),
+            (
+                &["--raw", "jest"][..],
+                "npx ARGV:--no-install -- jest --no-watch",
+            ),
+            (
+                &["--raw", "prisma", "generate"][..],
+                "npx ARGV:prisma generate",
+            ),
+            (
+                &["--raw", "playwright", "test", "--reporter=line"][..],
+                "npx ARGV:--no-install -- playwright test --reporter=line",
+            ),
+        ] {
+            let out = run(dir.path(), &bin, args);
+            assert_eq!(first_line(&out), expected, "{args:?}");
+            assert_eq!(out.status.code(), Some(7), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn raw_pip_via_uv_drops_json_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        let list = run(dir.path(), &bin, &["--raw", "pip", "list"]);
+        assert_eq!(first_line(&list), "uv ARGV:pip list");
+        let outdated = run(dir.path(), &bin, &["--raw", "pip", "outdated"]);
+        assert_eq!(first_line(&outdated), "uv ARGV:pip list --outdated");
+    }
+    #[test]
+    fn lint_output_format_option_handled_as_a_unit_in_both_modes() {
+        // `check` used to be added only when no --output-format was given, and
+        // a separate-token value was left behind: 0.45.7 ran `ruff text .`
+        // for `bdo lint ruff check --output-format text .`.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        let args = ["lint", "ruff", "check", "--output-format", "text", "."];
+
+        let mut raw = vec!["--raw"];
+        raw.extend(args);
+        run(dir.path(), &bin, &raw);
+        assert_eq!(argv_seen(&bin, "ruff"), "check --output-format text .");
+
+        // Normal mode replaces the user's format, value included, with JSON.
+        run(dir.path(), &bin, &args);
+        assert_eq!(argv_seen(&bin, "ruff"), "check --output-format=json .");
+
+        // No path given: the format's value is not mistaken for one.
+        run(
+            dir.path(),
+            &bin,
+            &["--raw", "lint", "ruff", "--output-format", "text"],
+        );
+        assert_eq!(argv_seen(&bin, "ruff"), "check --output-format text .");
+
+        // eslint's -f: 0.45.7 passed both `-f json -f stylish`, and the
+        // later one won, breaking bdo's JSON parse.
+        run(
+            dir.path(),
+            &bin,
+            &["lint", "eslint", "-f", "stylish", "src"],
+        );
+        assert_eq!(argv_seen(&bin, "npx"), "--no-install -- eslint -f json src");
+    }
+}

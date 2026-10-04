@@ -265,6 +265,13 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         }
     };
 
+    // Raw mode: the JSON reporter exists only for bdo's parser, so run the
+    // user's arguments exactly as given.
+    if crate::core::raw::is_active() {
+        cmd.args(args);
+        return crate::core::runner::run_raw(cmd, "playwright", &args.join(" "));
+    }
+
     // Only inject --reporter=json for `playwright test` runs
     let is_test = args.first().map(|a| a == "test").unwrap_or(false);
     if is_test {

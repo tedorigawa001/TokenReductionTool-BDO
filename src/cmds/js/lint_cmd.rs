@@ -57,6 +57,52 @@ fn is_python_linter(linter: &str) -> bool {
     matches!(linter, "ruff" | "pylint" | "mypy" | "flake8")
 }
 
+/// The option each linter uses to choose its output format — the one bdo
+/// overrides with a machine-readable format for parsing.
+fn format_options(linter: &str) -> &'static [&'static str] {
+    match linter {
+        "ruff" => &["--output-format"],
+        "pylint" => &["--output-format", "-f"],
+        "eslint" => &["--format", "-f"],
+        _ => &[],
+    }
+}
+
+/// How many tokens `args[i]` spans if it is the linter's output-format option:
+/// 2 for `--output-format text` (the value is a separate token), 1 for
+/// `--output-format=text` or a trailing option with no value, 0 otherwise.
+fn format_option_span(linter: &str, args: &[String], i: usize) -> usize {
+    let arg = &args[i];
+    for opt in format_options(linter) {
+        if arg == opt {
+            return if i + 1 < args.len() { 2 } else { 1 };
+        }
+        if arg.strip_prefix(opt).is_some_and(|rest| rest.starts_with('=')) {
+            return 1;
+        }
+    }
+    0
+}
+
+/// Whether the user's arguments already name a path to lint. A value given to
+/// the format option (`text` in `--output-format text`) is not a path.
+fn has_path_arg(linter: &str, args: &[String]) -> bool {
+    let mut i = 0;
+    while i < args.len() {
+        let span = format_option_span(linter, args, i);
+        if span > 0 {
+            i += span;
+            continue;
+        }
+        let a = &args[i];
+        if !a.starts_with('-') && !a.contains('=') {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Strip package manager prefixes (npx, bunx, pnpm, pnpm exec, yarn) from args.
 /// Returns the number of args to skip.
 fn strip_pm_prefix(args: &[String]) -> usize {
@@ -103,28 +149,38 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         package_manager_exec(linter)
     };
 
-    // Add format flags based on linter
-    match linter {
-        "eslint" => {
-            cmd.arg("-f").arg("json");
-        }
-        // Force JSON output for ruff check
-        "ruff" if !effective_args.contains(&"--output-format".to_string()) => {
-            cmd.arg("check").arg("--output-format=json");
-        }
-        // Force JSON2 output for pylint
-        "pylint" if !effective_args.contains(&"--output-format".to_string()) => {
-            cmd.arg("--output-format=json2");
-        }
-        "mypy" => {
-            // mypy uses default text output (no special flags)
-        }
-        _ => {
-            // Other linters: no special formatting
+    // Raw mode (`--raw` / BDO_RAW=1): run the same check, but without the
+    // machine-readable output flags below, which exist only for bdo's parser.
+    let raw = crate::core::raw::is_active();
+
+    // `check` is ruff's subcommand — what runs, not how its output looks — so
+    // it is always added, independent of any output-format option. (It used
+    // to be added only when no `--output-format` was given, and the user's own
+    // `check` is skipped below, so `ruff check --output-format text .` lost it.)
+    if linter == "ruff" {
+        cmd.arg("check");
+    }
+
+    // Force the machine-readable format bdo's parser needs. Any format option
+    // the user gave is dropped below in this case; raw mode forces nothing and
+    // passes the user's through untouched.
+    if !raw {
+        match linter {
+            "eslint" => {
+                cmd.arg("-f").arg("json");
+            }
+            "ruff" => {
+                cmd.arg("--output-format=json");
+            }
+            "pylint" => {
+                cmd.arg("--output-format=json2");
+            }
+            // mypy uses default text output; other linters get no flags.
+            _ => {}
         }
     }
 
-    // Add user arguments (skip first if it was the linter name, and skip "check" for ruff if we added it)
+    // Add user arguments (skip first if it was the linter name, and skip "check" for ruff since we add it)
     let start_idx = if !explicit {
         0
     } else if linter == "ruff" && !effective_args.is_empty() && effective_args[0] == "ruff" {
@@ -138,26 +194,28 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         1
     };
 
-    for arg in &effective_args[start_idx..] {
-        // Skip --output-format if we already added it
-        if linter == "ruff" && arg.starts_with("--output-format") {
+    let user_args = &effective_args[start_idx..];
+    let mut i = 0;
+    while i < user_args.len() {
+        // Outside raw mode, drop the user's format option — including a value
+        // given as a separate token (`--output-format text`), which used to be
+        // left behind as a stray argument — since bdo forced its own above.
+        let span = format_option_span(linter, user_args, i);
+        if !raw && span > 0 {
+            i += span;
             continue;
         }
-        if linter == "pylint" && arg.starts_with("--output-format") {
-            continue;
-        }
-        cmd.arg(arg);
+        cmd.arg(&user_args[i]);
+        i += 1;
     }
 
     // Default to current directory if no path specified (for ruff/pylint/mypy/eslint)
-    if matches!(linter, "ruff" | "pylint" | "mypy" | "eslint") {
-        let has_path = effective_args
-            .iter()
-            .skip(start_idx)
-            .any(|a| !a.starts_with('-') && !a.contains('='));
-        if !has_path {
-            cmd.arg(".");
-        }
+    if matches!(linter, "ruff" | "pylint" | "mypy" | "eslint") && !has_path_arg(linter, user_args) {
+        cmd.arg(".");
+    }
+
+    if raw {
+        return crate::core::runner::run_raw(cmd, "lint", &effective_args.join(" "));
     }
 
     if verbose > 0 {
@@ -507,6 +565,36 @@ fn compact_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn test_format_option_span_covers_both_spellings() {
+        let a = s(&["--output-format", "text", "."]);
+        assert_eq!(format_option_span("ruff", &a, 0), 2);
+        let a = s(&["--output-format=text", "."]);
+        assert_eq!(format_option_span("ruff", &a, 0), 1);
+        let a = s(&["-f", "stylish"]);
+        assert_eq!(format_option_span("eslint", &a, 0), 2);
+        assert_eq!(format_option_span("pylint", &a, 0), 2);
+        // Not a format option for ruff, and not a prefix match either.
+        let a = s(&["-f", "--output-formatx"]);
+        assert_eq!(format_option_span("ruff", &a, 0), 0);
+        assert_eq!(format_option_span("ruff", &a, 1), 0);
+        // mypy has no format option bdo overrides.
+        assert_eq!(format_option_span("mypy", &s(&["--output-format", "x"]), 0), 0);
+    }
+
+    #[test]
+    fn test_has_path_arg_ignores_format_values() {
+        // `text` is the value of --output-format, not a path to lint.
+        assert!(!has_path_arg("ruff", &s(&["--output-format", "text"])));
+        assert!(has_path_arg("ruff", &s(&["--output-format", "text", "src"])));
+        assert!(!has_path_arg("eslint", &s(&["-f", "stylish", "--fix"])));
+        assert!(has_path_arg("eslint", &s(&["src/"])));
+    }
 
     #[test]
     fn test_filter_eslint_json() {

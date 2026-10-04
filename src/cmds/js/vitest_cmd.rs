@@ -206,40 +206,46 @@ fn extract_failures_regex(output: &str) -> Vec<TestFailure> {
 
 pub fn run_test(command: &Commands, args: &[String], verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
+    // Raw mode keeps the non-watch flag (watch mode would never return) and
+    // drops only the JSON reporter, which exists for bdo's parser.
+    let raw = crate::core::raw::is_active();
 
     let (framework, mut cmd) = match command {
         Commands::Vitest { .. } => {
             let framework = "vitest";
             let mut cmd = package_manager_exec(framework);
-            cmd
-                // Force non-watch mode
-                .arg("run")
+            // Force non-watch mode
+            cmd.arg("run");
+            if !raw {
                 // Enable JSON structured output
-                .arg("--reporter=json");
+                cmd.arg("--reporter=json");
+            }
             (framework, cmd)
         }
         Commands::Jest { .. } => {
             let framework = "jest";
             let mut cmd = package_manager_exec(framework);
-            cmd
-                // Force non-watch mode
-                .arg("--no-watch")
+            // Force non-watch mode
+            cmd.arg("--no-watch");
+            if !raw {
                 // Enable JSON structured output
-                .arg("--json");
+                cmd.arg("--json");
+            }
             (framework, cmd)
         }
         _ => unreachable!(),
     };
 
     for arg in args {
-        if arg == "run"
-            || arg.starts_with("--json")
-            || arg.starts_with("--reporter")
-            || arg.starts_with("--watch")
-        {
+        let ours_to_replace = !raw && (arg.starts_with("--json") || arg.starts_with("--reporter"));
+        if arg == "run" || arg.starts_with("--watch") || ours_to_replace {
             continue;
         }
         cmd.arg(arg);
+    }
+
+    if raw {
+        return crate::core::runner::run_raw(cmd, framework, &args.join(" "));
     }
 
     let result = exec_capture(&mut cmd).context(format!("Failed to run {}", framework))?;

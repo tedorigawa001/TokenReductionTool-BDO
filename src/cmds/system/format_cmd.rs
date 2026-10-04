@@ -109,6 +109,13 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         eprintln!("Running: {} {}", formatter, user_args.join(" "));
     }
 
+    // Raw mode: the flags above (`--check`, `format`, a default `.`) decide
+    // what runs, not how its output looks, so they stay — only bdo's
+    // reduction is skipped.
+    if crate::core::raw::is_active() {
+        return crate::core::runner::run_raw(cmd, "format", &args.join(" "));
+    }
+
     let result = exec_capture(&mut cmd).context(format!(
         "Failed to run {}. Is it installed? Try: pip install {} (or npm/pnpm for JS formatters)",
         formatter, formatter

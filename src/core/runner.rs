@@ -157,6 +157,15 @@ pub fn run(
     let timer = tracking::TimedExecution::start();
     let cmd_label = format!("{} {}", tool_name, args_display);
 
+    // Raw mode (`--raw` / `BDO_RAW=1`): commands with a same-named program are
+    // exec'd directly before clap ever runs (see core::raw). What reaches here
+    // is a bdo command whose tool has a different name — never reduce it.
+    let mode = if crate::core::raw::is_active() {
+        RunMode::Passthrough
+    } else {
+        mode
+    };
+
     match mode {
         RunMode::Filtered(filter_fn) => {
             run_captured_filter(cmd, &cmd_label, move |text, _| filter_fn(text), opts, timer)

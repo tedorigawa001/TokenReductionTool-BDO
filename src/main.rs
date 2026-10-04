@@ -73,6 +73,11 @@ struct Cli {
     /// Set SKIP_ENV_VALIDATION=1 for child processes (Next.js, tsc, lint, prisma)
     #[arg(long = "skip-env", global = true)]
     skip_env: bool,
+
+    /// Run as if bdo weren't there: no filtering (same as BDO_RAW=1).
+    /// Put it before the subcommand: `bdo --raw git log`.
+    #[arg(long, global = true)]
+    raw: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1224,6 +1229,51 @@ const BDO_META_COMMANDS: &[&str] = &[
     "rewrite",
 ];
 
+/// Raw mode (`--raw` / `BDO_RAW=1`), routed before clap. Returns the exit
+/// code when the command was exec'd natively; `None` means continue with the
+/// normal parse, with raw mode left active for the command to honor.
+/// See `core::raw` for why this happens ahead of clap.
+fn run_raw_if_requested() -> Result<Option<i32>> {
+    // args_os: a non-UTF-8 argument must not panic, and must reach the native
+    // program byte for byte.
+    let argv: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let globals = core::raw::split_leading_globals(&argv);
+    if !globals.raw_flag && !core::raw::env_requests_raw() {
+        return Ok(None);
+    }
+    core::raw::activate();
+
+    let rest = &argv[globals.rest_start..];
+    let route = core::raw::route(rest, BDO_META_COMMANDS, |program| {
+        which::which(program).is_ok()
+    });
+    match route {
+        core::raw::Route::Native { program, args } => {
+            let program = program.to_string_lossy().into_owned();
+            Ok(Some(core::runner::run_passthrough(
+                &program,
+                &args,
+                globals.verbose,
+            )?))
+        }
+        core::raw::Route::Normal => {
+            // Only for an explicit flag: BDO_RAW=1 is ambient, and set
+            // globally it would put this note on every hook invocation.
+            if globals.raw_flag {
+                if let Some(sub) = rest.first().and_then(|s| s.to_str()) {
+                    if BDO_META_COMMANDS.contains(&sub) && !matches!(sub, "read" | "proxy" | "run")
+                    {
+                        eprintln!(
+                            "bdo: --raw has no effect on `bdo {sub}`; it has no unfiltered form"
+                        );
+                    }
+                }
+            }
+            Ok(None)
+        }
+    }
+}
+
 /// The CLI's real top-level subcommand names (kebab-case, exactly as `bdo
 /// --help` lists them) — read from the clap definition itself so `bdo
 /// stale`'s docs↔impl drift check compares against the actual source of
@@ -1249,6 +1299,13 @@ fn run_fallback(parse_error: clap::Error) -> Result<i32> {
         parse_error.exit();
     }
 
+    // Only global flags and no subcommand (`bdo --raw`, `bdo -v`): no program
+    // name starts with `-`, so executing args[0] can only fail with "not
+    // found" (exit 127). Show clap's usage error instead.
+    if args[0].starts_with('-') {
+        parse_error.exit();
+    }
+
     let raw_command = args.join(" ");
     let error_message = core::utils::strip_ansi(&parse_error.to_string());
 
@@ -1267,11 +1324,12 @@ fn run_fallback(parse_error: clap::Error) -> Result<i32> {
             .collect::<Vec<_>>()
             .join(" ")
     };
-    let toml_match = if std::env::var("BDO_NO_TOML").ok().as_deref() == Some("1") {
-        None
-    } else {
-        core::toml_filter::find_matching_filter(&lookup_cmd)
-    };
+    let toml_match =
+        if std::env::var("BDO_NO_TOML").ok().as_deref() == Some("1") || core::raw::is_active() {
+            None
+        } else {
+            core::toml_filter::find_matching_filter(&lookup_cmd)
+        };
 
     if let Some(filter) = toml_match {
         // TOML match: capture stdout for filtering
@@ -1569,6 +1627,10 @@ fn run_cli() -> Result<i32> {
     // Fire-and-forget telemetry ping (1/day, non-blocking)
     core::telemetry::maybe_ping();
 
+    if let Some(code) = run_raw_if_requested()? {
+        return Ok(code);
+    }
+
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -1605,6 +1667,14 @@ fn run_cli() -> Result<i32> {
             tail_lines,
             line_numbers,
         } => {
+            // There is no `read` program to exec, so raw mode is `read`'s own
+            // full-content level. Explicit -m/--tail-lines still apply: they
+            // are what the caller asked for (`head -5` rewrites to `-m 5`).
+            let level = if core::raw::is_active() {
+                core::filter::FilterLevel::None
+            } else {
+                level
+            };
             let mut had_error = false;
             let mut stdin_seen = false;
             for file in &files {

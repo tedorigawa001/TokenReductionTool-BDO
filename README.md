@@ -399,7 +399,33 @@ Antigravity, Copilot, Cursor), or set explicitly via `BDO_AGENT=<name>`. Command
 ```bash
 -u, --ultra-compact    # ASCII icons, inline format (extra token savings)
 -v, --verbose          # Increase verbosity (-v, -vv, -vvv)
+--raw                  # No filtering at all — run as if bdo weren't there
 ```
+
+### Raw output (`--raw` / `BDO_RAW=1`)
+
+When you need the exact, unreduced output — a checksum, a precise count, an
+error message bdo would trim — use one switch for every command:
+
+```bash
+bdo --raw git log            # identical to `git log`, byte for byte, same exit code
+bdo --raw read src/main.rs   # the whole file
+BDO_RAW=1 bdo cargo test     # env var form, e.g. for a whole session
+```
+
+- A command with a same-named program (`git`, `ls`, `cargo`, `grep`, …) runs
+  that program with your arguments unchanged.
+- `err` / `test` / `summary` run the command they wrap.
+- `read` shows the full file.
+- bdo-only commands (`gain`, `map`, …) have no unfiltered form and run as usual.
+
+Put `--raw` **before** the subcommand: after it, the flag belongs to the
+wrapped command (`git log --raw` is git's own option). `BDO_RAW=1` works
+anywhere, and leaves the hook's rewriting unchanged — the rewritten command
+just runs raw. Raw runs are still tracked, at 0% savings.
+
+The older per-command switches — `bdo read -l none`, `BDO_NO_TOML=1`,
+`bdo proxy <cmd>` — keep working.
 
 ## Examples
 

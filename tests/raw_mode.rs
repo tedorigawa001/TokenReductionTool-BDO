@@ -174,8 +174,9 @@ mod modules_that_exec_on_their_own {
     use std::os::unix::fs::PermissionsExt;
 
     /// A dir with fake `ruff`, `black`, `npx` and `uv` that print their argv
-    /// and exit 7. Real JS tools and `pip` are absent from PATH, so bdo reaches
-    /// its own modules (npx / uv fallbacks) rather than routing to PATH.
+    /// and exit 7. PATH holds nothing else, so real JS tools and `pip` are
+    /// absent and bdo reaches its own modules (npx / uv fallbacks) rather than
+    /// routing to PATH.
     fn fakebin(dir: &Path) -> std::path::PathBuf {
         let bin = dir.join("fakebin");
         fs::create_dir(&bin).unwrap();
@@ -202,7 +203,11 @@ mod modules_that_exec_on_their_own {
         Command::new(env!("CARGO_BIN_EXE_bdo"))
             .current_dir(dir)
             .args(args)
-            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            // Only the fakes: a system dir would leak real tools into the
+            // test (GitHub's Ubuntu runners ship /usr/bin/pip, which raw
+            // mode rightly execs directly). The fakes' `#!/bin/sh` is an
+            // absolute path, so they need nothing else on PATH.
+            .env("PATH", bin)
             .env("BDO_DB_PATH", dir.join("track.db"))
             .env("BDO_TELEMETRY_DISABLED", "1")
             .env_remove("BDO_RAW")

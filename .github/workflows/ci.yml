@@ -5,6 +5,17 @@ on:
     branches:
       - main
   pull_request:
+  # The advisory database changes daily even when the code does not. Without
+  # this, a new RUSTSEC advisory against a locked dependency stays invisible
+  # until someone happens to push — RUSTSEC-2026-0285 was only caught because
+  # an unrelated docs PR ran the audit five days after it was published.
+  # Only audit-check runs on the schedule; every other job is gated off it.
+  # Failure notifications for scheduled runs go to whoever last edited this
+  # cron line. GitHub disables scheduled workflows after 60 days without
+  # repository activity; re-enable from the Actions tab if that happens.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,6 +44,7 @@ jobs:
 
   release-hardening:
     name: Release workflow hardening
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -49,6 +61,7 @@ jobs:
 
   fmt:
     name: Rust formatting
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -64,6 +77,7 @@ jobs:
 
   clippy:
     name: Clippy (${{ matrix.os }})
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -85,6 +99,7 @@ jobs:
 
   test:
     name: Tests (${{ matrix.os }})
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

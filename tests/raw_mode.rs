@@ -189,9 +189,15 @@ mod modules_that_exec_on_their_own {
             } else {
                 ""
             };
+            // Also record argv to <tool>.argv: in normal mode bdo filters
+            // stdout, so the file is the only way to see what it ran.
+            let log = bin.join(format!("{tool}.argv"));
             fs::write(
                 &p,
-                format!("#!/bin/sh\necho \"{tool} ARGV:$*\"\n{extra}exit 7\n"),
+                format!(
+                    "#!/bin/sh\necho \"$*\" > '{}'\necho \"{tool} ARGV:$*\"\n{extra}exit 7\n",
+                    log.display()
+                ),
             )
             .unwrap();
             fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
@@ -213,6 +219,13 @@ mod modules_that_exec_on_their_own {
             .env_remove("BDO_RAW")
             .output()
             .expect("spawn bdo")
+    }
+
+    fn argv_seen(bin: &Path, tool: &str) -> String {
+        fs::read_to_string(bin.join(format!("{tool}.argv")))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string()
     }
 
     fn first_line(o: &Output) -> String {
@@ -297,5 +310,40 @@ mod modules_that_exec_on_their_own {
         assert_eq!(first_line(&list), "uv ARGV:pip list");
         let outdated = run(dir.path(), &bin, &["--raw", "pip", "outdated"]);
         assert_eq!(first_line(&outdated), "uv ARGV:pip list --outdated");
+    }
+    #[test]
+    fn lint_output_format_option_handled_as_a_unit_in_both_modes() {
+        // `check` used to be added only when no --output-format was given, and
+        // a separate-token value was left behind: 0.45.7 ran `ruff text .`
+        // for `bdo lint ruff check --output-format text .`.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fakebin(dir.path());
+        let args = ["lint", "ruff", "check", "--output-format", "text", "."];
+
+        let mut raw = vec!["--raw"];
+        raw.extend(args);
+        run(dir.path(), &bin, &raw);
+        assert_eq!(argv_seen(&bin, "ruff"), "check --output-format text .");
+
+        // Normal mode replaces the user's format, value included, with JSON.
+        run(dir.path(), &bin, &args);
+        assert_eq!(argv_seen(&bin, "ruff"), "check --output-format=json .");
+
+        // No path given: the format's value is not mistaken for one.
+        run(
+            dir.path(),
+            &bin,
+            &["--raw", "lint", "ruff", "--output-format", "text"],
+        );
+        assert_eq!(argv_seen(&bin, "ruff"), "check --output-format text .");
+
+        // eslint's -f: 0.45.7 passed both `-f json -f stylish`, and the
+        // later one won, breaking bdo's JSON parse.
+        run(
+            dir.path(),
+            &bin,
+            &["lint", "eslint", "-f", "stylish", "src"],
+        );
+        assert_eq!(argv_seen(&bin, "npx"), "--no-install -- eslint -f json src");
     }
 }

@@ -5,6 +5,17 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **CI actions pinned to commit SHAs.** `ci.yml` used mutable refs
+  (`actions/checkout@v6`, `dtolnay/rust-toolchain@1.91`), so whoever controls
+  those tags or branches could change what runs on every PR. They are now
+  pinned like `release.yml`, every checkout drops its credentials
+  (`persist-credentials: false`), and the hardening check runs against
+  `ci.yml` too, so an unpinned action fails CI.
+
 ## [0.46.0] (2026-10-04)
 
 ### Features

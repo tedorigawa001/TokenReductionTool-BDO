@@ -21,7 +21,7 @@ if [ ! -f "$WORKFLOW" ]; then
     exit 1
 fi
 
-echo "==> Release workflow hardening"
+echo "==> Workflow hardening: $WORKFLOW"
 
 # 1. Third-party actions must be pinned to a commit SHA. Any mutable ref —
 #    a tag (@v6), a branch (@main), @latest — lets whoever controls it change
@@ -65,8 +65,8 @@ fi
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then
-    echo "Release workflow hardening intact"
+    echo "Workflow hardening intact: $WORKFLOW"
 else
-    echo "Release workflow hardening REGRESSED — see failures above" >&2
+    echo "Workflow hardening REGRESSED ($WORKFLOW) — see failures above" >&2
     exit 1
 fi

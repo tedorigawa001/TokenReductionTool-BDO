@@ -368,10 +368,13 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
 - **override パス配下の既存ファイル遡及なし**: `BDO_DB_PATH` / `BDO_TEE_DIR` /
   config で指定したディレクトリでは、修正前に作られたファイルの権限に手を入れない
   （共有ディレクトリを壊さないため、意図的）。新規作成分は保護される。
-- **`ci.yml` のアクション未 pin**: `release.yml` は SHA pin 済みだが `ci.yml` は
-  `@v6` / `@1.91` のまま。`permissions: contents: read` かつシークレット無しなので
-  トークン漏洩経路にはならず、優先度は低い。揃えるなら `check-release-hardening.sh`
-  の対象に `ci.yml` を足すだけでガードも効く。
+- ✅ ~~**`ci.yml` のアクション未 pin**~~（2026-10-07 対応）: `actions/checkout` と
+  `dtolnay/rust-toolchain` を SHA pin。後者は ref がツールチェーン名を兼ねるため
+  `with: toolchain:` 入力に移した（`"1.91"` は YAML で数値化されないよう引用）。全
+  checkout に `persist-credentials: false`。`release-hardening` ジョブが
+  `check-release-hardening.sh .github/workflows/ci.yml` も実行するので、未 pin の
+  再混入は PR で落ちる。**pin の更新**: `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`
+  （rust-toolchain は `commits/master`）で SHA を取り、コメントのバージョン表記も揃える。
 - **パターン外の秘密は平文**: `core::redact` は高確度パターンのみ。取り逃しは
   0600/0700 のパーミッション層が受ける設計（fail-safe で誤検知しない側に倒した結果）。
 - **リリース成果物は完全性のみで真正性がない**（2026-09-24 記録）: `install.sh` は

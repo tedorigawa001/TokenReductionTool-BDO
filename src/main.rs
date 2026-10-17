@@ -267,6 +267,9 @@ enum Commands {
         /// With --changed, diff against a git ref (e.g. origin/main) instead of the working tree
         #[arg(long)]
         against: Option<String>,
+        /// Keep only signatures matching this regex (e.g. `Tracker`, `(?i)parse`, `^pub fn`)
+        #[arg(long, value_name = "PATTERN")]
+        grep: Option<String>,
     },
 
     /// Change summary for review: changed files, stray artifacts, stale markers, test hints
@@ -1938,8 +1941,15 @@ fn run_cli() -> Result<i32> {
             path,
             changed,
             against,
+            grep,
         } => {
-            map::run(&path, changed, against.as_deref(), cli.verbose)?;
+            map::run(
+                &path,
+                changed,
+                against.as_deref(),
+                grep.as_deref(),
+                cli.verbose,
+            )?;
             0
         }
 

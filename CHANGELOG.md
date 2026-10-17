@@ -5,6 +5,20 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Features
+
+- **`bdo map --grep <PATTERN>`**: keep only the signatures matching a regex
+  (files with no match are dropped), e.g. `bdo map src --grep 'Tracker'`. The
+  footer reports how many of the tree's signatures matched. Combines with
+  `--changed`.
+
+### Fixed
+
+- `bdo map <file>` (a single file) printed an empty header line instead of the
+  file's path.
+
 ## [0.47.1] (2026-10-17)
 
 ### Security

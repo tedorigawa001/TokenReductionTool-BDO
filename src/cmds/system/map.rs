@@ -8,17 +8,33 @@
 //!
 //! `--changed [--against <ref>]` narrows the map to the git change set, so a
 //! reviewer sees just the API surface they touched.
+//!
+//! `--grep <PATTERN>` keeps only the signatures matching a regex (files with no
+//! match are dropped), so "where is `Tracker` defined, and what takes one?" is
+//! one command. Drill into a hit with `bdo map <file>` or
+//! `bdo read <file> -l outline`.
 
 use crate::core::changes;
 use crate::core::filter::Language;
 use crate::core::outline;
 use crate::core::tracking;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ignore::WalkBuilder;
+use regex::Regex;
 use std::path::{Path, PathBuf};
 
-pub fn run(path: &Path, changed: bool, against: Option<&str>, verbose: u8) -> Result<()> {
+pub fn run(
+    path: &Path,
+    changed: bool,
+    against: Option<&str>,
+    grep: Option<&str>,
+    verbose: u8,
+) -> Result<()> {
     let timer = tracking::TimedExecution::start();
+    // User-supplied, so compiled once per run rather than in a lazy_static.
+    let pattern = grep
+        .map(|p| Regex::new(p).with_context(|| format!("bdo map --grep: invalid pattern {p:?}")))
+        .transpose()?;
 
     if verbose > 0 {
         eprintln!("Mapping: {} (changed={})", path.display(), changed);
@@ -35,6 +51,7 @@ pub fn run(path: &Path, changed: bool, against: Option<&str>, verbose: u8) -> Re
     let mut raw_all = String::new();
     let mut file_count = 0usize;
     let mut sig_lines = 0usize;
+    let mut total_sigs = 0usize;
     let mut source_lines = 0usize;
 
     for file in &files {
@@ -51,15 +68,19 @@ pub fn run(path: &Path, changed: bool, against: Option<&str>, verbose: u8) -> Re
         let Some(sigs) = outline::signatures(&content, &lang) else {
             continue;
         };
-        let sigs = sigs.trim();
-        if sigs.is_empty() {
+        let all: Vec<&str> = sigs.trim().lines().collect();
+        total_sigs += all.len();
+        let kept: Vec<&str> = match &pattern {
+            Some(re) => all.into_iter().filter(|l| re.is_match(l)).collect(),
+            None => all,
+        };
+        if kept.is_empty() {
             continue;
         }
 
-        let display = file.strip_prefix(path).unwrap_or(file);
-        out.push_str(&display.display().to_string());
+        out.push_str(&display_path(file, path).display().to_string());
         out.push('\n');
-        for line in sigs.lines() {
+        for line in kept {
             out.push_str("  ");
             out.push_str(line);
             out.push('\n');
@@ -70,21 +91,31 @@ pub fn run(path: &Path, changed: bool, against: Option<&str>, verbose: u8) -> Re
         raw_all.push_str(&content);
     }
 
+    let scope = match (changed, against) {
+        (true, Some(base)) => format!(" (changed vs {})", base),
+        (true, None) => " (changed)".to_string(),
+        (false, _) => String::new(),
+    };
     if file_count == 0 {
-        out.push_str(if changed {
-            "No changed source files to map.\n"
-        } else {
-            "No source files found to map.\n"
-        });
+        match grep {
+            Some(p) => out.push_str(&format!(
+                "No signatures match /{}/{} ({} searched).\n",
+                p, scope, total_sigs
+            )),
+            None => out.push_str(if changed {
+                "No changed source files to map.\n"
+            } else {
+                "No source files found to map.\n"
+            }),
+        }
     } else {
-        let scope = match (changed, against) {
-            (true, Some(base)) => format!(" (changed vs {})", base),
-            (true, None) => " (changed)".to_string(),
-            (false, _) => String::new(),
+        let count = match grep {
+            Some(p) => format!("{} of {} signatures match /{}/", sig_lines, total_sigs, p),
+            None => format!("{} signatures", sig_lines),
         };
         out.push_str(&format!(
-            "\n— {} files, {} signatures{} (full source: {} lines)\n",
-            file_count, sig_lines, scope, source_lines
+            "\n— {} files, {}{} (full source: {} lines)\n",
+            file_count, count, scope, source_lines
         ));
     }
 
@@ -92,6 +123,16 @@ pub fn run(path: &Path, changed: bool, against: Option<&str>, verbose: u8) -> Re
     // Savings are relative to reading the full source of the mapped files.
     timer.track(&format!("map {}", path.display()), "bdo map", &raw_all, &out);
     Ok(())
+}
+
+/// How a mapped file is labelled: relative to the mapped directory, or — when
+/// `bdo map` was pointed at a single file, which would strip to nothing — the
+/// path as given.
+fn display_path<'a>(file: &'a Path, root: &'a Path) -> &'a Path {
+    match file.strip_prefix(root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => rel,
+        _ => file,
+    }
 }
 
 /// Source files under `path`, respecting `.gitignore` (the default whole-tree map).
@@ -129,4 +170,26 @@ fn changed_source_files(path: &Path, against: Option<&str>) -> Result<Vec<PathBu
     files.sort();
     files.dedup();
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_path_is_relative_to_the_mapped_dir() {
+        assert_eq!(
+            display_path(Path::new("src/core/a.rs"), Path::new("src")),
+            Path::new("core/a.rs")
+        );
+    }
+
+    #[test]
+    fn display_path_keeps_a_single_mapped_file() {
+        // `bdo map src/a.rs` used to print an empty header line.
+        assert_eq!(
+            display_path(Path::new("src/a.rs"), Path::new("src/a.rs")),
+            Path::new("src/a.rs")
+        );
+    }
 }

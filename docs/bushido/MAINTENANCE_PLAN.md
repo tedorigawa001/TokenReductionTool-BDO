@@ -406,6 +406,14 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   `bushido-npm-package.tar.gz` を手元から OTP 付きで公開した。**次のリリースで
   publish-npm 成功を確認後**、`gh secret delete NPM_TOKEN` と npm 側トークンの
   Revoke を行う。workflow ファイル名を変えると公開できなくなる点に注意。
+- **npm 段階的公開**（2026-10-17、v0.47.0 で `OIDC permission denied` を受けて決定）:
+  Trusted Publisher の Allowed actions は既定で `npm stage publish` のみ。npm 推奨に
+  従い「Allow npm publish」は付けず、`release.yml` を `npm stage publish` に変更。
+  CI は公開待ちにするだけで、**リリースごとにメンテナが 2FA で承認**する:
+  `npm stage list bdo-cli` → `npm stage approve <stage-id>`（npmjs.com からも可）。
+  CI が侵害されても npm に単独では出せない。ハードニングチェックが直接の
+  `npm publish` を検出する。v0.47.0 はタグ時点の workflow が `npm publish` のため
+  0.46.1 と同様に手元から OTP 付きで公開。
 - **リリース用トークンの期限**: `HOMEBREW_TAP_TOKEN`（homebrew-tap への
   fine-grained PAT、Contents R/W）は期限付き。2026-10-04 更新。失効すると
   `publish-homebrew-formula` が `Bad credentials` で落ちる → 再発行して

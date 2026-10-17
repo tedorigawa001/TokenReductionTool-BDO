@@ -5,9 +5,16 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.46.1] (2026-10-17)
 
 ### Security
+
+- **rustls 0.23.45 → 0.23.46** (via `ureq`), fixing RUSTSEC-2026-0346
+  (`Debug` impls for client session values expose TLS secrets, medium),
+  RUSTSEC-2026-0347, RUSTSEC-2026-0348 and RUSTSEC-2026-0349 (including an
+  unauthenticated ServerHello downgrading later connections to classical key
+  exchange, low). Caught by the daily scheduled `cargo audit` run. No code
+  changes.
 
 - **CI actions pinned to commit SHAs.** `ci.yml` used mutable refs
   (`actions/checkout@v6`, `dtolnay/rust-toolchain@1.91`), so whoever controls

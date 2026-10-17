@@ -429,6 +429,13 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   まず `brew list --versions bushido` とタップ側 formula の version を比べて切り分ける。**
 
 ### チップ（Claude Code 上で1クリック着手可）
-- **`task_0bbc6dfb`**: tracking の flaky テスト（実ユーザー DB + env 共有のレース）。
-  CI では Linux / Windows とも今のところ一度も赤くなっていないが、レース自体は残る。
-  散発的に落ち始めたら消化のタイミング。
+- ✅ ~~**`task_0bbc6dfb`**: tracking の flaky テスト~~（2026-10-17 対応）: 原因は
+  (1) `test_db_path_env_and_default` がプロセス共有の `BDO_DB_PATH` を書き換え、並列の
+  `Tracker::new()` が別 DB に書いて読む競合、(2) 単体テストが実ユーザーの
+  `history.db` に書き込み（`bdo test` 等のゴミ行が `bdo gain` に混入）。`cfg(test)`
+  の `get_db_path_with_source` をスレッドローカルな一時 DB（スレッド終了で削除）に
+  差し替え、env を書き換えるテストは削除（優先順位は `resolve_db_path` の純関数
+  テストが担保）。macOS の `/var` symlink は `validate_database_path` に弾かれるため
+  一時ディレクトリの基点を canonicalize。30 回連続実行で失敗 0、実 DB の行数不変を確認。
+  統合テスト（`tests/*.rs`）はバイナリを起動するため対象外 — 各テストが自前で
+  `BDO_DB_PATH` を設定済み。

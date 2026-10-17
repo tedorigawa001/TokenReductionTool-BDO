@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unit tests no longer race on, or write to, the real tracking DB.** A test
+  rewrote the process-wide `BDO_DB_PATH` while other tests opened trackers in
+  parallel, and several tests recorded rows into the user's own `history.db`
+  (visible in `bdo gain`). Each test thread now gets a throwaway DB.
+
 ### Security
 
 - **npm publishing moved to Trusted Publishing (OIDC).** The release

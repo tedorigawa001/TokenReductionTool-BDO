@@ -350,7 +350,10 @@ jobs:
     runs-on: "ubuntu-22.04"
     # Trusted Publishing (OIDC): npm verifies a short-lived token GitHub mints
     # for this job, so no long-lived NPM_TOKEN secret exists to leak or expire.
-    # The publisher is registered on npmjs.com for this repo + release.yml.
+    # The publisher is registered on npmjs.com for this repo + release.yml and
+    # allowed only `npm stage publish`: CI stages the version, and it goes
+    # public only when a maintainer approves it with 2FA
+    # (`npm stage list bdo-cli`, then `npm stage approve <stage-id>`).
     permissions:
       contents: read
       id-token: write
@@ -376,7 +379,7 @@ jobs:
       - run: |
           for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith("-npm-package.tar.gz")] | any)'); do
             pkg=$(echo "$release" | jq '.artifacts[] | select(endswith("-npm-package.tar.gz"))' --raw-output)
-            npm publish --access public "./npm/${pkg}"
+            npm stage publish --access public "./npm/${pkg}"
           done
 
   announce:

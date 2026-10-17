@@ -63,18 +63,23 @@ else
     pass "no rustup-init bootstrap present"
 fi
 
-# 4. npm publishes via Trusted Publishing (OIDC), not a stored token. The
-#    dist template publishes with NODE_AUTH_TOKEN: secrets.NPM_TOKEN, so a
-#    regeneration silently brings the long-lived secret back.
-if grep -qE 'npm publish' "$WORKFLOW"; then
+# 4. npm publishes via Trusted Publishing (OIDC), not a stored token, and only
+#    stages the version: a maintainer approves it with 2FA. The dist template
+#    runs a direct `npm publish` with NODE_AUTH_TOKEN: secrets.NPM_TOKEN, so a
+#    regeneration silently brings both back.
+if grep -qE 'npm (stage )?publish' "$WORKFLOW"; then
     if grep -nE 'secrets\.NPM_TOKEN|NODE_AUTH_TOKEN' "$WORKFLOW" >/dev/null; then
         echo "    found:"
         grep -nE 'secrets\.NPM_TOKEN|NODE_AUTH_TOKEN' "$WORKFLOW" | sed 's/^/      /'
         fail "npm publish uses a stored token instead of Trusted Publishing"
     elif ! grep -qE '^[[:space:]]*id-token:[[:space:]]*write' "$WORKFLOW"; then
         fail "npm publish without id-token: write cannot use Trusted Publishing"
+    elif grep -nE 'npm publish' "$WORKFLOW" | grep -vE '^[0-9]+:[[:space:]]*#' >/dev/null; then
+        echo "    found:"
+        grep -nE 'npm publish' "$WORKFLOW" | grep -vE '^[0-9]+:[[:space:]]*#' | sed 's/^/      /'
+        fail "direct npm publish bypasses staged publishing (use npm stage publish)"
     else
-        pass "npm publishes via Trusted Publishing"
+        pass "npm stages via Trusted Publishing (maintainer approves with 2FA)"
     fi
 else
     pass "no npm publish present"

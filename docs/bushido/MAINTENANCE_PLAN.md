@@ -387,6 +387,24 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   検証できる）。`release.yml` に `id-token: write` / `attestations: write` 権限の
   追加が必要で、`allow-dirty = ["ci"]` 下の手動 hardening と両立させる作業になる。
   利用者側の検証手順も伴うため、配布先が増えるか外部からの利用が増えたら着手。
+  **npm は 2026-10-17 に部分対応**: Trusted Publishing 移行で npm パッケージには
+  provenance が自動付与される（下記）。GitHub Releases / Homebrew 側は未対応のまま。
+- **npm Trusted Publishing**（2026-10-17 移行）: v0.46.1 の `publish-npm` が `EOTP`
+  で失敗（10/4 に作り直した `NPM_TOKEN` が 2FA bypass なし）。bypass 付きトークンは
+  npm 自身が非推奨と警告するため、OIDC の Trusted Publishing に移行した。
+  `publish-npm` ジョブに `id-token: write`、Node 24 + npm 11.21.1 固定（11.5.1 以上が
+  必須）、`NODE_AUTH_TOKEN` 削除。npmjs.com 側の登録は `bdo-cli` → Settings →
+  Trusted Publisher（`tedorigawa001` / `TokenReductionTool-BDO` / `release.yml` /
+  environment なし）。`check-release-hardening.sh` の 4 項目目が
+  `secrets.NPM_TOKEN` / `NODE_AUTH_TOKEN` の再混入（`dist generate` で戻る）と
+  `id-token: write` の欠落を検出する。v0.46.1 の npm 版は Release 成果物の
+  `bushido-npm-package.tar.gz` を手元から OTP 付きで公開した。**次のリリースで
+  publish-npm 成功を確認後**、`gh secret delete NPM_TOKEN` と npm 側トークンの
+  Revoke を行う。workflow ファイル名を変えると公開できなくなる点に注意。
+- **リリース用トークンの期限**: `HOMEBREW_TAP_TOKEN`（homebrew-tap への
+  fine-grained PAT、Contents R/W）は期限付き。2026-10-04 更新。失効すると
+  `publish-homebrew-formula` が `Bad credentials` で落ちる → 再発行して
+  `gh secret set HOMEBREW_TAP_TOKEN`、`gh run rerun <run-id> --failed`。
 
 ### 既知の不具合（軽微・未修正）
 - ✅ ~~README のバッジが 404~~（0.45.3 で修正）: CI バッジを

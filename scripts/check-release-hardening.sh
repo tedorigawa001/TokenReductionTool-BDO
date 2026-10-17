@@ -63,6 +63,23 @@ else
     pass "no rustup-init bootstrap present"
 fi
 
+# 4. npm publishes via Trusted Publishing (OIDC), not a stored token. The
+#    dist template publishes with NODE_AUTH_TOKEN: secrets.NPM_TOKEN, so a
+#    regeneration silently brings the long-lived secret back.
+if grep -qE 'npm publish' "$WORKFLOW"; then
+    if grep -nE 'secrets\.NPM_TOKEN|NODE_AUTH_TOKEN' "$WORKFLOW" >/dev/null; then
+        echo "    found:"
+        grep -nE 'secrets\.NPM_TOKEN|NODE_AUTH_TOKEN' "$WORKFLOW" | sed 's/^/      /'
+        fail "npm publish uses a stored token instead of Trusted Publishing"
+    elif ! grep -qE '^[[:space:]]*id-token:[[:space:]]*write' "$WORKFLOW"; then
+        fail "npm publish without id-token: write cannot use Trusted Publishing"
+    else
+        pass "npm publishes via Trusted Publishing"
+    fi
+else
+    pass "no npm publish present"
+fi
+
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "Workflow hardening intact: $WORKFLOW"

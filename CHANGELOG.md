@@ -5,6 +5,16 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **npm publishing moved to Trusted Publishing (OIDC).** The release
+  workflow no longer uses a long-lived `NPM_TOKEN` secret: npm verifies a
+  short-lived token GitHub issues to the `publish-npm` job, and the package
+  gets npm provenance. The hardening check fails if a stored npm token comes
+  back (e.g. after `dist generate`).
+
 ## [0.46.1] (2026-10-17)
 
 ### Security

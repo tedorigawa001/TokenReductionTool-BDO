@@ -348,6 +348,12 @@ jobs:
       - plan
       - host
     runs-on: "ubuntu-22.04"
+    # Trusted Publishing (OIDC): npm verifies a short-lived token GitHub mints
+    # for this job, so no long-lived NPM_TOKEN secret exists to leak or expire.
+    # The publisher is registered on npmjs.com for this repo + release.yml.
+    permissions:
+      contents: read
+      id-token: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PLAN: ${{ needs.plan.outputs.val }}
@@ -361,15 +367,17 @@ jobs:
           merge-multiple: true
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '20.x'
+          node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
+      # Trusted Publishing needs npm >= 11.5.1; pin it rather than trusting
+      # whatever the Node image bundles.
+      - name: Install npm with Trusted Publishing support
+        run: npm install -g npm@11.21.1
       - run: |
           for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith("-npm-package.tar.gz")] | any)'); do
             pkg=$(echo "$release" | jq '.artifacts[] | select(endswith("-npm-package.tar.gz"))' --raw-output)
             npm publish --access public "./npm/${pkg}"
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   announce:
     needs:

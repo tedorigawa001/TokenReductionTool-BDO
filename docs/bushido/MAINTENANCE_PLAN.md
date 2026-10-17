@@ -411,9 +411,10 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   environment なし）。`check-release-hardening.sh` の 4 項目目が
   `secrets.NPM_TOKEN` / `NODE_AUTH_TOKEN` の再混入（`dist generate` で戻る）と
   `id-token: write` の欠落を検出する。v0.46.1 の npm 版は Release 成果物の
-  `bushido-npm-package.tar.gz` を手元から OTP 付きで公開した。**次のリリースで
-  publish-npm 成功を確認後**、`gh secret delete NPM_TOKEN` と npm 側トークンの
-  Revoke を行う。workflow ファイル名を変えると公開できなくなる点に注意。
+  `bushido-npm-package.tar.gz` を手元から OTP 付きで公開した。v0.47.1 で CI からの
+  公開を確認後、**2026-10-17 に `NPM_TOKEN` シークレット削除・npm 側トークン Revoke
+  済み**（npm 用の長期シークレットはもう存在しない）。workflow ファイル名を変えると
+  公開できなくなる点に注意。
 - **npm 段階的公開**（2026-10-17、v0.47.0 で `OIDC permission denied` を受けて決定）:
   Trusted Publisher の Allowed actions は既定で `npm stage publish` のみ。npm 推奨に
   従い「Allow npm publish」は付けず、`release.yml` を `npm stage publish` に変更。
@@ -422,6 +423,13 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   CI が侵害されても npm に単独では出せない。ハードニングチェックが直接の
   `npm publish` を検出する。v0.47.0 はタグ時点の workflow が `npm publish` のため
   0.46.1 と同様に手元から OTP 付きで公開。
+- **v0.47.1 でサプライチェーン対策を実地確認**（2026-10-17）: 全ジョブ成功。
+  `gh attestation verify` がアーカイブ（darwin arm64 / windows）で成功し、署名には
+  `release.yml@refs/tags/v0.47.1` とタグのコミットが記録、1 バイト改ざんしたファイルは
+  検証失敗。npm は `staged with id …` → メンテナ承認で公開され、registry 上の
+  `_npmUser` が `GitHub Actions`（trustedPublisher）+ `approver`、provenance 付き。
+  **リリース手順の最後に「npm stage approve」が加わった**:
+  タグ push → Release 完了 → `npm stage list bdo-cli` → `npm stage approve <id>`。
 - **リリース用トークンの期限**: `HOMEBREW_TAP_TOKEN`（homebrew-tap への
   fine-grained PAT、Contents R/W）は期限付き。2026-10-04 更新。失効すると
   `publish-homebrew-formula` が `Bad credentials` で落ちる → 再発行して

@@ -393,7 +393,15 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   追加が必要で、`allow-dirty = ["ci"]` 下の手動 hardening と両立させる作業になる。
   利用者側の検証手順も伴うため、配布先が増えるか外部からの利用が増えたら着手。
   **npm は 2026-10-17 に部分対応**: Trusted Publishing 移行で npm パッケージには
-  provenance が自動付与される（下記）。GitHub Releases / Homebrew 側は未対応のまま。
+  provenance が自動付与される（下記）。
+  **バイナリも 2026-10-17 に対応**: `dist-workspace.toml` の `github-attestations = true`
+  を `dist generate` で出したテンプレートどおり手で移植 — `build-local-artifacts` に
+  `attestations: write` / `id-token: write` と `actions/attest`（v4.2.2、SHA pin）で
+  `target/distrib/*<target>*` を attest。ハードニングチェック 5 項目目が欠落を検出。
+  利用者は `gh attestation verify <file> --repo tedorigawa001/TokenReductionTool-BDO`
+  （README に記載）。**残り**: `install.sh` / Homebrew は自動では attestation を検証しない
+  （利用者が手動で verify する前提）。グローバル成果物（`bushido-installer.sh`・
+  npm tarball・source tarball）は dist テンプレートどおり対象外。
 - **npm Trusted Publishing**（2026-10-17 移行）: v0.46.1 の `publish-npm` が `EOTP`
   で失敗（10/4 に作り直した `NPM_TOKEN` が 2FA bypass なし）。bypass 付きトークンは
   npm 自身が非推奨と警告するため、OIDC の Trusted Publishing に移行した。

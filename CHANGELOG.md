@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Release archives carry GitHub build provenance.** Each platform's archive
+  is attested by the release workflow, so a download can be checked with
+  `gh attestation verify <file> --repo tedorigawa001/TokenReductionTool-BDO`.
+  Unlike the `.sha256` sidecar, which ships in the same release, this proves
+  the file was built by this repository's workflow from the tagged commit.
+
 - **npm releases are staged and need maintainer approval.** CI now runs
   `npm stage publish` (still via Trusted Publishing), and the trusted publisher
   is allowed nothing else, so a new `bdo-cli` version goes public only when a

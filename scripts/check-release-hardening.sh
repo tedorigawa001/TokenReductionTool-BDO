@@ -85,6 +85,20 @@ else
     pass "no npm publish present"
 fi
 
+# 5. Release archives carry GitHub build provenance. Only the release workflow
+#    builds them (it is the one that runs `dist build`).
+if grep -qE 'dist build' "$WORKFLOW"; then
+    if ! grep -qE 'uses:[[:space:]]*actions/attest(-build-provenance)?@' "$WORKFLOW"; then
+        fail "release archives are built without an attestation step"
+    elif ! grep -qE '^[[:space:]]*"?attestations"?:[[:space:]]*"?write' "$WORKFLOW"; then
+        fail "attestation step lacks attestations: write"
+    else
+        pass "release archives get build provenance attestations"
+    fi
+else
+    pass "no release build present"
+fi
+
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "Workflow hardening intact: $WORKFLOW"

@@ -29,8 +29,9 @@ npm-shrinkwrap = false
 # scripts/check-release-hardening.sh verifies in CI.
 allow-dirty = ["ci"]
 # Publish the Homebrew formula and the npm package from CI.
-# Requires repo secrets: HOMEBREW_TAP_TOKEN (PAT with write access to the
-# tap repo) and NPM_TOKEN (npm automation token).
+# Requires the repo secret HOMEBREW_TAP_TOKEN (PAT with write access to the
+# tap repo). npm needs no secret: release.yml stages it via Trusted Publishing
+# and a maintainer approves it (`npm stage approve`).
 publish-jobs = ["homebrew", "npm"]
 # The GitHub repo to push the Homebrew formula to
 tap = "tedorigawa001/homebrew-tap"
@@ -40,3 +41,6 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-da
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Attach GitHub build provenance to each platform's archives
+# (`gh attestation verify`). release.yml carries it by hand under allow-dirty.
+github-attestations = true

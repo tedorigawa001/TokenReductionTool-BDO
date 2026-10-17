@@ -86,7 +86,14 @@ cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 
 Download from [releases](https://github.com/tedorigawa001/TokenReductionTool-BDO/releases):
 Archives are named after the crate (`bushido`); the binary inside is `bdo`.
-Each has a `.sha256` sidecar — verify before extracting.
+Each has a `.sha256` sidecar — verify before extracting. From 0.47.1 on, each
+archive also carries GitHub build provenance, which proves it was built by this
+repository's release workflow (the checksum alone cannot: it ships in the same
+release):
+
+```bash
+gh attestation verify bushido-aarch64-apple-darwin.tar.xz --repo tedorigawa001/TokenReductionTool-BDO
+```
 
 - macOS: `bushido-x86_64-apple-darwin.tar.xz` / `bushido-aarch64-apple-darwin.tar.xz`
 - Linux: `bushido-x86_64-unknown-linux-gnu.tar.xz` / `bushido-aarch64-unknown-linux-gnu.tar.xz`

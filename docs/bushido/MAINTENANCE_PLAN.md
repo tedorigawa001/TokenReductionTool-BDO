@@ -313,7 +313,12 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   - 副産物: `bdo --raw` / `bdo -v` 単独（サブコマンド無し）がフォールバックで「`--raw` という
     コマンド」を実行し exit 127 になっていた（`-v` は元から）。`-` 始まりは clap の usage エラーに
   - テスト: `core::raw` ユニット7件 + `tests/raw_mode.rs` 統合7件
-- **`BDO_QUIET=1`**: reduced-view ヒント等の stderr 補助メッセージを抑制。
+- ✅ ~~**`BDO_QUIET=1`**~~（2026-10-17 実装）: `core::quiet::{is_quiet, note}`。対象は
+  「別の場所を指す案内」だけ — `read` の reduced-view ヒント、hook 未導入/古いの日次
+  リマインダー（抑制時は rate-limit マーカーを書かず、次の非 quiet 実行で出る）、
+  `--raw has no effect`。エラー・bdo 異常の警告（filter panic、hook integrity）・
+  包んだコマンドの stderr・`[full output: …]`（stdout、エージェントの復旧経路）は対象外。
+  新しい補助メッセージは `eprintln!` ではなく `core::quiet::note` で出すこと。
 - **`bdo map` シンボルフィルタ / ドリルダウン**: `bdo map --grep <sym>`、map から特定ファイルを outline へ。
 
 ### 要切り分け

@@ -233,6 +233,14 @@ BDO_RAW=1 bdo cargo test     # 環境変数版（セッション全体に効か�
 書き換えにも影響しません。従来の `bdo read -l none`・`BDO_NO_TOML=1`・`bdo proxy` も引き続き
 使えます。
 
+### 静音モード（`BDO_QUIET=1`）
+
+`BDO_QUIET=1` で、bdo 自身が stderr に出す補助メッセージを止められます。対象は `bdo read`
+後の「reduced view — full raw content: …」ヒント、1日1回の「hook 未インストール / 古い」
+リマインダー、「--raw has no effect」の注記です。コマンドの出力・エラー・包んだコマンド自身の
+stderr・bdo の異常を知らせる警告（フィルタの panic、hook の整合性チェック失敗）・
+`[full output: …]` の案内は止まりません。
+
 ## ドキュメント
 
 - **[troubleshooting.md](docs/guide/resources/troubleshooting.md)** - よくある問題の解決

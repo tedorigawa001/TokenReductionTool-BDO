@@ -1263,9 +1263,9 @@ fn run_raw_if_requested() -> Result<Option<i32>> {
                 if let Some(sub) = rest.first().and_then(|s| s.to_str()) {
                     if BDO_META_COMMANDS.contains(&sub) && !matches!(sub, "read" | "proxy" | "run")
                     {
-                        eprintln!(
+                        core::quiet::note(format_args!(
                             "bdo: --raw has no effect on `bdo {sub}`; it has no unfiltered form"
-                        );
+                        ));
                     }
                 }
             }

@@ -48,7 +48,7 @@ pub fn env_requests_raw() -> bool {
         .unwrap_or(false)
 }
 
-fn is_truthy(v: &str) -> bool {
+pub(crate) fn is_truthy(v: &str) -> bool {
     matches!(
         v.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"

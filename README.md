@@ -427,6 +427,15 @@ just runs raw. Raw runs are still tracked, at 0% savings.
 The older per-command switches — `bdo read -l none`, `BDO_NO_TOML=1`,
 `bdo proxy <cmd>` — keep working.
 
+### Quiet mode (`BDO_QUIET=1`)
+
+`BDO_QUIET=1` silences bdo's own advisory notes on stderr: the
+"reduced view — full raw content: …" hint after `bdo read`, the daily
+"no hook installed / hook outdated" reminder, and the "--raw has no effect"
+note. Command output, errors, the wrapped command's own stderr, warnings that
+bdo itself misbehaved (a filter panic, a failed hook integrity check) and the
+`[full output: …]` pointer are unaffected.
+
 ## Examples
 
 **Directory listing:**

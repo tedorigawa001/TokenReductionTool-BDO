@@ -105,11 +105,11 @@ pub fn run(
     let _ = std::io::Write::flush(&mut std::io::stdout());
 
     if reduced_view {
-        eprintln!(
+        crate::core::quiet::note(format_args!(
             "bdo: {}: reduced view — full raw content: bdo --raw read {}",
             file.display(),
             file.display()
-        );
+        ));
     }
     timer.track(
         &format!("cat {}", file.display()),

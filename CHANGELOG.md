@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Features
+
+- **`BDO_QUIET=1` silences bdo's advisory notes on stderr** — the
+  reduced-view hint after `bdo read`, the daily "no hook installed / hook
+  outdated" reminder, and the "--raw has no effect" note. Output, errors, the
+  wrapped command's stderr, warnings that bdo misbehaved and the
+  `[full output: …]` pointer are unaffected. A suppressed hook reminder is not
+  spent: it still shows on the next run without `BDO_QUIET`.
+
 ### Fixed
 
 - **Unit tests no longer race on, or write to, the real tracking DB.** A test

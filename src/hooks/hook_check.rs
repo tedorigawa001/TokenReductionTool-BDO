@@ -93,6 +93,11 @@ pub fn maybe_warn() {
 
 /// Single source of truth: delegates to `status()` then rate-limits the warning.
 fn check_and_warn() -> Option<()> {
+    // Advisory only. Return before touching the rate-limit marker, so the nag
+    // still shows once BDO_QUIET is unset.
+    if crate::core::quiet::is_quiet() {
+        return Some(());
+    }
     let warning = match status() {
         HookStatus::Ok => return Some(()),
         HookStatus::Missing => {

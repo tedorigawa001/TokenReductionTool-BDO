@@ -1348,6 +1348,29 @@ fn categorize_command(rtk_cmd: &str) -> String {
     .to_string()
 }
 
+// Unit tests must never touch the user's real history DB, and must not see
+// each other's rows: every test thread gets its own throwaway DB, removed when
+// the thread exits. Thread-local rather than an env var, because mutating
+// BDO_DB_PATH races every other test that opens a Tracker concurrently.
+// The base is canonicalized because validate_database_path rejects symlinked
+// components and macOS's temp dir lives under the /var -> /private/var link.
+#[cfg(test)]
+thread_local! {
+    static TEST_DB_DIR: tempfile::TempDir = {
+        let base = std::env::temp_dir();
+        #[cfg(unix)]
+        let base = base.canonicalize().expect("Failed to resolve temp dir");
+        tempfile::tempdir_in(base).expect("Failed to create per-thread test DB dir")
+    };
+}
+
+#[cfg(test)]
+fn get_db_path_with_source() -> Result<(PathBuf, crate::core::utils::PathSource)> {
+    let path = TEST_DB_DIR.with(|dir| dir.path().join(HISTORY_DB));
+    Ok((path, crate::core::utils::PathSource::Default))
+}
+
+#[cfg(not(test))]
 fn get_db_path_with_source() -> Result<(PathBuf, crate::core::utils::PathSource)> {
     let env_override = std::env::var("BDO_DB_PATH").ok();
     let config_override = crate::core::config::Config::load()
@@ -1995,31 +2018,22 @@ mod tests {
         assert_eq!(pt.saved_tokens, 0);
     }
 
-    // 7. get_db_path respects environment variable BDO_DB_PATH
-    // 8. get_db_path falls back to default when no custom config
-    // Combined into one test to avoid env var race between parallel tests
+    // 7. Tests run against a per-thread DB, never the user's history.db
+    // (BDO_DB_PATH / config / default precedence: test_resolve_db_path_*).
     #[test]
-    fn test_db_path_env_and_default() {
-        use std::env;
-        use std::sync::Mutex;
-        static ENV_LOCK: Mutex<()> = Mutex::new(());
-        let _guard = ENV_LOCK.lock().unwrap();
+    fn test_tests_use_isolated_per_thread_db() {
+        let (here, _) = get_db_path_with_source().unwrap();
+        let (default_path, _) = resolve_db_path(None, None);
+        assert_ne!(here, default_path);
 
-        use crate::core::utils::PathSource;
-        let custom_path = env::temp_dir().join("rtk_test_custom.db");
-        env::set_var("BDO_DB_PATH", &custom_path);
-        let (db_path, source) = get_db_path_with_source().expect("Failed to get db path");
-        assert_eq!(db_path, custom_path);
-        assert_eq!(source, PathSource::Override);
+        let other = std::thread::spawn(|| get_db_path_with_source().unwrap().0)
+            .join()
+            .unwrap();
+        assert_ne!(here, other, "threads must not share a test DB");
 
-        env::remove_var("BDO_DB_PATH");
-        let (db_path, source) = get_db_path_with_source().expect("Failed to get db path");
-        assert!(
-            db_path.ends_with("bdo/history.db"),
-            "expected default path ending with bdo/history.db, got: {}",
-            db_path.display()
-        );
-        assert_eq!(source, PathSource::Default);
+        let tracker = Tracker::new().unwrap();
+        tracker.record("ls", "bdo ls isolated", 10, 5, 1).unwrap();
+        assert_eq!(tracker.get_recent(10).unwrap().len(), 1);
     }
 
     // resolve_db_path classifies overrides so Tracker::new only chmods the

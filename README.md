@@ -196,6 +196,21 @@ C++, Java, and Python; respects `.gitignore`.
 `--against origin/main` for the whole-branch diff) — the API surface you touched,
 ideal alongside `bdo review`.
 
+`bdo map --grep <PATTERN>` keeps only the signatures matching a regex, so
+"where is `Tracker` defined, and what takes or returns one?" is one command
+(`(?i)` for case-insensitive, `^pub` for the public surface). Drill into a hit
+with `bdo map <file>` or `bdo read <file> -l outline`.
+
+```
+$ bdo map src --grep 'struct Tracker\b|pub fn is_quiet'
+core/quiet.rs
+  pub fn is_quiet() -> bool { … }
+core/tracking.rs
+  pub struct Tracker { … }
+
+— 2 files, 2 of 2206 signatures match /struct Tracker\b|pub fn is_quiet/ (full source: 2208 lines)
+```
+
 For Python, function bodies are elided with a `…` marker (the analogue of
 `{ … }`), `async def` is handled like `def`, and multi-line signatures are
 folded onto one line:

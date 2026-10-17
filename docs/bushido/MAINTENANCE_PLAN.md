@@ -319,7 +319,11 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   `--raw has no effect`。エラー・bdo 異常の警告（filter panic、hook integrity）・
   包んだコマンドの stderr・`[full output: …]`（stdout、エージェントの復旧経路）は対象外。
   新しい補助メッセージは `eprintln!` ではなく `core::quiet::note` で出すこと。
-- **`bdo map` シンボルフィルタ / ドリルダウン**: `bdo map --grep <sym>`、map から特定ファイルを outline へ。
+- ✅ ~~**`bdo map` シンボルフィルタ / ドリルダウン**~~（2026-10-17 実装）: `--grep <PATTERN>`
+  （regex。一致する署名だけ残し、一致のないファイルは出さない。フッターに「N of M
+  signatures match」、0 件は「No signatures match … (M searched)」、不正 regex はエラー）。
+  ドリルダウンは既存の `bdo map <file>` / `bdo read <file> -l outline` で足りるため新設せず、
+  ついでに単一ファイル指定時にヘッダー行が空になるバグを修正（`display_path`）。
 
 ### 要切り分け
 - ✅ ~~**複合コマンド/パイプ堅牢性**~~（2026-09-19 調査・修正）: **bdo 側の問題だった**。

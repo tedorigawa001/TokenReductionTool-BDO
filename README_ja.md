@@ -140,6 +140,8 @@ stream.rs
 
 `bdo map --changed` は git の変更セットだけにマップを絞ります（`--against origin/main` でブランチ全体の差分）。触った API 面だけを見られ、`bdo review` と併用すると便利です。
 
+`bdo map --grep <PATTERN>` は正規表現に一致する署名だけを残します。「`Tracker` はどこで定義され、何が受け取り・返すか」が1コマンドで分かります（`(?i)` で大文字小文字を無視、`^pub` で公開 API のみ）。見つけたファイルは `bdo map <file>` や `bdo read <file> -l outline` で掘り下げられます。
+
 Python では関数本体を `…` マーカーで省略（`{ … }` に相当）、`async def` も `def` と同様に処理、複数行シグネチャは1行に折りたたみます:
 
 ```python

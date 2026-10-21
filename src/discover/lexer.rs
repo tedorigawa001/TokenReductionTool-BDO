@@ -311,8 +311,16 @@ fn contains_unsupported_shell_construct(cmd: &str) -> bool {
                 return true
             }
             b'`' if !in_single => return true,
-            b'$' if !in_single && bytes.get(i + 1) == Some(&b'(') => return true,
-            b'<' | b'>' if !in_single && !in_double && bytes.get(i + 1) == Some(&b'(') => {
+            // `$\<newline>(` is `$(` once bash drops the line continuation,
+            // inside double quotes too.
+            b'$' if !in_single && next_after_line_continuations(bytes, i + 1) == Some(b'(') => {
+                return true
+            }
+            b'<' | b'>'
+                if !in_single
+                    && !in_double
+                    && next_after_line_continuations(bytes, i + 1) == Some(b'(') =>
+            {
                 return true
             }
             _ => {}
@@ -322,7 +330,8 @@ fn contains_unsupported_shell_construct(cmd: &str) -> bool {
     false
 }
 
-/// Bash removes backslash-newline pairs before recognizing an ANSI-C quote.
+/// Bash removes backslash-newline pairs before recognizing an ANSI-C quote or a
+/// `$(`/`<(`/`>(` substitution.
 /// Inspect that logical next byte without changing quote/escape handling for
 /// literal dollar signs or for the rest of the original command.
 fn next_after_line_continuations(bytes: &[u8], mut pos: usize) -> Option<u8> {
@@ -1191,6 +1200,25 @@ mod tests {
         ] {
             assert!(contains_unattestable_construct(cmd), "{cmd:?}");
         }
+    }
+
+    #[test]
+    fn test_unattestable_substitution_across_line_continuations() {
+        for cmd in [
+            "git status $\\\n(printf BDO_GATE_BYPASS)",
+            "git status $\\\n\\\n(printf BDO_GATE_BYPASS)",
+            "git status \"$\\\n(printf BDO_GATE_BYPASS)\"",
+            "git log $\\\n(echo --output=/tmp/x)",
+            "diff <\\\n(printf a) b",
+            "tee >\\\n(cat) </dev/null",
+        ] {
+            assert!(contains_unattestable_construct(cmd), "{cmd:?}");
+        }
+        // A continuation that is not followed by `(` stays attestable.
+        assert!(!contains_unattestable_construct("git status \\\n--short"));
+        assert!(!contains_unattestable_construct(
+            "git status '$\\\n(literal)'"
+        ));
     }
 
     #[test]

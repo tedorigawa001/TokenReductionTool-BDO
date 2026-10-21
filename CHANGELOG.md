@@ -5,6 +5,19 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Hook permission gate: ANSI-C quoting and line-continued substitutions are
+  never auto-allowed.** `$'...'` quoting can hide real separators behind
+  escaped quotes (`git status $'a\'b'; other-cmd; echo $'c\'d'` looked like
+  one allowed `git status`), and a backslash-newline between `$`/`<`/`>` and
+  `(` (`$\⏎(…)`) slipped a command substitution past the gate, letting two
+  allowed commands combine (`git log $\⏎(echo --output=/path)` writes a file).
+  Both now defer to the agent's own permission prompt, across the Claude,
+  Cursor, Gemini and Copilot hooks.
+
 ## [0.48.0] (2026-10-17)
 
 ### Features

@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allowed commands combine (`git log $\⏎(echo --output=/path)` writes a file).
   Both now defer to the agent's own permission prompt, across the Claude,
   Cursor, Gemini and Copilot hooks.
+- **rustls-webpki 0.103.15 → 0.103.16 and webpki-roots 1.0.6 → 1.0.10**
+  (via `ureq`), fixing RUSTSEC-2026-0382 (certificate verification may accept
+  distrusted intermediates) and RUSTSEC-2026-0381 (bundled roots trust
+  distrusted emSign intermediates). Caught by the daily scheduled audit.
+- **`bdo curl` no longer buffers a whole response in memory.** Piped / redirected
+  output now goes straight from curl to the consumer (bytes arrive before the
+  transfer ends, exit status and failure bodies unchanged). On a terminal,
+  bdo captures at most 16 MiB to summarize; a larger response is streamed
+  byte-exact instead of growing memory without bound.
 
 ## [0.48.0] (2026-10-17)
 

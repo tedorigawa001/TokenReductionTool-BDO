@@ -1447,6 +1447,37 @@ mod tests {
     }
 
     #[test]
+    fn test_special_quotes_defer_across_hook_hosts() {
+        let allow = vec!["git status".to_string()];
+        for cmd in [
+            r#"git status $'a\'b'; printf BDO_GATE_BYPASS; echo $'c\'d'"#,
+            r#"git status $'a\'b' $(printf BDO_GATE_BYPASS) $'c\'d'"#,
+            "git status $\\\n'a\\'b'; printf BDO_GATE_BYPASS; echo $'c\\'d'",
+        ] {
+            assert!(matches!(
+                decide_with_rules(cmd, &[], &[], &allow),
+                HookDecision::Defer
+            ));
+            // The attributed helper is shared by Gemini and Copilot integrations.
+            assert!(matches!(
+                decide_from_verdict_for_agent(cmd, PermissionVerdict::Allow, "gemini"),
+                HookDecision::Defer
+            ));
+            let input = claude_input(cmd);
+            assert!(run_claude_inner(&input).is_none(), "Claude: {cmd:?}");
+            assert_eq!(
+                run_cursor_inner_with_rules(&input, &[], &[], &allow),
+                "{}",
+                "Cursor: {cmd:?}"
+            );
+        }
+        assert!(matches!(
+            decide_with_rules("git status 2>&1", &[], &[], &allow),
+            HookDecision::AllowRewrite(_)
+        ));
+    }
+
+    #[test]
     fn test_decide_defer_for_substitution_even_when_allowed() {
         for cmd in [
             "git status `rm -rf /tmp/x`",

@@ -273,11 +273,11 @@ fn flush_arg(tokens: &mut Vec<ParsedToken>, current: &mut String, offset: usize)
 }
 
 /// True for constructs the permission gate can't decompose, so they must never
-/// be auto-allowed: command/process substitution, or a real file-target redirect
+/// be auto-allowed: ANSI-C quoting, command/process substitution, or a real file-target redirect
 /// (fd-dup like `2>&1` and `/dev/null` are exempt). Separators and subshells are
 /// handled by [`split_for_permissions`], not flagged here.
 pub fn contains_unattestable_construct(cmd: &str) -> bool {
-    if contains_substitution(cmd) {
+    if contains_unsupported_shell_construct(cmd) {
         return true;
     }
     let tokens = tokenize(cmd);
@@ -289,7 +289,9 @@ pub fn contains_unattestable_construct(cmd: &str) -> bool {
 
 /// Quote-aware: bash runs backtick/`$(...)` unquoted and inside double quotes,
 /// but treats single-quoted text literally; `<(`/`>(` is unquoted-only.
-fn contains_substitution(cmd: &str) -> bool {
+/// ANSI-C `$'...'` quoting is not modeled by the tokenizer: its escaped quotes
+/// can hide real shell separators. Defer the entire command before parsing it.
+fn contains_unsupported_shell_construct(cmd: &str) -> bool {
     let bytes = cmd.as_bytes();
     let mut in_single = false;
     let mut in_double = false;
@@ -302,6 +304,12 @@ fn contains_substitution(cmd: &str) -> bool {
             }
             b'\'' if !in_double => in_single = !in_single,
             b'"' if !in_single => in_double = !in_double,
+            b'$' if !in_single
+                && !in_double
+                && next_after_line_continuations(bytes, i + 1) == Some(b'\'') =>
+            {
+                return true
+            }
             b'`' if !in_single => return true,
             b'$' if !in_single && bytes.get(i + 1) == Some(&b'(') => return true,
             b'<' | b'>' if !in_single && !in_double && bytes.get(i + 1) == Some(&b'(') => {
@@ -312,6 +320,16 @@ fn contains_substitution(cmd: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// Bash removes backslash-newline pairs before recognizing an ANSI-C quote.
+/// Inspect that logical next byte without changing quote/escape handling for
+/// literal dollar signs or for the rest of the original command.
+fn next_after_line_continuations(bytes: &[u8], mut pos: usize) -> Option<u8> {
+    while bytes.get(pos) == Some(&b'\\') && bytes.get(pos + 1) == Some(&b'\n') {
+        pos += 2;
+    }
+    bytes.get(pos).copied()
 }
 
 // `>&N`/`>&-` (and `N>&M`) is fd-dup/close; bare `>&` before a word is
@@ -1146,6 +1164,49 @@ mod tests {
     }
 
     // --- contains_unattestable_construct (security) -------------------------
+
+    #[test]
+    fn test_unattestable_special_quotes() {
+        for cmd in [
+            r#"git status $'a\'b'; printf BDO_GATE_BYPASS; echo $'c\'d'"#,
+            "git status $'a\\'b'\nprintf BDO_GATE_BYPASS; echo $'c\\'d'",
+            r#"git status --ignored=$'a\'b' & printf BDO_GATE_BYPASS; echo $'c\'d'"#,
+            r#"git status $'a\'b' $(printf BDO_GATE_BYPASS) $'c\'d'"#,
+            r#"git status $'ordinary'"#,
+            r#"git status $'unterminated"#,
+            r#"git status $''"#,
+            r#"git status prefix$'日本語\t'"#,
+            r#"VALUE=$'a\'b' git status"#,
+            r#"git status \\$'active'"#,
+        ] {
+            assert!(contains_unattestable_construct(cmd), "{cmd:?}");
+        }
+    }
+
+    #[test]
+    fn test_unattestable_special_quotes_across_line_continuations() {
+        for cmd in [
+            "git status $\\\n'a\\'b'; printf BDO_GATE_BYPASS; echo $'c\\'d'",
+            "git status $\\\n\\\n'ordinary'",
+        ] {
+            assert!(contains_unattestable_construct(cmd), "{cmd:?}");
+        }
+    }
+
+    #[test]
+    fn test_attestable_literal_special_quotes() {
+        for cmd in [
+            r#"git status "$'literal'""#,
+            r#"git status 'literal $' 2>&1"#,
+            r#"git status \$\'literal\'"#,
+            r#"git status \$\"literal\""#,
+            r#"git status \\\$\'literal\'"#,
+            r#"git status $"ordinary""#,
+            r#"git status "ordinary""#,
+        ] {
+            assert!(!contains_unattestable_construct(cmd), "{cmd:?}");
+        }
+    }
 
     #[test]
     fn test_unattestable_backtick() {

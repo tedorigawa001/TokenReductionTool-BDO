@@ -94,6 +94,17 @@ mod tests {
         use super::super::{evaluate, RewriteOutcome};
 
         #[test]
+        fn test_special_quotes_passthrough() {
+            for cmd in [
+                r#"git status $'a\'b'; printf BDO_GATE_BYPASS; echo $'c\'d'"#,
+                r#"git status $'ordinary'"#,
+                "git status $\\\n'a\\'b'; printf BDO_GATE_BYPASS; echo $'c\\'d'",
+            ] {
+                assert_eq!(evaluate(cmd, &[], &[]), RewriteOutcome::Passthrough);
+            }
+        }
+
+        #[test]
         fn test_backtick_substitution_passthrough() {
             assert_eq!(
                 evaluate("git status `rm -rf /tmp/x`", &[], &[]),

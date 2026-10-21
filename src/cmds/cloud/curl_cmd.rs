@@ -1,7 +1,8 @@
 //! Runs curl and condenses long output for human consumption.
 //!
-//! For pipes / redirects (non-TTY) and JSON bodies the full response is passed
-//! through unchanged — truncating mid-stream would break downstream parsers.
+//! Pipes / redirects (non-TTY) inherit curl's output handles, forwarding bytes
+//! immediately without buffering. Terminal capture is bounded; oversized bodies
+//! switch to byte-exact streaming instead of growing memory or a spool file.
 //! The condensed-form-with-tee-hint path is reserved for non-JSON bodies on
 //! a real terminal where a human reads the output and the tee file gives the
 //! LLM a way to recover the raw response.
@@ -16,9 +17,11 @@ use crate::core::tracking;
 use crate::core::utils::resolved_command;
 use anyhow::{Context, Result};
 use std::borrow::Cow;
-use std::io::{IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
+use std::process::{Child, Stdio};
 
 const MAX_RESPONSE_SIZE: usize = 500;
+const TERMINAL_CAPTURE_LIMIT: usize = 16 * 1024 * 1024;
 
 pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
@@ -33,24 +36,46 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         eprintln!("Running: curl -s {}", args.join(" "));
     }
 
-    // Capture stdout as raw bytes (not UTF-8 String) so binary downloads
-    // survive intact. `String::from_utf8_lossy` would otherwise replace
-    // every non-UTF-8 byte with U+FFFD (3 bytes), corrupting e.g. gzip
-    // magic `1f 8b 08 00` into `1f ef bf bd 08 00` (#1087).
-    let output = cmd.output().context("Failed to run curl")?;
-    let exit_code = output.status.code().unwrap_or(1);
+    // Never collect piped data (including stderr) in bdo. Native handles let
+    // downstream consumers receive bytes immediately and close the transfer.
+    // Keep the previous null-stdin behavior of Command::output().
+    cmd.stdin(Stdio::null()).stderr(Stdio::inherit());
+    if !std::io::stdout().is_terminal() {
+        let status = cmd.stdout(Stdio::inherit()).status().context("Failed to run curl")?;
+        let exit_code = status.code().unwrap_or(1);
+        if !status.success() {
+            eprintln!("FAILED: curl (exit code {exit_code})");
+        }
+        timer.track_passthrough(
+            &format!("curl {}", args.join(" ")),
+            &format!("bdo curl {}", args.join(" ")),
+        );
+        return Ok(exit_code);
+    }
+
+    let mut child = CurlChild(cmd.stdout(Stdio::piped()).spawn().context("Failed to run curl")?);
+    let stdout = child.0.stdout.take().context("No curl stdout handle")?;
+    let body = read_terminal_body(stdout, &mut io::stdout().lock(), TERMINAL_CAPTURE_LIMIT)
+        .context("Failed to forward curl response")?;
+    let status = child.0.wait().context("Failed to wait for curl")?;
+    let exit_code = status.code().unwrap_or(1);
+
+    let TerminalBody::Captured(bytes) = body else {
+        if !status.success() {
+            eprintln!("FAILED: curl (exit code {exit_code})");
+        }
+        timer.track_passthrough(
+            &format!("curl {}", args.join(" ")),
+            &format!("bdo curl {}", args.join(" ")),
+        );
+        return Ok(exit_code);
+    };
 
     // Skip filtering on failure: curl can return HTML error bodies that would
     // be misleading to summarize, and we want the real exit code surfaced.
-    if !output.status.success() {
-        let stderr_str = String::from_utf8_lossy(&output.stderr);
-        let stdout_str = String::from_utf8_lossy(&output.stdout);
-        let msg = if stderr_str.trim().is_empty() {
-            stdout_str.trim().to_string()
-        } else {
-            stderr_str.trim().to_string()
-        };
-        eprintln!("FAILED: curl {}", msg);
+    if !status.success() {
+        // Native stderr has already been forwarded without an unbounded buffer.
+        eprintln!("FAILED: curl {}", String::from_utf8_lossy(&bytes).trim());
         return Ok(exit_code);
     }
 
@@ -59,11 +84,11 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     // (gzip, zip, png, pdf, elf, ... — any binary format). Write raw bytes
     // through and skip filtering. Tracking is recorded as passthrough
     // (0% savings) since token counts over binary content have no meaning.
-    if is_binary(&output.stdout) {
+    if is_binary(&bytes) {
         let stdout = std::io::stdout();
         let mut handle = stdout.lock();
         handle
-            .write_all(&output.stdout)
+            .write_all(&bytes)
             .context("Failed to write binary response to stdout")?;
         timer.track_passthrough(
             &format!("curl {}", args.join(" ")),
@@ -72,9 +97,8 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         return Ok(exit_code);
     }
 
-    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-    let is_tty = std::io::stdout().is_terminal();
-    let filtered = filter_curl_output(&raw, is_tty);
+    let raw = String::from_utf8_lossy(&bytes).into_owned();
+    let filtered = filter_curl_output(&raw, true);
 
     println!("{}", filtered.content);
     if let Some(hint) = &filtered.tee_hint {
@@ -89,6 +113,40 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     );
 
     Ok(exit_code)
+}
+
+// A failed write (e.g. a closed consumer) must not leave curl running.
+struct CurlChild(Child);
+
+impl Drop for CurlChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TerminalBody {
+    Captured(Vec<u8>),
+    Streamed,
+}
+
+fn read_terminal_body(
+    mut reader: impl Read,
+    output: &mut impl Write,
+    limit: usize,
+) -> io::Result<TerminalBody> {
+    let mut prefix = Vec::new();
+    reader.by_ref().take(limit as u64 + 1).read_to_end(&mut prefix)?;
+    if prefix.len() <= limit {
+        return Ok(TerminalBody::Captured(prefix));
+    }
+    // Do not classify or summarize a partial body: a late binary byte must not
+    // corrupt earlier bytes. Oversized text/JSON also remains complete.
+    output.write_all(&prefix)?;
+    io::copy(&mut reader, output)?;
+    output.flush()?;
+    Ok(TerminalBody::Streamed)
 }
 
 /// Returns `true` if `bytes` is not valid UTF-8 — which is exactly the
@@ -189,6 +247,38 @@ struct FilterResult<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_terminal_capture_boundary_and_raw_overflow() {
+        for len in [0, 31, 32, 33, 100_000] {
+            let mut input = vec![b'x'; len];
+            if len > 32 {
+                input[len - 1] = 0xff;
+            }
+            let mut output = Vec::new();
+            let result = read_terminal_body(input.as_slice(), &mut output, 32).unwrap();
+            if len <= 32 {
+                assert_eq!(result, TerminalBody::Captured(input));
+                assert!(output.is_empty());
+            } else {
+                assert_eq!(result, TerminalBody::Streamed);
+                assert_eq!(output, input);
+            }
+        }
+    }
+
+    #[test]
+    fn test_terminal_overflow_stops_on_write_failure() {
+        struct Closed;
+        impl Write for Closed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> { Ok(()) }
+        }
+        let error = read_terminal_body(&b"oversized"[..], &mut Closed, 2).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    }
 
     #[test]
     fn test_filter_curl_json_small_no_tee_hint() {

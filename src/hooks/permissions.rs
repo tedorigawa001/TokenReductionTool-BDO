@@ -850,6 +850,55 @@ mod tests {
     }
 
     #[test]
+    fn test_line_continued_substitution_never_auto_allowed() {
+        // Allowed command pairs must not combine through `$\<newline>(`:
+        // `git log $(echo --output=/path)` writes a file.
+        let allow = vec![
+            "git *".to_string(),
+            "printf *".to_string(),
+            "echo *".to_string(),
+        ];
+        for cmd in [
+            "git status $(printf X)",
+            "git status $\\\n(printf X)",
+            "git log $\\\n(echo --output=/tmp/x)",
+            "git log \"$\\\n(echo --output=/tmp/x)\"",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &[], &[], &allow),
+                PermissionVerdict::Ask,
+                "{cmd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_special_quotes_never_auto_allowed() {
+        let allow = vec!["git status".to_string()];
+        for cmd in [
+            r#"git status $'a\'b'; printf BDO_GATE_BYPASS; echo $'c\'d'"#,
+            r#"git status $'a\'b' $(printf BDO_GATE_BYPASS) $'c\'d'"#,
+            "git status $\\\n'a\\'b'; printf BDO_GATE_BYPASS; echo $'c\\'d'",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &[], &[], &allow),
+                PermissionVerdict::Ask,
+                "{cmd:?}"
+            );
+        }
+        assert_eq!(
+            check_command_with_rules(r#"git status "$'literal'""#, &[], &[], &allow),
+            PermissionVerdict::Allow
+        );
+        // Locale quotes follow the ordinary double-quote rules; real separators
+        // after them must still require an independent permission match.
+        assert_eq!(
+            check_command_with_rules(r#"git status $"ordinary"; printf other"#, &[], &[], &allow),
+            PermissionVerdict::Default
+        );
+    }
+
+    #[test]
     fn test_substitution_never_auto_allowed() {
         let allow = vec!["git *".to_string()];
         for cmd in [

@@ -104,7 +104,7 @@ gh attestation verify bushido-aarch64-apple-darwin.tar.xz --repo tedorigawa001/T
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.48.0"
+bdo --version   # Should show "bdo 0.48.1"
 bdo gain        # Should show token savings stats
 ```
 

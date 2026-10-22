@@ -19,6 +19,25 @@
 
 ## Ways to Contribute
 
+### Rust development environment
+
+Development and release builds use Rust **1.99.1**, pinned in
+`rust-toolchain.toml`. With rustup installed, commands in this repository select
+that toolchain automatically, including rustfmt and Clippy. CI uses the same
+version on Linux and Windows.
+
+The minimum supported Rust version remains **1.91** (`Cargo.toml`), and the
+language edition remains **2021**. A separate CI job checks compatibility with
+Rust 1.91.0. Updating the development toolchain does not raise the minimum
+supported compiler version.
+
+When updating Rust, keep `rust-toolchain.toml`, the development toolchains in
+`.github/workflows/ci.yml`, and the container bootstrap in
+`.github/workflows/release.yml` aligned. Leave the MSRV job separate unless
+intentionally changing compatibility requirements.
+
+### Contribution types
+
 | Type | Examples |
 |------|----------|
 | **Report** | File a clear issue with steps to reproduce, expected vs actual behavior |

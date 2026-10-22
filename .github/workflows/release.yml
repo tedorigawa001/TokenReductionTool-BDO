@@ -130,7 +130,7 @@ jobs:
       - name: Install Rust non-interactively if not already installed
         if: ${{ matrix.container }}
         run: |
-          if ! command -v cargo > /dev/null 2>&1; then
+          if ! command -v rustup > /dev/null 2>&1; then
             case "$(uname -m)" in
               x86_64)
                 rustup_target=x86_64-unknown-linux-gnu
@@ -150,7 +150,7 @@ jobs:
               -o /tmp/rustup-init
             echo "${rustup_sha256}  /tmp/rustup-init" | sha256sum -c -
             chmod +x /tmp/rustup-init
-            /tmp/rustup-init -y --profile minimal --default-toolchain 1.91.0
+            /tmp/rustup-init -y --profile minimal --default-toolchain 1.99.1
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: Install dist

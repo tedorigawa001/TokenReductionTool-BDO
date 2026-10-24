@@ -76,6 +76,13 @@ curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BD
 > echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc  # or ~/.zshrc
 > ```
 
+The installer always checks the archive's SHA-256. With an authenticated
+GitHub CLI (`gh auth login`) it also verifies the build provenance — that the
+archive was built by this repository's release workflow at that tag — and
+refuses to install if it doesn't match. Without `gh` it warns and relies on the
+checksum. `BDO_VERIFY_ATTESTATION=require` makes provenance mandatory;
+`BDO_VERIFY_ATTESTATION=0` skips it.
+
 ### Cargo
 
 ```bash

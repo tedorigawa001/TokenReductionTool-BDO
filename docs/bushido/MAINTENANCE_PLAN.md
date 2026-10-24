@@ -403,8 +403,15 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   `attestations: write` / `id-token: write` と `actions/attest`（v4.2.2、SHA pin）で
   `target/distrib/*<target>*` を attest。ハードニングチェック 5 項目目が欠落を検出。
   利用者は `gh attestation verify <file> --repo tedorigawa001/TokenReductionTool-BDO`
-  （README に記載）。**残り**: `install.sh` / Homebrew は自動では attestation を検証しない
-  （利用者が手動で verify する前提）。グローバル成果物（`bushido-installer.sh`・
+  （README に記載）。**`install.sh` は 2026-10-25 に自動検証へ対応**: SHA-256 の後に、
+  認証済み `gh` があれば `gh attestation verify --repo … --signer-workflow …/release.yml
+  --source-ref refs/tags/<ver>` を実行し、不一致ならインストール中止。`gh` なし / 未認証は
+  警告してチェックサムのみ（`curl | sh` 利用者の多くは gh を持たないため既定は auto）。
+  `BDO_VERIFY_ATTESTATION=require` で必須化、`=0` で省略。v0.47.1 未満は attestation が
+  無いのでチェックサムのみ。テストは `scripts/test-install.sh`（偽 gh、PATH は偽のみ —
+  CI の Ubuntu には本物の gh があるため）。同時に x86_64 Linux が存在しない musl
+  アーカイブを取りに行くバグを修正し、選ぶ target を `dist-workspace.toml` と突合する
+  テストを追加。**残り**: Homebrew は attestation を検証しない。グローバル成果物（`bushido-installer.sh`・
   npm tarball・source tarball）は dist テンプレートどおり対象外。
 - **npm Trusted Publishing**（2026-10-17 移行）: v0.46.1 の `publish-npm` が `EOTP`
   で失敗（10/4 に作り直した `NPM_TOKEN` が 2FA bypass なし）。bypass 付きトークンは

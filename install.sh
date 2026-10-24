@@ -75,7 +75,7 @@ get_target() {
     case "$OS" in
         linux)
             case "$ARCH" in
-                x86_64)  TARGET="x86_64-unknown-linux-musl";;
+                x86_64)  TARGET="x86_64-unknown-linux-gnu";;
                 aarch64) TARGET="aarch64-unknown-linux-gnu";;
             esac
             ;;
@@ -83,6 +83,62 @@ get_target() {
             TARGET="${ARCH}-apple-darwin"
             ;;
     esac
+}
+
+# Releases from v0.47.1 on carry GitHub build provenance.
+version_has_attestations() {
+    v=${1#v}
+    v=${v%%-*}
+    major=${v%%.*}
+    rest=${v#*.}
+    minor=${rest%%.*}
+    patch=${rest#*.}
+    case "$major$minor$patch" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$major" -gt 0 ] && return 0
+    [ "$minor" -gt 47 ] && return 0
+    [ "$minor" -eq 47 ] && [ "$patch" -ge 1 ] && return 0
+    return 1
+}
+
+# The .sha256 sidecar ships in the same release as the archive, so it proves
+# integrity but not origin: whoever can replace one can replace both. Build
+# provenance is signed by GitHub for this repo's release workflow at this tag,
+# so a tampered release fails here even with a matching checksum.
+#
+# BDO_VERIFY_ATTESTATION: unset/auto — verify when an authenticated `gh` is
+# available, otherwise warn and rely on the checksum; "require" — refuse to
+# install unverified; "0"/"off"/"false" — skip.
+verify_attestation() {
+    archive=$1
+    mode=${BDO_VERIFY_ATTESTATION:-auto}
+    case "$mode" in
+        0|off|false|no) warn "Attestation check skipped (BDO_VERIFY_ATTESTATION=$mode)"; return 0 ;;
+        auto|require|1|true|yes|on) ;;
+        *) error "BDO_VERIFY_ATTESTATION must be auto, require or 0 (got: $mode)" ;;
+    esac
+    [ "$mode" = auto ] || mode=require
+
+    if ! version_has_attestations "$VERSION"; then
+        [ "$mode" = require ] && error "${VERSION} predates release attestations (v0.47.1) — cannot verify origin"
+        warn "${VERSION} predates release attestations (v0.47.1); relying on the checksum only"
+        return 0
+    fi
+    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+        [ "$mode" = require ] && error "BDO_VERIFY_ATTESTATION=require needs an authenticated GitHub CLI (gh auth login)"
+        warn "Build provenance not verified (needs an authenticated 'gh'); relying on the checksum only"
+        return 0
+    fi
+
+    info "Verifying build provenance..."
+    if ! gh attestation verify "$archive" \
+        --repo "$REPO" \
+        --signer-workflow "${REPO}/.github/workflows/release.yml" \
+        --source-ref "refs/tags/${VERSION}" >/dev/null 2>&1; then
+        error "Build provenance verification failed — not built by ${REPO}'s release workflow at ${VERSION}; refusing to install (override: BDO_VERIFY_ATTESTATION=0)"
+    fi
+    info "Build provenance verified (${REPO} release.yml @ ${VERSION})"
 }
 
 # Download and install
@@ -125,6 +181,8 @@ install() {
     if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
         error "Checksum verification failed — refusing to install"
     fi
+
+    verify_attestation "$ARCHIVE"
 
     # Verify archive contents before extraction (CWE-22 path traversal).
     # Reject any entry with an absolute path or a ".." component.
@@ -195,4 +253,8 @@ main() {
     info "Installation complete! Run '$BINARY_NAME --help' to get started."
 }
 
-main
+# Sourcing with BDO_INSTALL_SH_LIB=1 loads the functions without installing
+# (scripts/test-install.sh).
+if [ "${BDO_INSTALL_SH_LIB:-}" != 1 ]; then
+    main
+fi

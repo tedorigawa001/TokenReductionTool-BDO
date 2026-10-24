@@ -411,7 +411,18 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   無いのでチェックサムのみ。テストは `scripts/test-install.sh`（偽 gh、PATH は偽のみ —
   CI の Ubuntu には本物の gh があるため）。同時に x86_64 Linux が存在しない musl
   アーカイブを取りに行くバグを修正し、選ぶ target を `dist-workspace.toml` と突合する
-  テストを追加。**残り**: Homebrew は attestation を検証しない。グローバル成果物（`bushido-installer.sh`・
+  テストを追加。
+  **Homebrew は 2026-10-25 に監視で対応**: formula 内で `gh attestation verify` する案は
+  不採用 — tap 改ざん（`HOMEBREW_TAP_TOKEN` 漏洩）なら攻撃者が検証部分ごと消せる、
+  brew は install 時に HOME/env を差し替えるため gh 認証がほぼ使えない、dist が毎回
+  formula を再生成する。代わりに `scripts/check-homebrew-tap.sh` を CI の
+  `homebrew-tap` ジョブ（schedule でも実行）で毎日走らせ、live formula の全 url が
+  本リポジトリの当該 version のリリース資産であること・sha256 一致・`release.yml` @
+  タグの provenance・最新リリース追従を検証（改ざんは 1 日以内に CI 失敗で検知）。
+  `scripts/test-check-homebrew-tap.sh` が改ざん 4 種（別ホスト・fork・sha 不一致・
+  未 attest 版へのロールバック）の拒否を確認。リリース直後〜formula 公開までの数分は
+  「最新に追従していない」で失敗し得る（必須チェックにはしていない）。利用者向けには
+  `gh attestation verify "$(brew --cache bushido)" …` を README に記載。グローバル成果物（`bushido-installer.sh`・
   npm tarball・source tarball）は dist テンプレートどおり対象外。
 - **npm Trusted Publishing**（2026-10-17 移行）: v0.46.1 の `publish-npm` が `EOTP`
   で失敗（10/4 に作り直した `NPM_TOKEN` が 2FA bypass なし）。bypass 付きトークンは

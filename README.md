@@ -102,6 +102,14 @@ release):
 gh attestation verify bushido-aarch64-apple-darwin.tar.xz --repo tedorigawa001/TokenReductionTool-BDO
 ```
 
+Homebrew installs can be checked the same way, against the archive brew
+downloaded (CI also verifies the published formula against these attestations
+daily):
+
+```bash
+gh attestation verify "$(brew --cache bushido)" --repo tedorigawa001/TokenReductionTool-BDO
+```
+
 - macOS: `bushido-x86_64-apple-darwin.tar.xz` / `bushido-aarch64-apple-darwin.tar.xz`
 - Linux: `bushido-x86_64-unknown-linux-gnu.tar.xz` / `bushido-aarch64-unknown-linux-gnu.tar.xz`
 - Windows: `bushido-x86_64-pc-windows-msvc.zip`

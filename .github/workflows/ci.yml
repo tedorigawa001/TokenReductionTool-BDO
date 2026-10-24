@@ -9,7 +9,8 @@ on:
   # this, a new RUSTSEC advisory against a locked dependency stays invisible
   # until someone happens to push — RUSTSEC-2026-0285 was only caught because
   # an unrelated docs PR ran the audit five days after it was published.
-  # Only audit-check runs on the schedule; every other job is gated off it.
+  # Only audit-check and homebrew-tap run on the schedule; every other job is
+  # gated off it.
   # Failure notifications for scheduled runs go to whoever last edited this
   # cron line. GitHub disables scheduled workflows after 60 days without
   # repository activity; re-enable from the Actions tab if that happens.
@@ -43,6 +44,31 @@ jobs:
       # Fetch the current RustSec database; do not filter out other platforms.
       - name: Audit locked dependencies
         run: cargo audit --file Cargo.lock --deny warnings
+
+  # The tap's formula pins each archive's sha256, so brew already rejects a
+  # replaced release asset. It cannot notice the tap itself being rewritten
+  # (e.g. a leaked HOMEBREW_TAP_TOKEN pointing url + sha256 at another binary).
+  # Check daily that the live formula still names this repo's attested assets.
+  homebrew-tap:
+    name: Homebrew tap integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify the published formula
+        run: sh scripts/check-homebrew-tap.sh
+
+      - name: Tampered formulas are rejected
+        run: sh scripts/test-check-homebrew-tap.sh
 
   release-hardening:
     name: Release workflow hardening

@@ -31,6 +31,13 @@ language edition remains **2021**. A separate CI job checks compatibility with
 Rust 1.91.0. Updating the development toolchain does not raise the minimum
 supported compiler version.
 
+The integration tests also require `rg` on PATH. Install it with
+`bdo proxy cargo install ripgrep --locked --version 15.1.0` if necessary.
+CI installs this pinned version on both Linux and Windows. The cross-platform
+`raw_grep` tests copy the native `rg` executable into an isolated PATH without
+`grep`, so they exercise the Windows fallback rather than a system grep.
+Missing ripgrep fails these tests instead of silently skipping them.
+
 When updating Rust, keep `rust-toolchain.toml`, the development toolchains in
 `.github/workflows/ci.yml`, and the container bootstrap in
 `.github/workflows/release.yml` aligned. Leave the MSRV job separate unless

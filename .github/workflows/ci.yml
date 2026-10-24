@@ -159,6 +159,12 @@ jobs:
         with:
           toolchain: "1.99.1"
 
+      - name: Install ripgrep for cross-platform raw grep tests
+        shell: bash
+        run: |
+          cargo install ripgrep --locked --version 15.1.0 --root "$RUNNER_TEMP/raw-grep-tools"
+          echo "$RUNNER_TEMP/raw-grep-tools/bin" >> "$GITHUB_PATH"
+
       - name: Run tests
         run: cargo test
 

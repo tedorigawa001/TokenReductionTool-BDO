@@ -7,6 +7,9 @@
 #   3. Archives with ".." components are rejected pre-extraction.
 #   4. The check is still present in install.sh (regression guard).
 #   5. The installer requires and verifies a SHA-256 sidecar.
+#   6. Build provenance: verified with an authenticated gh (a failure aborts),
+#      skipped with a warning without one, enforced by BDO_VERIFY_ATTESTATION.
+#   7. Every target install.sh picks is one the release actually publishes.
 
 set -eu
 
@@ -122,6 +125,88 @@ if grep -qF '"$INSTALLED_BIN" --version' "$INSTALL_SH" \
 else
     fail "install.sh verification can report a different binary than it installed"
 fi
+
+echo "==> Build provenance (attestation)"
+
+# A fake gh records its argv and answers per FAKE_GH_AUTH / FAKE_GH_VERIFY.
+mkdir -p "$TMPDIR/fakebin"
+cat > "$TMPDIR/fakebin/gh" <<'GH'
+#!/bin/sh
+echo "$*" >> "$FAKE_GH_LOG"
+case "$1 $2" in
+    "auth status") exit "${FAKE_GH_AUTH:-0}" ;;
+    "attestation verify") exit "${FAKE_GH_VERIFY:-0}" ;;
+esac
+exit 2
+GH
+chmod +x "$TMPDIR/fakebin/gh"
+: > "$TMPDIR/archive"
+
+# Run verify_attestation in a subshell (error() exits); echo the exit status.
+attest() {
+    (
+        PATH="$1"
+        FAKE_GH_LOG="$TMPDIR/gh.log" FAKE_GH_AUTH="$2" FAKE_GH_VERIFY="$3"
+        VERSION="$4" BDO_VERIFY_ATTESTATION="$5"
+        export PATH FAKE_GH_LOG FAKE_GH_AUTH FAKE_GH_VERIFY BDO_VERIFY_ATTESTATION
+        BDO_INSTALL_SH_LIB=1 . "$INSTALL_SH"
+        verify_attestation "$TMPDIR/archive"
+    ) >/dev/null 2>&1 && echo 0 || echo 1
+}
+# PATHs hold only the fake (or nothing), so a real gh on the runner — GitHub's
+# Ubuntu images ship one in /usr/bin — can never answer instead. Sourcing
+# install.sh and verify_attestation need no external commands.
+mkdir -p "$TMPDIR/emptybin"
+WITH_GH="$TMPDIR/fakebin"
+NO_GH="$TMPDIR/emptybin"
+expect() { # description, expected, actual
+    if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (exit $3, want $2)"; fi
+}
+
+: > "$TMPDIR/gh.log"
+expect "verified provenance installs" 0 "$(attest "$WITH_GH" 0 0 v0.48.1 '')"
+if grep -qF -- "attestation verify $TMPDIR/archive --repo tedorigawa001/TokenReductionTool-BDO --signer-workflow tedorigawa001/TokenReductionTool-BDO/.github/workflows/release.yml --source-ref refs/tags/v0.48.1" "$TMPDIR/gh.log"; then
+    pass "gh pins repo, release workflow and tag"
+else
+    fail "gh attestation verify called without repo/workflow/tag pins: $(cat "$TMPDIR/gh.log")"
+fi
+expect "failed provenance refuses to install" 1 "$(attest "$WITH_GH" 0 1 v0.48.1 '')"
+expect "BDO_VERIFY_ATTESTATION=0 skips a failing check" 0 "$(attest "$WITH_GH" 0 1 v0.48.1 0)"
+expect "no gh: checksum only (auto)" 0 "$(attest "$NO_GH" 0 0 v0.48.1 '')"
+expect "unauthenticated gh: checksum only (auto)" 0 "$(attest "$WITH_GH" 1 0 v0.48.1 '')"
+expect "no gh + require refuses" 1 "$(attest "$NO_GH" 0 0 v0.48.1 require)"
+expect "unauthenticated gh + require refuses" 1 "$(attest "$WITH_GH" 1 0 v0.48.1 require)"
+: > "$TMPDIR/gh.log"
+expect "pre-attestation release (v0.47.0): checksum only" 0 "$(attest "$WITH_GH" 0 1 v0.47.0 '')"
+if [ -s "$TMPDIR/gh.log" ]; then
+    fail "gh was called for a release that has no attestations"
+else
+    pass "no gh call for a pre-attestation release"
+fi
+expect "pre-attestation release + require refuses" 1 "$(attest "$WITH_GH" 0 0 v0.47.0 require)"
+expect "v0.47.1 is the first attested release" 1 "$(attest "$WITH_GH" 0 1 v0.47.1 '')"
+expect "v1.0.0 counts as attested" 1 "$(attest "$WITH_GH" 0 1 v1.0.0 '')"
+expect "unknown BDO_VERIFY_ATTESTATION value is an error" 1 "$(attest "$WITH_GH" 0 0 v0.48.1 maybe)"
+
+if grep -qE '^[[:space:]]*verify_attestation "\$ARCHIVE"' "$INSTALL_SH"; then
+    pass "install() calls verify_attestation before extraction"
+else
+    fail "install() no longer calls verify_attestation"
+fi
+
+echo "==> Targets match published release assets"
+
+# x86_64 Linux once asked for a musl archive the release never publishes.
+DIST_TARGETS=$(sed -n 's/^targets = \[\(.*\)\]/\1/p' "$REPO_ROOT/dist-workspace.toml" | tr -d '" ' | tr ',' ' ')
+for os_arch in "linux x86_64" "linux aarch64" "darwin x86_64" "darwin aarch64"; do
+    # shellcheck disable=SC2086
+    set -- $os_arch
+    target=$(OS=$1 ARCH=$2 BDO_INSTALL_SH_LIB=1 sh -c '. "$0"; get_target; echo "$TARGET"' "$INSTALL_SH")
+    case " $DIST_TARGETS " in
+        *" $target "*) pass "$1/$2 -> $target is published" ;;
+        *) fail "$1/$2 -> $target is not in dist-workspace.toml targets ($DIST_TARGETS)" ;;
+    esac
+done
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then

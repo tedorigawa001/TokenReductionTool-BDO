@@ -5,6 +5,25 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **`install.sh` verifies build provenance.** After the SHA-256 check, an
+  authenticated GitHub CLI runs `gh attestation verify`, pinned to this repo's
+  `release.yml` and the release tag; a mismatch aborts the install. The
+  checksum alone cannot catch a replaced release, since it ships in the same
+  release. Without an authenticated `gh` the installer warns and falls back to
+  the checksum; `BDO_VERIFY_ATTESTATION=require` refuses that, `=0` skips the
+  check. Releases before v0.47.1 have no attestations and are checksum-only.
+
+### Fixed
+
+- `install.sh` on x86_64 Linux downloaded `x86_64-unknown-linux-musl`, which
+  the release never publishes, so every such install failed. It now uses the
+  published `x86_64-unknown-linux-gnu` archive, and a test checks every target
+  the installer picks against the release's target list.
+
 ## [0.48.1] (2026-10-21)
 
 ### Security

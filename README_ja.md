@@ -61,6 +61,11 @@ formula 名はクレート名の `bushido` です(インストールされるコ
 curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 ```
 
+インストーラは常にアーカイブの SHA-256 を確認します。認証済みの GitHub CLI（`gh auth login`）があれば、
+さらにビルド出所（このリポジトリのリリースワークフローがそのタグからビルドしたこと）を検証し、
+一致しなければインストールを拒否します。`gh` がない場合は警告してチェックサムのみで続行します。
+`BDO_VERIFY_ATTESTATION=require` で出所検証を必須に、`BDO_VERIFY_ATTESTATION=0` で省略できます。
+
 ### Cargo
 
 ```bash

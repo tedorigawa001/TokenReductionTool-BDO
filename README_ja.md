@@ -234,7 +234,9 @@ BDO_RAW=1 bdo cargo test     # 環境変数版（セッション全体に効か�
 ```
 
 同名の実コマンドがあるもの（`git`・`ls`・`cargo`・`grep` など）は引数を変えずにそのコマンドを
-実行し、`err`/`test`/`summary` は包んでいるコマンドを、`read` は全文を出します。`gain`・`map`
+実行し（`grep` が PATH に無い Windows のネイティブシェルでは、`bdo --raw grep` は同じ検索を
+ripgrep で行い、全一致を省略せず `file:line:content` で出します）、`err`/`test`/`summary` は
+包んでいるコマンドを、`read` は全文を出します。`gain`・`map`
 など bdo 固有のコマンドは通常どおり動きます。`--raw` は**サブコマンドの前**に置いてください
 （後ろに置くと、包まれたコマンド自身の引数になります）。`BDO_RAW=1` は位置を問わず、hook の
 書き換えにも影響しません。従来の `bdo read -l none`・`BDO_NO_TOML=1`・`bdo proxy` も引き続き

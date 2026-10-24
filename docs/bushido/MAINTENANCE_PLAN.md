@@ -302,9 +302,12 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
     （`BDO_NAMED_COMMANDS`）として PATH 判定の対象外にした。
   - 偽ツール（引数を echo する `ruff`/`black`/`npx`/`uv`）を PATH 先頭に置く統合テストで固定。
     4件とも修正前のソースで失敗することを確認済み。
-  - **残余**: `grep` が PATH に無い環境（grep の無い Windows のネイティブシェル）では
-    `bdo --raw grep` がモジュールに来て、ripgrep に翻訳した引数で検索・圧縮する。引数翻訳が
-    4経路あり raw 割り込みの変更が大きいので未対応。Unix・Git Bash では発生しない。
+  - ✅ ~~**残余**: `grep` が PATH に無い環境で `bdo --raw grep` が圧縮される~~（2026-10-25
+    対応）: 4経路の引数翻訳はそのまま使い（同じ検索）、raw 時は `build_rg_args` の
+    NUL 区切り（`-nH0`、パーサ用）だけ外して `-nH` にし、`runner::run_raw` で rg の出力と
+    exit code をそのまま流す。bdo 独自の削減オプション（`--max`/`--max-len`/
+    `--context-only`/`--all`）は無視。偽 `rg` だけを PATH に置く統合テストで固定
+    （修正前のソースで失敗を確認）。
   - TOML フォールバックも `BDO_NO_TOML` 同様にバイパス
   - `--raw` はサブコマンドの**前**に置く（後ろは trailing_var_arg で包んだコマンドの引数になる。
     `git log --raw` は git 自身の正規オプション）。`BDO_RAW=1` は位置不問で、hook の書き換えは不変

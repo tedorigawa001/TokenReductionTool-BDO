@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`bdo --raw grep` without `grep` on PATH** (native Windows shells) still
+  capped, truncated and grouped the matches, because raw mode had no `grep` to
+  run and bdo's module ignored the switch. It now runs the same search through
+  ripgrep and prints every match in full as grep-style `file:line:content`,
+  with rg's exit code.
 - `install.sh` on x86_64 Linux downloaded `x86_64-unknown-linux-musl`, which
   the release never publishes, so every such install failed. It now uses the
   published `x86_64-unknown-linux-gnu` archive, and a test checks every target

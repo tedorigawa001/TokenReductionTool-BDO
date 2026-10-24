@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the checksum; `BDO_VERIFY_ATTESTATION=require` refuses that, `=0` skips the
   check. Releases before v0.47.1 have no attestations and are checksum-only.
 
+- **The Homebrew tap is checked daily against the release attestations.** The
+  formula pins each archive's sha256, so brew already rejects a replaced
+  release asset, but not a rewritten tap (e.g. a leaked tap token pointing url
+  and sha256 at another binary). A scheduled CI job now verifies that every
+  url in the live formula is this repository's release asset for the formula's
+  version, that its sha256 matches, that it carries build provenance from
+  `release.yml` at that tag, and that the formula tracks the latest release.
+  The README shows how to verify a Homebrew download yourself
+  (`gh attestation verify "$(brew --cache bushido)" …`).
+
 ### Fixed
 
 - `install.sh` on x86_64 Linux downloaded `x86_64-unknown-linux-musl`, which

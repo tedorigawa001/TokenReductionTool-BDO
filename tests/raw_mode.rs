@@ -236,6 +236,72 @@ mod modules_that_exec_on_their_own {
             .to_string()
     }
 
+    /// A fake `rg` with no `grep` beside it — the native Windows shell case,
+    /// where `bdo --raw grep` cannot route to grep and reaches bdo's module.
+    /// It prints its argv, then 250 grep-style matches with 150-char content:
+    /// more than bdo's default cap (200) and longer than its line limit (80).
+    fn fake_rg(dir: &Path) -> std::path::PathBuf {
+        let bin = dir.join("rgbin");
+        fs::create_dir(&bin).unwrap();
+        let log = bin.join("rg.argv");
+        let content = "x".repeat(150);
+        fs::write(
+            bin.join("rg"),
+            format!(
+                "#!/bin/sh\necho \"$*\" > '{}'\necho \"rg ARGV:$*\"\ni=1\nwhile [ $i -le 250 ]; do echo \"src/a.rs:$i:{content}\"; i=$((i+1)); done\nexit 0\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(bin.join("rg"), fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    #[test]
+    fn raw_grep_without_grep_on_path_searches_with_rg_unreduced() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake_rg(dir.path());
+        let long = format!("src/a.rs:250:{}", "x".repeat(150));
+
+        let normal = run(dir.path(), &bin, &["grep", "needle", "src"]);
+        let normal_out = String::from_utf8_lossy(&normal.stdout);
+        assert!(
+            normal_out.contains("more"),
+            "normal mode should cap: {normal_out}"
+        );
+        assert!(
+            !normal_out.contains(&long),
+            "normal mode should truncate lines"
+        );
+
+        for args in [
+            &["--raw", "grep", "needle", "src"][..],
+            &[
+                "--raw",
+                "grep",
+                "needle",
+                "src",
+                "--max",
+                "5",
+                "--max-len",
+                "10",
+            ][..],
+        ] {
+            let raw = run(dir.path(), &bin, args);
+            let out = String::from_utf8_lossy(&raw.stdout);
+            assert_eq!(raw.status.code(), Some(0));
+            // Every match, full length, nothing appended.
+            assert_eq!(out.lines().count(), 251, "{args:?}");
+            assert_eq!(out.lines().last(), Some(long.as_str()), "{args:?}");
+            assert!(!out.contains("more"), "{args:?}");
+            // Same search, grep-style output: line numbers and file names,
+            // but no NUL separator (that is only for bdo's parser).
+            let argv = argv_seen(&bin, "rg");
+            assert!(argv.contains("-nH ") && !argv.contains("-nH0"), "{argv}");
+            assert!(argv.contains("needle src"), "{argv}");
+        }
+    }
+
     #[test]
     fn raw_lint_runs_the_linter_without_json_flags_and_unfiltered() {
         let dir = tempfile::tempdir().unwrap();

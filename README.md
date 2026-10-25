@@ -451,7 +451,9 @@ BDO_RAW=1 bdo cargo test     # env var form, e.g. for a whole session
 ```
 
 - A command with a same-named program (`git`, `ls`, `cargo`, `grep`, …) runs
-  that program with your arguments unchanged.
+  that program with your arguments unchanged. Where there is no `grep` on PATH
+  (native Windows shells), `bdo --raw grep` runs the same search through
+  ripgrep and prints every match in full, as `file:line:content`.
 - `err` / `test` / `summary` run the command they wrap.
 - `read` shows the full file.
 - bdo-only commands (`gain`, `map`, …) have no unfiltered form and run as usual.

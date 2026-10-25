@@ -28,8 +28,21 @@ pub fn run(
     // Fix: convert BRE alternation \| → | for rg (which uses PCRE-style regex)
     let rg_pattern = pattern.replace(r"\|", "|");
 
+    // `bdo --raw grep` only reaches this module when no `grep` is on PATH —
+    // otherwise raw mode runs grep itself (native Windows shells are the
+    // usual case). Run the same search through ripgrep, unreduced: grep-style
+    // `file:line:content` lines, no caps, no truncation, no grouping, and
+    // rg's exit code. bdo's own reduction options (--max, --max-len,
+    // --context-only, --all) have nothing left to do and are ignored.
+    if crate::core::raw::is_active() {
+        let mut rg_cmd = resolved_command("rg");
+        let args = build_rg_args(&rg_pattern, path, file_type, extra_args, false);
+        rg_cmd.args(&args);
+        return crate::core::runner::run_raw(rg_cmd, "grep", &args.join(" "));
+    }
+
     let mut rg_cmd = resolved_command("rg");
-    rg_cmd.args(build_rg_args(&rg_pattern, path, file_type, extra_args));
+    rg_cmd.args(build_rg_args(&rg_pattern, path, file_type, extra_args, true));
 
     let result = exec_capture(&mut rg_cmd)
         .or_else(|_| {
@@ -170,11 +183,15 @@ pub fn run(
 ///
 /// Returns `None` for lines that do not match either shape (e.g. rg `-A`/`-B`
 /// context lines that use `-` as separator).
+/// `nul_separated` asks rg for `file\0line:content` so the filter can parse
+/// paths containing `:digits:`; raw mode passes `false` to get the plain
+/// `file:line:content` that grep prints.
 fn build_rg_args(
     rg_pattern: &str,
     path: &str,
     file_type: Option<&str>,
     extra_args: &[String],
+    nul_separated: bool,
 ) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -201,7 +218,7 @@ fn build_rg_args(
         // -n: line numbers, -H: always filename, -0: NUL-separate filename.
         // NUL separation lets parse_match_line disambiguate filenames/content
         // containing `:digits:` patterns (issue #1436).
-        args.push("-nH0".to_string());
+        args.push(if nul_separated { "-nH0" } else { "-nH" }.to_string());
         args.push(rg_pattern.to_string());
         args.push(path.to_string());
     }
@@ -406,14 +423,14 @@ mod tests {
     // Fix: -r flag (grep recursive) is stripped from extra_args (rg is recursive by default)
     #[test]
     fn test_recursive_flag_stripped() {
-        let args = build_rg_args("needle", ".", None, &["-r".to_string(), "-i".to_string()]);
+        let args = build_rg_args("needle", ".", None, &["-r".to_string(), "-i".to_string()], true);
         assert!(!args.contains(&"-r".to_string()));
         assert!(args.contains(&"-i".to_string()));
     }
 
     #[test]
     fn test_rg_args_normal_search_include_line_numbers_and_nul_separator() {
-        let args = build_rg_args("needle", "src", None, &[]);
+        let args = build_rg_args("needle", "src", None, &[], true);
         assert!(args.contains(&"-nH0".to_string()));
         assert!(args.contains(&"--no-heading".to_string()));
         assert!(args.contains(&"--no-ignore-vcs".to_string()));
@@ -429,7 +446,7 @@ mod tests {
             "-o",
             "--only-matching",
         ] {
-            let args = build_rg_args("needle", "src", None, &[flag.to_string()]);
+            let args = build_rg_args("needle", "src", None, &[flag.to_string()], true);
             assert!(
                 args.contains(&flag.to_string()),
                 "missing passthrough flag {flag}"
@@ -443,7 +460,7 @@ mod tests {
 
     #[test]
     fn test_rg_args_preserve_type_filter_with_format_flag() {
-        let args = build_rg_args("needle", "src", Some("rust"), &["-l".to_string()]);
+        let args = build_rg_args("needle", "src", Some("rust"), &["-l".to_string()], true);
         assert!(args.windows(2).any(|pair| pair == ["--type", "rust"]));
         assert!(args.contains(&"-l".to_string()));
         assert!(!args.contains(&"-nH0".to_string()));

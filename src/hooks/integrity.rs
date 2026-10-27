@@ -15,7 +15,6 @@
 use super::constants::{HOOKS_SUBDIR, REWRITE_HOOK_FILE};
 use super::init::resolve_claude_dir;
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -41,9 +40,7 @@ pub enum IntegrityStatus {
 pub fn compute_hash(path: &Path) -> Result<String> {
     let content =
         fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    hasher.update(&content);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(crate::core::utils::sha256_hex(&content))
 }
 
 /// Derive the hash file path from the hook path

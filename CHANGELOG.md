@@ -5,6 +5,18 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **sha2 0.10 → 0.11**, which moves `block-buffer` from 0.10.4 to 0.12.1 and
+  fixes GHSA-qwgh-2vcv-g2f7 (a caught panic inside a compression callback
+  could corrupt the buffer position; not reachable from bdo, which never
+  hashes inside `catch_unwind`). Found by an OSV scan; it has no RustSec ID
+  yet, so `cargo audit` did not report it. Hashes are unchanged — the three
+  call sites now share one `sha256_hex` helper pinned by FIPS test vectors,
+  so stored hook-integrity, trust and device hashes stay valid.
+
 ## [0.48.2] (2026-10-25)
 
 ### Security

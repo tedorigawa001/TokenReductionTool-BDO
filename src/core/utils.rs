@@ -262,6 +262,20 @@ pub fn ruby_exec(tool: &str) -> Command {
     Command::new(tool)
 }
 
+/// SHA-256 of `data` as 64 lowercase hex chars — the format `sha256sum` prints
+/// and that stored hashes (hook integrity, trust, device id) were written in.
+/// sha2 0.11's digest no longer implements `LowerHex`, so format the bytes here.
+pub fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    Sha256::digest(data)
+        .iter()
+        .fold(String::with_capacity(64), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
+}
+
 /// Count whitespace-delimited tokens in text. Used by filter tests to verify
 /// token savings claims.
 #[cfg(test)]
@@ -413,6 +427,19 @@ pub fn human_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sha256_hex_matches_sha256sum() {
+        // FIPS 180-2 test vectors; stored hashes must not change across sha2 bumps.
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn test_truncate_short_string() {

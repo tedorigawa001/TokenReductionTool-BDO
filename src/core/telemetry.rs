@@ -5,7 +5,6 @@ use crate::core::config;
 use crate::core::tracking;
 use crate::hooks::constants::CLAUDE_DIR;
 use crate::hooks::init::resolve_claude_dir;
-use sha2::{Digest, Sha256};
 use std::fmt::Write as FmtWrite;
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
@@ -156,9 +155,7 @@ fn send_ping() -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn generate_device_hash() -> String {
     let salt = get_or_create_salt();
-    let mut hasher = Sha256::new();
-    hasher.update(salt.as_bytes());
-    format!("{:x}", hasher.finalize())
+    crate::core::utils::sha256_hex(salt.as_bytes())
 }
 
 fn get_or_create_salt() -> String {
@@ -197,9 +194,7 @@ fn random_salt() -> String {
     let mut buf = [0u8; 32];
     if getrandom::fill(&mut buf).is_err() {
         let fallback = format!("{:?}:{}", std::time::SystemTime::now(), std::process::id());
-        let mut hasher = Sha256::new();
-        hasher.update(fallback.as_bytes());
-        return format!("{:x}", hasher.finalize());
+        return crate::core::utils::sha256_hex(fallback.as_bytes());
     }
     buf.iter().fold(String::new(), |mut output, b| {
         let _ = write!(output, "{b:02x}");

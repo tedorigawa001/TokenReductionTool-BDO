@@ -213,12 +213,7 @@ pub fn run_trust(list: bool) -> Result<()> {
     print_risk_summary(&content);
 
     // Hash the in-memory buffer (not a second file read)
-    let hash = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(&content_bytes);
-        format!("{:x}", h.finalize())
-    };
+    let hash = crate::core::utils::sha256_hex(&content_bytes);
 
     // Store trust with pre-computed hash
     trust_filter_with_hash(filter_path, &hash)?;

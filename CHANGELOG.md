@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quote. The `-u` / `--user` / `-uUSER` / `--user=` argument is now captured
   as one shell word and split at its first `:`: the user is kept and the rest
   of the word masked, with quotes re-balanced. No `:` (curl prompts) and
-  `$VAR` references are left alone; `--user-agent` is not touched.
+  `$VAR` references the shell expands (unquoted or in `"…"`) are left alone,
+  while a `$` inside `'…'` is literal and masked
+  (`curl -u 'alice:$literalSecret9'`). `--user` must be followed by `=` or a
+  space, so `--user-agent=client:1.0` is not touched.
 
 ## [0.49.0] (2026-10-29)
 

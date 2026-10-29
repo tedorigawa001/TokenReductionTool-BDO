@@ -92,7 +92,7 @@ macro_rules! mysql_prefix {
 }
 macro_rules! curl_user_prefix {
     () => {
-        r#"(\bcurl\b[^\n|;&]*?\s(?:-u|--user)(?:=|\s+)?"#
+        r#"(\bcurl\b[^\n|;&]*?\s(?:-u(?:=|\s+)?|--user(?:=|\s+))"#
     };
 }
 macro_rules! assignment_prefix {
@@ -317,7 +317,8 @@ const RULES: &[Rule] = &[
         pattern: concat!(mysql_prefix!(), shell_value!()),
         mask: Mask::ShellWord { allow_dash: true },
     },
-    // `curl -u user:PASSWORD` (also `-uuser:…`, `--user=…`). The argument is
+    // `curl -u user:PASSWORD` (also `-uuser:…`, `--user=…`; `--user` must be
+    // followed by `=` or a space, so `--user-agent=a:b` is not it). The argument is
     // one shell word however it is quoted — `'alice:abc'defgh` is a single
     // credential — so it is captured whole and split in `mask_curl_user`.
     Rule {
@@ -375,7 +376,8 @@ fn mask_shell_word(word: &str, allow_dash: bool) -> String {
 /// (`alice:"a b"`, `'alice:abc'defgh`, `"alice":pw`). Everything after it is
 /// masked; if the `:` sat inside a quoted segment, that quote is closed again
 /// after the mask so the stored line stays balanced. No `:` means curl will
-/// prompt for the password, and a `$` reference is not a literal: both kept.
+/// prompt for the password, and a `$` reference that the shell expands
+/// (unquoted or in "…", not in '…') is not a literal: both kept.
 fn mask_curl_user(word: &str) -> String {
     let mut open: Option<char> = None;
     let mut chars = word.char_indices();
@@ -388,7 +390,13 @@ fn mask_curl_user(word: &str) -> String {
             (Some(q), _) if c == q => open = None,
             (_, ':') => {
                 let (user, rest) = word.split_at(i + 1);
-                if rest.starts_with('$') || rest.starts_with("\"$") {
+                // `$` expands unquoted and inside "…", but is literal in '…'.
+                let expands = match open {
+                    None => rest.starts_with('$') || rest.starts_with("\"$"),
+                    Some('"') => rest.starts_with('$'),
+                    Some(_) => false,
+                };
+                if expands {
                     return word.to_string();
                 }
                 return match (open, single_quoted_segment(rest)) {
@@ -834,11 +842,29 @@ mod tests {
         ] {
             assert_eq!(redact_secrets(input), expected, "{input}");
         }
-        // No password (curl prompts), a reference, or `--user-agent`: kept.
+        // `$` is literal inside single quotes.
+        for (input, expected) in [
+            (
+                "curl -u 'alice:$literalSecret9' https://x",
+                "curl -u 'alice:[REDACTED]' https://x",
+            ),
+            (
+                "curl -u alice:'$literalSecret9' https://x",
+                "curl -u alice:'[REDACTED]' https://x",
+            ),
+        ] {
+            assert_eq!(redact_secrets(input), expected, "{input}");
+        }
+        // No password (curl prompts), a reference the shell expands, or a
+        // `--user-*` option that is not `--user`: kept.
         for input in [
             "curl -u alice https://x",
             "curl -u alice:$PASS https://x",
+            r#"curl -u "alice:$PASS" https://x"#,
+            r#"curl -u alice:"$PASS" https://x"#,
             "curl --user-agent 'a:b' https://x",
+            "curl --user-agent=client:1.0 https://x",
+            "curl --user-agent client:1.0 https://x",
         ] {
             assert_eq!(redact_secrets(input), input);
         }

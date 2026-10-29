@@ -5,6 +5,31 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Secret redaction covers far more forms.** What bdo stores locally
+  (tracking DB, tee recovery files, hook audit fields) is now masked for:
+  environment-style assignments whose name ends in a secret word
+  (`GITHUB_TOKEN=…`, `OPENAI_API_KEY=…`, `AWS_SECRET_ACCESS_KEY=…`) — the old
+  rule missed these because `_TOKEN` has no word boundary; passwords in URL
+  userinfo (`https://user:PASS@host`, `postgres://…`); secret-named flags with a
+  separate value (`--password X`, `--token X`); mysql `-pPASS` and
+  `curl -u user:PASS`; Cookie headers; Slack/Discord webhook URLs; AWS/Azure
+  signed-URL parameters; and Hugging Face, Docker Hub, DigitalOcean, PyPI,
+  SendGrid, Google OAuth and further GitLab token formats. A probe of 23
+  common forms went from 2 masked to all 23. Look-alikes are pinned as
+  untouched: `MAX_TOKENS=4096`, `GITHUB_TOKEN=$GH_TOKEN`, `--password-stdin`,
+  `--token-file`, `ssh://git@host:22`, `cargo test -p`, `docker run -p`,
+  mysql's `-P3306`. Values may be quoted and contain spaces
+  (`PASSWORD="my secret pass"`, `--password ' leading'`, `-p'a b'`,
+  `curl -u 'alice:a b'`, `my\ pass`): the whole value is masked and its quotes
+  kept, and a Cookie value containing quotes (`session="…"`) is masked whole.
+  Each rule now compiles only when its trigger substrings appear, so the
+  per-command cost dropped despite the larger rule set (e.g. ~0.2 ms for an
+  env token, ~0.005 ms for a command with no secret word, vs ~2.8 ms before).
+
 ## [0.48.3] (2026-10-27)
 
 ### Security

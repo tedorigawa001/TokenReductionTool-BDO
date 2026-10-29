@@ -389,6 +389,29 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   （rust-toolchain は `commits/master`）で SHA を取り、コメントのバージョン表記も揃える。
 - **パターン外の秘密は平文**: `core::redact` は高確度パターンのみ。取り逃しは
   0600/0700 のパーミッション層が受ける設計（fail-safe で誤検知しない側に倒した結果）。
+  **2026-10-29 に大幅拡充**: よくある 23 形式を試したところ伏せ字は 2 件のみ。最大の穴は
+  `GITHUB_TOKEN=…` 等の env 形式（既存ルールは `\btoken` で、`_TOKEN` に単語境界が無い）。
+  追加: 名前が秘密語で**終わる**大文字 env 代入（値が `$` 参照なら残す）、URL userinfo の
+  パスワード（`scheme://u:PASS@`、`@` が `/` より前に必須）、`--password X` 等の空白区切り
+  フラグ値（`-`/`$` 始まりは除外）、mysql 系 `-pPASS`（大文字小文字区別 — `-P3306` は
+  ポート）、`curl -u user:PASS`、Cookie ヘッダ、Slack/Discord webhook、署名付き URL
+  （X-Amz-*・sig）、hf_/dckr_pat_/do[po]_v1_/pypi-/SG./ya29./glptt-/gldt-/glrt-。
+  23 形式すべて伏せ字化、似て非なる 21 形式（`MAX_TOKENS=4096`・`--password-stdin`・
+  `ssh://git@host:22`・`docker run -p` 等）は無変更をテストで固定。
+  **性能**: bdo はコマンド毎に別プロセスなので regex は毎回コンパイルされる。全ルール一括
+  コンパイルのままだと 2.8ms → 4.8ms に増えたため、ルール毎に trigger（いずれか）と
+  `requires`（すべて）を持たせ、該当ルールだけ遅延コンパイルする方式に変更。release で
+  初回: 秘密語なし 0.04ms、`GITHUB_TOKEN=…` 0.28ms、URL userinfo 0.11ms、
+  `curl https://api…` 0.75ms（`api` で汎用代入ルールが起きる分）— いずれも旧 2.8ms 未満。
+  **レビュー指摘で追加修正**: Cookie 値中の `"` で止まり `Cookie: [REDACTED]"secret"` と
+  漏れていた → 引用されたシェル引数内は閉じ引用符まで、それ以外は行末まで伏せる 3 ルールに。
+  空白を含む値（`PASSWORD="my secret pass"`・`--password ' x'`・`-p'a b'`・`curl -u 'a:b c'`・
+  `my\ pass`）が途中まで／全く伏せられなかった → 値を「単一引用・二重引用（`\"` 対応）・
+  エスケープ込み非引用」の 1 つの alternation（`shell_value!`）にし、開き引用符は捕捉して
+  残し閉じ引用符は一致外に置く（JSON・シェル構文を保つ）。3 ルールに分けると compile が
+  3 倍（`curl https://api…` 3.6ms）になったため 1 alternation にまとめ、2 回目以降の初回呼び
+  出しで 秘密語なし 0.005ms / env 0.21ms / userinfo 0.08ms / curl+api 0.50ms。**残り**: 依然として高確度パターンのみ — 任意の
+  文字列の秘密（`--header "X-Custom: secret"` 等）はパーミッション層頼み。
 - **リリース成果物は完全性のみで真正性がない**（2026-09-24 記録）: `install.sh` は
   `.sha256` サイドカーを検証するが、サイドカーはバイナリと**同じリリースから**取得
   する。転送中の破損・途中切れは検出できるが、リリース自体（またはリポジトリの

@@ -34,6 +34,9 @@ enum Mask {
     ShellWord {
         allow_dash: bool,
     },
+    /// Group 1 kept, then the `user:password` word in group `v` with only
+    /// the password masked (see [`mask_curl_user`]).
+    CurlUser,
 }
 
 /// One redaction rule. `triggers` are lowercase substrings at least one of
@@ -65,6 +68,13 @@ macro_rules! shell_value {
         r#")(?P<v>(?:(?:\\.|[^\s"'\;|&<>()])+|'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?)(?:'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?|(?:\\.|[^\s"'\;|&<>(),}\]:])+)*)"#
     };
 }
+// The same shell word without the JSON stops after a quoted segment, for
+// arguments that are never JSON: `curl -u "alice":pw` continues past `:`.
+macro_rules! shell_word {
+    () => {
+        r#")(?P<v>(?:(?:\\.|[^\s"'\\;|&<>()])+|'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?)(?:'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?|(?:\\.|[^\s"'\\;|&<>()])+)*)"#
+    };
+}
 macro_rules! env_prefix {
     () => {
         r#"\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|ACCESS_KEY|SECRET_KEY|PRIVATE_KEY|CREDENTIALS?)="#
@@ -82,7 +92,7 @@ macro_rules! mysql_prefix {
 }
 macro_rules! curl_user_prefix {
     () => {
-        r#"(\bcurl\b[^\n|;&]*?\s(?:-u|--user)\s+[^\s:'"]+:"#
+        r#"(\bcurl\b[^\n|;&]*?\s(?:-u|--user)(?:=|\s+)?"#
     };
 }
 macro_rules! assignment_prefix {
@@ -307,25 +317,14 @@ const RULES: &[Rule] = &[
         pattern: concat!(mysql_prefix!(), shell_value!()),
         mask: Mask::ShellWord { allow_dash: true },
     },
-    // `curl -u user:PASSWORD`, password possibly quoted …
+    // `curl -u user:PASSWORD` (also `-uuser:…`, `--user=…`). The argument is
+    // one shell word however it is quoted — `'alice:abc'defgh` is a single
+    // credential — so it is captured whole and split in `mask_curl_user`.
     Rule {
         requires: &["-u"],
         triggers: &["curl"],
-        pattern: concat!(curl_user_prefix!(), shell_value!()),
-        mask: Mask::ShellWord { allow_dash: true },
-    },
-    // … or the whole `user:password` argument quoted.
-    Rule {
-        requires: &["-u"],
-        triggers: &["curl"],
-        pattern: r"(\bcurl\b[^\n|;&]*?\s(?:-u|--user)\s+'[^':\n]*:)[^'\n]+",
-        mask: Mask::KeepPrefix,
-    },
-    Rule {
-        requires: &["-u"],
-        triggers: &["curl"],
-        pattern: r#"(\bcurl\b[^\n|;&]*?\s(?:-u|--user)\s+"[^":\n]*:)(?:\\.|[^"\\\n])+"#,
-        mask: Mask::KeepPrefix,
+        pattern: concat!(curl_user_prefix!(), shell_word!()),
+        mask: Mask::CurlUser,
     },
     // key=value / key: value assignments for well-known secret names. Leading
     // \b keeps compound words like `input_tokens:` out (no word boundary
@@ -370,6 +369,41 @@ fn mask_shell_word(word: &str, allow_dash: bool) -> String {
     MASK.to_string()
 }
 
+/// Mask the password in a curl `user:password` shell word, keeping the user.
+///
+/// The split is at the first `:` outside an escape, wherever the quotes fall
+/// (`alice:"a b"`, `'alice:abc'defgh`, `"alice":pw`). Everything after it is
+/// masked; if the `:` sat inside a quoted segment, that quote is closed again
+/// after the mask so the stored line stays balanced. No `:` means curl will
+/// prompt for the password, and a `$` reference is not a literal: both kept.
+fn mask_curl_user(word: &str) -> String {
+    let mut open: Option<char> = None;
+    let mut chars = word.char_indices();
+    while let Some((i, c)) = chars.next() {
+        match (open, c) {
+            (Some('"') | None, '\\') => {
+                chars.next();
+            }
+            (None, '\'' | '"') => open = Some(c),
+            (Some(q), _) if c == q => open = None,
+            (_, ':') => {
+                let (user, rest) = word.split_at(i + 1);
+                if rest.starts_with('$') || rest.starts_with("\"$") {
+                    return word.to_string();
+                }
+                return match (open, single_quoted_segment(rest)) {
+                    (Some(q), _) => format!("{user}{MASK}{q}"),
+                    // `alice:"my pass"` keeps the password's own quotes.
+                    (None, Some(q)) => format!("{user}{q}{MASK}{q}"),
+                    (None, None) => format!("{user}{MASK}"),
+                };
+            }
+            _ => {}
+        }
+    }
+    word.to_string()
+}
+
 /// The quote character if `word` is exactly one non-empty, terminated quoted
 /// segment (`'…'` or `"…"` with `\"` escapes), else `None`.
 fn single_quoted_segment(word: &str) -> Option<char> {
@@ -410,6 +444,11 @@ pub fn redact_secrets(input: &str) -> Cow<'_, str> {
             Mask::ShellWord { allow_dash } => re
                 .replace_all(&out, |caps: &Captures| {
                     format!("{}{}", &caps[1], mask_shell_word(&caps["v"], allow_dash))
+                })
+                .into_owned(),
+            Mask::CurlUser => re
+                .replace_all(&out, |caps: &Captures| {
+                    format!("{}{}", &caps[1], mask_curl_user(&caps["v"]))
                 })
                 .into_owned(),
             Mask::Full => re.replace_all(&out, MASK).into_owned(),
@@ -752,6 +791,54 @@ mod tests {
             r#"DB_PASSWORD="" cmd"#,
             "DB_PASSWORD='' cmd",
             r#"GITHUB_TOKEN="$GH_TOKEN" gh"#,
+        ] {
+            assert_eq!(redact_secrets(input), input);
+        }
+    }
+
+    #[test]
+    fn test_curl_user_argument_is_one_shell_word() {
+        for (input, expected) in [
+            (
+                "curl -u 'alice:abc'defgh https://x",
+                "curl -u 'alice:[REDACTED]' https://x",
+            ),
+            (
+                r#"curl -u "alice:abc"defgh https://x"#,
+                r#"curl -u "alice:[REDACTED]" https://x"#,
+            ),
+            (
+                "curl -u 'alice:my pass' https://x",
+                "curl -u 'alice:[REDACTED]' https://x",
+            ),
+            (
+                r#"curl -u alice:"a b"c https://x"#,
+                "curl -u alice:[REDACTED] https://x",
+            ),
+            (
+                r#"curl -u "alice":pw1234 https://x"#,
+                r#"curl -u "alice":[REDACTED] https://x"#,
+            ),
+            (
+                "curl -ualice:pw1234 https://x",
+                "curl -ualice:[REDACTED] https://x",
+            ),
+            (
+                "curl --user=alice:pw1234 https://x",
+                "curl --user=alice:[REDACTED] https://x",
+            ),
+            (
+                "curl -u alice:-dash9 https://x",
+                "curl -u alice:[REDACTED] https://x",
+            ),
+        ] {
+            assert_eq!(redact_secrets(input), expected, "{input}");
+        }
+        // No password (curl prompts), a reference, or `--user-agent`: kept.
+        for input in [
+            "curl -u alice https://x",
+            "curl -u alice:$PASS https://x",
+            "curl --user-agent 'a:b' https://x",
         ] {
             assert_eq!(redact_secrets(input), input);
         }

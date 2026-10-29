@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `defgh`) or not at all (`abc"d e"f`). The whole word is now masked; a value
   that is exactly one quoted string still keeps its quotes, so JSON stays
   valid, and `""`, `''` and `$VAR` / `"$VAR"` references are left alone.
+- **Redaction: `curl -u` arguments are one shell word too.** A credential
+  quoted as a whole and continued after the quote — `curl -u 'alice:abc'defgh`
+  — kept `defgh`, because the quoted-argument rule stopped at the closing
+  quote. The `-u` / `--user` / `-uUSER` / `--user=` argument is now captured
+  as one shell word and split at its first `:`: the user is kept and the rest
+  of the word masked, with quotes re-balanced. No `:` (curl prompts) and
+  `$VAR` references are left alone; `--user-agent` is not touched.
 
 ## [0.49.0] (2026-10-29)
 

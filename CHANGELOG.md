@@ -5,6 +5,20 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Redaction: values starting with `-` and multi-part shell words.** A secret
+  beginning with `-` was left in plain text for env assignments
+  (`DATABASE_PASSWORD=-…`), `curl -u alice:-…`, mysql `-p-…` and
+  `password=-…` — only a value after a `--flag` may be the next flag. And a
+  value the shell reads as one word but built from several quoted and
+  unquoted parts was masked only in part (`--password "abc"defgh` kept
+  `defgh`) or not at all (`abc"d e"f`). The whole word is now masked; a value
+  that is exactly one quoted string still keeps its quotes, so JSON stays
+  valid, and `""`, `''` and `$VAR` / `"$VAR"` references are left alone.
+
 ## [0.49.0] (2026-10-29)
 
 ### Security

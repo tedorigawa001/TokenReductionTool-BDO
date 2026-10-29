@@ -12,7 +12,7 @@
 //! permissions layer, while a false positive would corrupt recovery data,
 //! so patterns err on the side of NOT matching.
 
-use regex::Regex;
+use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
@@ -28,8 +28,12 @@ enum Mask {
     KeepPrefix,
     /// Group 1, the mask, then a literal `@` (URL userinfo).
     KeepPrefixThenAt,
-    /// Group 1 plus the opening quote (group 2 or 3, if any), then the mask.
-    KeepPrefixAndQuote,
+    /// Group 1 kept, then the shell word in group `v` masked (see
+    /// [`mask_shell_word`]). `allow_dash`: whether a value may begin with `-`
+    /// (not for flags, where `--token -x` means the next flag).
+    ShellWord {
+        allow_dash: bool,
+    },
 }
 
 /// One redaction rule. `triggers` are lowercase substrings at least one of
@@ -46,18 +50,19 @@ struct Rule {
 }
 
 // Value shape, appended to a prefix that opens capture group 1 (the kept
-// context). A secret may be quoted and contain spaces — `"my pass"`,
-// `' leading'`, `my\ pass` — so the value is one of: a single-quoted string,
-// a double-quoted string (honouring `\"`), or an unquoted word with `\x`
-// escapes. The opening quote is captured (groups 2/3) and kept, and the
-// closing quote lies outside the match, so JSON and shell syntax survive.
-// A double-quoted value starting with `$` is an expansion and an unquoted one
-// a reference — neither is a literal secret, so both are left alone.
-// One alternation per prefix rather than one rule per quote style: compiling
-// regexes is the dominant cost of a redaction pass (see `compiled`).
+// context): one whole shell word, captured as `v`. A word is a run of
+// segments with no space between them — unquoted text with `\x` escapes,
+// '…', or "…" honouring `\"` — so `"abc"defgh`, `abc"d e"f` and `'a'"b"` are
+// each ONE password to the shell and are masked whole. A quote may be left
+// unterminated (a truncated line still gets masked). After a quoted segment
+// the word does not continue into `,` `}` `]` `:`, so a JSON string value
+// ends at its closing quote. Shell operators (`;|&<>()`) always end a word.
+// How the matched word is masked — quotes kept or not, references and short
+// words left alone — is decided in `mask_shell_word`, which keeps the regex
+// itself small: compiling regexes dominates a redaction pass.
 macro_rules! shell_value {
     () => {
-        r#")(?:(')[^'\n]+|(")(?:\\.|[^$"\\\n])(?:\\.|[^"\\\n])*|(?:\\.|[^\s"'$\\-])(?:\\.|[^\s"'\\]){3,})"#
+        r#")(?P<v>(?:(?:\\.|[^\s"'\;|&<>()])+|'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?)(?:'[^'\n]*'?|"(?:\\.|[^"\\\n])*"?|(?:\\.|[^\s"'\;|&<>(),}\]:])+)*)"#
     };
 }
 macro_rules! env_prefix {
@@ -275,7 +280,7 @@ const RULES: &[Rule] = &[
             "credential",
         ],
         pattern: concat!(env_prefix!(), shell_value!()),
-        mask: Mask::KeepPrefixAndQuote,
+        mask: Mask::ShellWord { allow_dash: true },
     },
     // Secret-named flags with the value as the next word: `--password
     // hunter2`, `--token "a b"`. `--token-file`, `--password-stdin` and a
@@ -293,21 +298,21 @@ const RULES: &[Rule] = &[
             "--auth",
         ],
         pattern: concat!(flag_prefix!(), shell_value!()),
-        mask: Mask::KeepPrefixAndQuote,
+        mask: Mask::ShellWord { allow_dash: false },
     },
     // mysql-family `-pPASSWORD` (attached). Case-sensitive: `-P3306` is the port.
     Rule {
         requires: &["-p"],
         triggers: &["mysql", "mariadb"],
         pattern: concat!(mysql_prefix!(), shell_value!()),
-        mask: Mask::KeepPrefixAndQuote,
+        mask: Mask::ShellWord { allow_dash: true },
     },
     // `curl -u user:PASSWORD`, password possibly quoted …
     Rule {
         requires: &["-u"],
         triggers: &["curl"],
         pattern: concat!(curl_user_prefix!(), shell_value!()),
-        mask: Mask::KeepPrefixAndQuote,
+        mask: Mask::ShellWord { allow_dash: true },
     },
     // … or the whole `user:password` argument quoted.
     Rule {
@@ -330,7 +335,7 @@ const RULES: &[Rule] = &[
         requires: &[],
         triggers: &["api", "token", "secret", "password", "passwd", "pwd"],
         pattern: concat!(assignment_prefix!(), shell_value!()),
-        mask: Mask::KeepPrefixAndQuote,
+        mask: Mask::ShellWord { allow_dash: true },
     },
 ];
 
@@ -339,6 +344,50 @@ fn compiled(i: usize) -> &'static Regex {
     static COMPILED: OnceLock<Vec<OnceLock<Regex>>> = OnceLock::new();
     let slots = COMPILED.get_or_init(|| RULES.iter().map(|_| OnceLock::new()).collect());
     slots[i].get_or_init(|| Regex::new(RULES[i].pattern).expect("redaction pattern compiles"))
+}
+
+/// Mask one shell word holding a secret value.
+///
+/// - A reference — `$VAR`, `$(cmd)`, `"$VAR"` — is not a literal secret: kept.
+/// - Without `allow_dash`, a word starting with `-` is the next flag: kept.
+/// - A bare word under 4 characters (`password: ok`) or an empty `""` / `''`
+///   holds nothing worth masking.
+/// - A word that is exactly one quoted segment keeps its quotes
+///   (`"[REDACTED]"`), so JSON strings and shell syntax stay intact.
+/// - Anything else — concatenated segments, an unterminated quote — is
+///   masked whole, since the shell reads it as a single value.
+fn mask_shell_word(word: &str, allow_dash: bool) -> String {
+    let is_reference = word.starts_with('$') || word.starts_with("\"$");
+    let is_flag = !allow_dash && word.starts_with('-');
+    let bare_and_short = !word.contains(['\'', '"']) && word.chars().count() < 4;
+    let empty_quotes = word == "''" || word == "\"\"";
+    if is_reference || is_flag || bare_and_short || empty_quotes {
+        return word.to_string();
+    }
+    if let Some(quote) = single_quoted_segment(word) {
+        return format!("{quote}{MASK}{quote}");
+    }
+    MASK.to_string()
+}
+
+/// The quote character if `word` is exactly one non-empty, terminated quoted
+/// segment (`'…'` or `"…"` with `\"` escapes), else `None`.
+fn single_quoted_segment(word: &str) -> Option<char> {
+    let quote = word.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+    let body = &word[1..];
+    let mut chars = body.char_indices();
+    while let Some((i, c)) = chars.next() {
+        if c == '\\' && quote == '"' {
+            chars.next();
+            continue;
+        }
+        if c == quote {
+            // The closing quote must end the word, and the segment must hold
+            // something to mask.
+            return (i + 1 == body.len() && i > 0).then_some(quote);
+        }
+    }
+    None
 }
 
 /// Mask known secret formats in `input`. Returns `Cow::Borrowed` when
@@ -357,13 +406,21 @@ pub fn redact_secrets(input: &str) -> Cow<'_, str> {
         if !re.is_match(&out) {
             continue;
         }
-        let replacement = match rule.mask {
-            Mask::Full => MASK.to_string(),
-            Mask::KeepPrefix => format!("${{1}}{MASK}"),
-            Mask::KeepPrefixThenAt => format!("${{1}}{MASK}@"),
-            Mask::KeepPrefixAndQuote => format!("${{1}}${{2}}${{3}}{MASK}"),
+        let replaced = match rule.mask {
+            Mask::ShellWord { allow_dash } => re
+                .replace_all(&out, |caps: &Captures| {
+                    format!("{}{}", &caps[1], mask_shell_word(&caps["v"], allow_dash))
+                })
+                .into_owned(),
+            Mask::Full => re.replace_all(&out, MASK).into_owned(),
+            Mask::KeepPrefix => re
+                .replace_all(&out, format!("${{1}}{MASK}").as_str())
+                .into_owned(),
+            Mask::KeepPrefixThenAt => re
+                .replace_all(&out, format!("${{1}}{MASK}@").as_str())
+                .into_owned(),
         };
-        out = Cow::Owned(re.replace_all(&out, replacement.as_str()).into_owned());
+        out = Cow::Owned(replaced);
     }
     out
 }
@@ -617,6 +674,87 @@ mod tests {
         // A double-quoted `$…` is an expansion, not a literal secret.
         let input = r#"GITHUB_TOKEN="$GH_TOKEN" gh pr list"#;
         assert_eq!(redact_secrets(input), input);
+    }
+
+    #[test]
+    fn test_values_starting_with_dash() {
+        for (input, expected) in [
+            (
+                "DATABASE_PASSWORD=-syntheticSecret9",
+                "DATABASE_PASSWORD=[REDACTED]",
+            ),
+            (
+                "curl -u alice:-syntheticSecret9 https://x",
+                "curl -u alice:[REDACTED] https://x",
+            ),
+            (
+                "mysql -u root -p-syntheticSecret9 db",
+                "mysql -u root -p[REDACTED] db",
+            ),
+            ("password=-syntheticSecret9", "password=[REDACTED]"),
+        ] {
+            assert_eq!(redact_secrets(input), expected, "{input}");
+        }
+        // After a flag, a leading `-` is the next flag, not a value.
+        for input in ["gh auth login --token -", "cli --password --verbose run"] {
+            assert_eq!(redact_secrets(input), input);
+        }
+    }
+
+    #[test]
+    fn test_concatenated_shell_words_are_masked_whole() {
+        for (input, expected) in [
+            (
+                r#"--password "abc"defgh next"#,
+                "--password [REDACTED] next",
+            ),
+            (
+                r#"--password abc"def gh"ij next"#,
+                "--password [REDACTED] next",
+            ),
+            (r#"API_TOKEN='abc'"def" cmd"#, "API_TOKEN=[REDACTED] cmd"),
+            (r#"mysql -p'my'pass db"#, "mysql -p[REDACTED] db"),
+            (
+                r#"curl -u alice:"a b"c https://x"#,
+                "curl -u alice:[REDACTED] https://x",
+            ),
+            // an unterminated quote (e.g. a truncated line) is still masked
+            (
+                r#"export DB_PASSWORD="unterminated secret"#,
+                "export DB_PASSWORD=[REDACTED]",
+            ),
+            // a shell operator ends the word
+            (
+                "API_TOKEN=abcdef;echo done",
+                "API_TOKEN=[REDACTED];echo done",
+            ),
+        ] {
+            assert_eq!(redact_secrets(input), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn test_single_quoted_values_keep_their_quotes() {
+        for (input, expected) in [
+            (
+                r#"{"password": "two words"}"#,
+                r#"{"password": "[REDACTED]"}"#,
+            ),
+            (
+                r#"{"token": "abcd","x":1}"#,
+                r#"{"token": "[REDACTED]","x":1}"#,
+            ),
+            ("export API_TOKEN='a b c'", "export API_TOKEN='[REDACTED]'"),
+        ] {
+            assert_eq!(redact_secrets(input), expected, "{input}");
+        }
+        for input in [
+            r#"DB_PASSWORD="" cmd"#,
+            "DB_PASSWORD='' cmd",
+            r#"GITHUB_TOKEN="$GH_TOKEN" gh"#,
+        ] {
+            assert_eq!(redact_secrets(input), input);
+        }
     }
 
     #[test]

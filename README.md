@@ -119,7 +119,7 @@ gh attestation verify "$(brew --cache bushido)" --repo tedorigawa001/TokenReduct
 ### Verify Installation
 
 ```bash
-bdo --version   # Should show "bdo 0.49.1"
+bdo --version   # Should show "bdo 0.49.2"
 bdo gain        # Should show token savings stats
 ```
 

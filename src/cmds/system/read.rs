@@ -4,9 +4,17 @@ use crate::core::filter::{self, FilterLevel, Language};
 use crate::core::tracking;
 use anyhow::{Context, Result};
 use std::fs;
+use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 
 const BUSHIDO_AUTO_MAX_LINES: usize = 400;
+
+/// Largest file bdo loads whole in order to filter it. Anything bigger, and
+/// anything that is not a regular file (`/dev/zero`, a FIFO, `/dev/stdin`), is
+/// streamed unfiltered instead, the way `cat` / `head` / `tail` would:
+/// `read_to_string` on `/dev/zero` grows memory until the process is killed,
+/// and a multi-gigabyte log would be held in memory just to be truncated.
+const FILTER_SIZE_LIMIT: u64 = 16 * 1024 * 1024;
 
 pub fn run(
     file: &Path,
@@ -20,6 +28,15 @@ pub fn run(
 
     if verbose > 0 {
         eprintln!("Reading: {} (filter: {})", file.display(), level);
+    }
+
+    if should_stream(file) {
+        stream_unfiltered(file, max_lines, tail_lines)?;
+        timer.track_passthrough(
+            &format!("cat {}", file.display()),
+            &format!("bdo read {} (streamed)", file.display()),
+        );
+        return Ok(());
     }
 
     // Read file content
@@ -120,6 +137,76 @@ pub fn run(
     Ok(())
 }
 
+/// True for inputs `run` must not load whole: non-regular files and files over
+/// [`FILTER_SIZE_LIMIT`]. An unreadable path returns false so the normal path
+/// reports the error.
+fn should_stream(file: &Path) -> bool {
+    fs::metadata(file).is_ok_and(|m| !m.is_file() || m.len() > FILTER_SIZE_LIMIT)
+}
+
+/// Copy `file` to stdout unfiltered, honouring `-m` (first N lines) or
+/// `--tail-lines` (last N lines), in bounded memory where the native tools are.
+fn stream_unfiltered(file: &Path, max_lines: Option<usize>, tail_lines: Option<usize>) -> Result<()> {
+    let input = fs::File::open(file)
+        .with_context(|| format!("Failed to read file: {}", file.display()))?;
+    // Straight to the (line-buffered) stdout lock, not a BufWriter: a FIFO or
+    // a growing file must show each line as it arrives, as `cat` does.
+    let mut out = io::stdout().lock();
+    match (max_lines, tail_lines) {
+        (Some(n), _) => copy_first_lines(input, &mut out, n),
+        (None, Some(n)) => copy_last_lines(input, &mut out, n),
+        (None, None) => io::copy(&mut io::BufReader::new(input), &mut out).map(|_| ()),
+    }
+    .and_then(|()| out.flush())
+    .with_context(|| format!("Failed to stream {}", file.display()))
+}
+
+/// Write everything up to and including the `n`th newline, chunk by chunk —
+/// never buffering a whole line, which on `/dev/zero` would never end.
+fn copy_first_lines(input: impl Read, out: &mut impl Write, n: usize) -> io::Result<()> {
+    let mut reader = io::BufReader::new(input);
+    let mut remaining = n;
+    while remaining > 0 {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        let mut cut = chunk.len();
+        for (i, b) in chunk.iter().enumerate() {
+            if *b == b'\n' {
+                remaining -= 1;
+                if remaining == 0 {
+                    cut = i + 1;
+                    break;
+                }
+            }
+        }
+        out.write_all(&chunk[..cut])?;
+        reader.consume(cut);
+    }
+    Ok(())
+}
+
+/// Write the last `n` lines (like `tail -n`), holding only those lines.
+fn copy_last_lines(input: impl Read, out: &mut impl Write, n: usize) -> io::Result<()> {
+    let mut reader = io::BufReader::new(input);
+    let mut lines: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
+    loop {
+        let mut line = Vec::new();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        lines.push_back(line);
+        if lines.len() > n {
+            lines.pop_front();
+        }
+    }
+    for line in lines {
+        out.write_all(&line)?;
+    }
+    Ok(())
+}
+
 pub fn run_stdin(
     level: FilterLevel,
     max_lines: Option<usize>,
@@ -127,8 +214,6 @@ pub fn run_stdin(
     line_numbers: bool,
     verbose: u8,
 ) -> Result<()> {
-    use std::io::{self, Read as IoRead};
-
     let timer = tracking::TimedExecution::start();
 
     if verbose > 0 {
@@ -234,6 +319,57 @@ fn should_auto_summarize(content: &str, lang: &Language) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_copy_first_lines_stops_at_the_nth_newline() {
+        let mut out = Vec::new();
+        copy_first_lines(&b"a\nb\nc\n"[..], &mut out, 2).unwrap();
+        assert_eq!(out, b"a\nb\n");
+        let mut out = Vec::new();
+        copy_first_lines(&b"no newline"[..], &mut out, 3).unwrap();
+        assert_eq!(out, b"no newline");
+        let mut out = Vec::new();
+        copy_first_lines(&b"a\n"[..], &mut out, 0).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_copy_first_lines_never_buffers_a_whole_line() {
+        // Like /dev/zero: no newline, never ends. Reading must stop once the
+        // writer fails, instead of accumulating the endless "line" first.
+        struct Endless;
+        impl Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                buf.fill(0);
+                Ok(buf.len())
+            }
+        }
+        struct Cap(usize);
+        impl Write for Cap {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if self.0 > 1 << 20 {
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+                self.0 += buf.len();
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let err = copy_first_lines(Endless, &mut Cap(0), 5).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn test_copy_last_lines() {
+        let mut out = Vec::new();
+        copy_last_lines(&b"a\nb\nc\nd"[..], &mut out, 2).unwrap();
+        assert_eq!(out, b"c\nd");
+        let mut out = Vec::new();
+        copy_last_lines(&b"a\nb\n"[..], &mut out, 5).unwrap();
+        assert_eq!(out, b"a\nb\n");
+    }
     use std::io::Write;
     use tempfile::NamedTempFile;
 

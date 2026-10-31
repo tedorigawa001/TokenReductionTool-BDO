@@ -4,9 +4,17 @@ use crate::core::filter::{self, FilterLevel, Language};
 use crate::core::tracking;
 use anyhow::{Context, Result};
 use std::fs;
+use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 
 const BUSHIDO_AUTO_MAX_LINES: usize = 400;
+
+/// Largest file bdo loads whole in order to filter it. Anything bigger, and
+/// anything that is not a regular file (`/dev/zero`, a FIFO, `/dev/stdin`), is
+/// streamed unfiltered instead, the way `cat` / `head` / `tail` would:
+/// `read_to_string` on `/dev/zero` grows memory until the process is killed,
+/// and a multi-gigabyte log would be held in memory just to be truncated.
+const FILTER_SIZE_LIMIT: u64 = 16 * 1024 * 1024;
 
 pub fn run(
     file: &Path,
@@ -20,6 +28,15 @@ pub fn run(
 
     if verbose > 0 {
         eprintln!("Reading: {} (filter: {})", file.display(), level);
+    }
+
+    if should_stream(file) {
+        stream_unfiltered(file, max_lines, tail_lines)?;
+        timer.track_passthrough(
+            &format!("cat {}", file.display()),
+            &format!("bdo read {} (streamed)", file.display()),
+        );
+        return Ok(());
     }
 
     // Read file content
@@ -120,6 +137,168 @@ pub fn run(
     Ok(())
 }
 
+/// True for inputs `run` must not load whole: non-regular files and files over
+/// [`FILTER_SIZE_LIMIT`]. An unreadable path returns false so the normal path
+/// reports the error.
+fn should_stream(file: &Path) -> bool {
+    fs::metadata(file).is_ok_and(|m| !m.is_file() || m.len() > FILTER_SIZE_LIMIT)
+}
+
+/// Copy `file` to stdout unfiltered, honouring `-m` (first N lines) or
+/// `--tail-lines` (last N lines), in bounded memory where the native tools are.
+fn stream_unfiltered(file: &Path, max_lines: Option<usize>, tail_lines: Option<usize>) -> Result<()> {
+    let input = fs::File::open(file)
+        .with_context(|| format!("Failed to read file: {}", file.display()))?;
+    // Straight to the (line-buffered) stdout lock, not a BufWriter: a FIFO or
+    // a growing file must show each line as it arrives, as `cat` does.
+    let mut out = io::stdout().lock();
+    let seekable = input.metadata().is_ok_and(|m| m.is_file());
+    match (max_lines, tail_lines) {
+        (Some(n), _) => copy_first_lines(input, &mut out, n),
+        (None, Some(n)) if seekable => copy_last_lines_seekable(input, &mut out, n),
+        (None, Some(n)) => {
+            let truncated = copy_last_lines_bounded(input, &mut out, n, TAIL_WINDOW)?;
+            if truncated {
+                eprintln!(
+                    "bdo: {}: the requested lines exceed the {} MiB tail buffer; showing only its final {} MiB",
+                    file.display(),
+                    TAIL_WINDOW >> 20,
+                    TAIL_WINDOW >> 20
+                );
+            }
+            Ok(())
+        }
+        (None, None) => io::copy(&mut io::BufReader::new(input), &mut out).map(|_| ()),
+    }
+    .and_then(|()| out.flush())
+    .with_context(|| format!("Failed to stream {}", file.display()))
+}
+
+/// Write everything up to and including the `n`th newline, chunk by chunk —
+/// never buffering a whole line, which on `/dev/zero` would never end.
+fn copy_first_lines(input: impl Read, out: &mut impl Write, n: usize) -> io::Result<()> {
+    let mut reader = io::BufReader::new(input);
+    let mut remaining = n;
+    while remaining > 0 {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        let mut cut = chunk.len();
+        for (i, b) in chunk.iter().enumerate() {
+            if *b == b'\n' {
+                remaining -= 1;
+                if remaining == 0 {
+                    cut = i + 1;
+                    break;
+                }
+            }
+        }
+        out.write_all(&chunk[..cut])?;
+        reader.consume(cut);
+    }
+    Ok(())
+}
+
+/// Bytes kept when tailing input that cannot be seeked (a FIFO, `/dev/zero`).
+const TAIL_WINDOW: usize = 16 * 1024 * 1024;
+
+/// Offset in `buf` where its last `n` lines begin, like `tail -n`: a newline
+/// that ends `buf` terminates the last line rather than starting a new one.
+/// `None` when `buf` holds fewer than `n` line starts.
+fn last_lines_start(buf: &[u8], n: usize) -> Option<usize> {
+    if n == 0 {
+        return Some(buf.len());
+    }
+    let body = buf.strip_suffix(b"\n").unwrap_or(buf);
+    let mut need = n;
+    for (i, b) in body.iter().enumerate().rev() {
+        if *b == b'\n' {
+            need -= 1;
+            if need == 0 {
+                return Some(i + 1);
+            }
+        }
+    }
+    None
+}
+
+/// `tail -n` on a regular file: scan backwards from the end in fixed blocks
+/// for the start of the last `n` lines, then stream from there. Memory stays
+/// at one block however long the lines are.
+fn copy_last_lines_seekable(mut file: fs::File, out: &mut impl Write, n: usize) -> io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    const BLOCK: u64 = 64 * 1024;
+    let len = file.seek(SeekFrom::End(0))?;
+    let mut start = 0u64;
+    if n == 0 {
+        start = len;
+    } else {
+        let mut need = n;
+        let mut block = vec![0u8; BLOCK as usize];
+        let mut end = len;
+        'scan: while end > 0 {
+            let from = end.saturating_sub(BLOCK);
+            let chunk = &mut block[..(end - from) as usize];
+            file.seek(SeekFrom::Start(from))?;
+            file.read_exact(chunk)?;
+            for (i, b) in chunk.iter().enumerate().rev() {
+                let pos = from + i as u64;
+                // The newline that ends the file terminates the last line.
+                if *b == b'\n' && pos + 1 != len {
+                    need -= 1;
+                    if need == 0 {
+                        start = pos + 1;
+                        break 'scan;
+                    }
+                }
+            }
+            end = from;
+        }
+    }
+    file.seek(SeekFrom::Start(start))?;
+    io::copy(&mut io::BufReader::new(file), out)?;
+    Ok(())
+}
+
+/// `tail -n` on input that cannot be seeked: keep only the final `window`
+/// bytes, then write the last `n` lines found in them. Memory is bounded by
+/// about twice `window` even for an endless line (`/dev/zero`), where the
+/// native tool would grow without limit. Returns true when the requested
+/// lines did not fit and only the window's tail was written.
+fn copy_last_lines_bounded(
+    input: impl Read,
+    out: &mut impl Write,
+    n: usize,
+    window: usize,
+) -> io::Result<bool> {
+    let mut reader = io::BufReader::new(input);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut dropped = false;
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        buf.extend_from_slice(chunk);
+        let used = chunk.len();
+        reader.consume(used);
+        if buf.len() > 2 * window {
+            buf.drain(..buf.len() - window);
+            dropped = true;
+        }
+    }
+    let (from, truncated) = match last_lines_start(&buf, n) {
+        Some(i) => (i, false),
+        // Earlier bytes were dropped, so the lines' start is gone: show
+        // exactly the final `window` bytes, as the warning says.
+        None if dropped => (buf.len().saturating_sub(window), true),
+        None => (0, false),
+    };
+    out.write_all(&buf[from..])?;
+    Ok(truncated)
+}
+
 pub fn run_stdin(
     level: FilterLevel,
     max_lines: Option<usize>,
@@ -127,8 +306,6 @@ pub fn run_stdin(
     line_numbers: bool,
     verbose: u8,
 ) -> Result<()> {
-    use std::io::{self, Read as IoRead};
-
     let timer = tracking::TimedExecution::start();
 
     if verbose > 0 {
@@ -234,6 +411,87 @@ fn should_auto_summarize(content: &str, lang: &Language) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_copy_first_lines_stops_at_the_nth_newline() {
+        let mut out = Vec::new();
+        copy_first_lines(&b"a\nb\nc\n"[..], &mut out, 2).unwrap();
+        assert_eq!(out, b"a\nb\n");
+        let mut out = Vec::new();
+        copy_first_lines(&b"no newline"[..], &mut out, 3).unwrap();
+        assert_eq!(out, b"no newline");
+        let mut out = Vec::new();
+        copy_first_lines(&b"a\n"[..], &mut out, 0).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_copy_first_lines_never_buffers_a_whole_line() {
+        // Like /dev/zero: no newline, never ends. Reading must stop once the
+        // writer fails, instead of accumulating the endless "line" first.
+        struct Endless;
+        impl Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                buf.fill(0);
+                Ok(buf.len())
+            }
+        }
+        struct Cap(usize);
+        impl Write for Cap {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if self.0 > 1 << 20 {
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+                self.0 += buf.len();
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let err = copy_first_lines(Endless, &mut Cap(0), 5).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn test_last_lines_start_matches_tail() {
+        assert_eq!(last_lines_start(b"a\nb\nc\n", 2), Some(2));
+        assert_eq!(last_lines_start(b"a\nb\nc", 1), Some(4));
+        assert_eq!(last_lines_start(b"a\nb\n", 5), None);
+        assert_eq!(last_lines_start(b"abc", 0), Some(3));
+    }
+
+    #[test]
+    fn test_copy_last_lines_seekable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        // Lines spanning several 64 KiB blocks, with and without a final newline.
+        let long = "x".repeat(200_000);
+        for body in [format!("a\n{long}\nb\nc\n"), format!("a\n{long}\nb\nc")] {
+            fs::write(&path, &body).unwrap();
+            for n in [0, 1, 2, 3, 4, 10] {
+                let mut out = Vec::new();
+                copy_last_lines_seekable(fs::File::open(&path).unwrap(), &mut out, n).unwrap();
+                let lines: Vec<&str> = body.split_inclusive('\n').collect();
+                let want: String = lines[lines.len().saturating_sub(n)..].concat();
+                assert_eq!(String::from_utf8(out).unwrap(), want, "n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_copy_last_lines_bounded() {
+        let mut out = Vec::new();
+        let cut = copy_last_lines_bounded(&b"a\nb\nc\nd"[..], &mut out, 2, 1024).unwrap();
+        assert_eq!((out.as_slice(), cut), (&b"c\nd"[..], false));
+        // An endless-looking line longer than the window: bounded, flagged.
+        let long = vec![b'z'; 10_000];
+        let mut out = Vec::new();
+        let cut = copy_last_lines_bounded(long.as_slice(), &mut out, 1, 1000).unwrap();
+        assert!(cut);
+        assert_eq!(out.len(), 1000);
+        assert!(out.iter().all(|b| *b == b'z'));
+    }
     use std::io::Write;
     use tempfile::NamedTempFile;
 

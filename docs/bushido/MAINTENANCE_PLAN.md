@@ -501,6 +501,30 @@ v0.44.7〜v0.45.0 のローカルデータ保護で塞がなかった範囲。�
   `publish-homebrew-formula` が `Bad credentials` で落ちる → 再発行して
   `gh secret set HOMEBREW_TAP_TOKEN`、`gh run rerun <run-id> --failed`。
 
+### 2026-10-31 — grep→rg 変換経由のコマンド実行、read の無制限読み込み
+- **発端**: samuraidash の MCP ラッパー（`scripts/bdo-mcp-server.mjs`）の監査で、`bdo_exec` が
+  引数を検査しない点を調べる中、bdo 本体の問題を発見。
+- **grep（重大）**: bdo は grep を rg に変換し余分な引数を素通ししていた。rg の `--pre <cmd>` は
+  検索対象ファイル毎に `<cmd>` を実行する。実証: `bdo grep needle . --pre /bin/rm` で対象ファイルが
+  削除された。hook は `grep -rn x . --pre rm` を `bdo grep …` に書き換え、`grep` の許可ルールで自動
+  承認されるため、ネイティブ grep なら無害に失敗するコマンドが削除コマンドに化けていた。
+  対策: path・`-t` 値・追加引数で `--pre`/`--pre-glob`/`--hostname-bin`（`=値` 形も）を拒否
+  （`--raw` 経路でも）、パターンは `-e` で渡す。clap が解析できない形はフォールバックでネイティブ
+  grep に行き、そちらは未知オプションで失敗するので安全。`tests/grep_exec_flags.rs`（実 rg のみの
+  PATH、`rm` を仕掛け、カナリアファイルの生存で判定）が修正前のソースで失敗することを確認。
+- **read**: `fs::read_to_string` で全量読み込みしていたため `/dev/zero` で無限にメモリ増、FIFO は
+  EOF まで無出力、巨大ログを丸ごと保持。通常ファイル以外と 16 MiB 超は無加工でストリーム
+  （`-m` はチャンク単位で改行を数え 1 行を溜めない、`--tail-lines` は末尾 N 行のみ保持）。
+  200MB の `/dev/zero` で RSS 約 8MB。`tests/read_streaming.rs`（17 MiB+非 UTF-8、FIFO の先行出力）。
+  **レビュー指摘で追加修正**: 初版の `--tail-lines` は `read_until` で 1 行全体を溜めており、
+  改行の無い巨大ファイル・`/dev/zero` でメモリ枯渇が残っていた → 通常ファイルは末尾から 64KiB
+  ずつ逆走査して最後の N 行の開始位置を求めてストリーム（300MB 1 行で RSS 約 10MB）、
+  シーク不可の入力は直近 16 MiB の窓だけ保持（`/dev/zero` で RSS 約 38MB で頭打ち、9 分実行で確認）。
+  要求行が窓に収まらなければ窓の末尾 16 MiB を出し stderr で警告。
+  **残り**: `bdo read -`（stdin）は従来どおり全量読み込み。
+- **MCP 側（samuraidash）**: パス制限・フラグ許可リスト・`env --show-all` や危険な git オプションの
+  拒否は別リポジトリで対応予定。
+
 ### 既知の不具合（軽微・未修正）
 - ✅ ~~README のバッジが 404~~（0.45.3 で修正）: CI バッジを
   `actions/workflows/ci.yml/badge.svg` に、`README.md` / `README_ja.md` 内の

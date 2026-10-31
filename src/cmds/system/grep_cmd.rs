@@ -25,6 +25,20 @@ pub fn run(
         eprintln!("grep: '{}' in {}", pattern, path);
     }
 
+    // Refuse ripgrep options that run a program. Native grep has none: it
+    // rejects `--pre` as an unknown option. bdo translates grep to rg and used
+    // to forward them, so an auto-allowed `grep -rn x . --pre rm` ran `rm` on
+    // every searched file. The pattern is exempt — it goes to rg via `-e`.
+    let candidates = std::iter::once(path)
+        .chain(file_type)
+        .chain(extra_args.iter().map(String::as_str));
+    if let Some(opt) = candidates.into_iter().find_map(command_running_rg_option) {
+        anyhow::bail!(
+            "bdo grep: refusing ripgrep option `{opt}` — it runs a program on the searched files; \
+             run `rg` directly if you mean it"
+        );
+    }
+
     // Fix: convert BRE alternation \| → | for rg (which uses PCRE-style regex)
     let rg_pattern = pattern.replace(r"\|", "|");
 
@@ -52,7 +66,7 @@ pub fn run(
             // NUL separator, but other grep-compatible binaries do not (e.g.
             // ugrep reads `-Z` as fuzzy matching), which both changes results and
             // breaks parsing. `parse_match_line` understands the colon format.
-            grep_cmd.args(["-rnH", pattern, path]).args(extra_args);
+            grep_cmd.args(["-rnH", "-e", pattern, path]).args(extra_args);
             exec_capture(&mut grep_cmd)
         })
         .context("grep/rg failed")?;
@@ -183,6 +197,20 @@ pub fn run(
 ///
 /// Returns `None` for lines that do not match either shape (e.g. rg `-A`/`-B`
 /// context lines that use `-` as separator).
+/// ripgrep options that execute an external program: `--pre <cmd>` runs a
+/// preprocessor on every searched file, `--pre-glob` scopes it, and
+/// `--hostname-bin <cmd>` runs a command to learn the hostname. Matches the
+/// bare flag and the `--flag=value` form; returns the flag name.
+fn command_running_rg_option(arg: &str) -> Option<&'static str> {
+    const EXEC_OPTIONS: &[&str] = &["--pre", "--pre-glob", "--hostname-bin"];
+    EXEC_OPTIONS.iter().copied().find(|opt| {
+        arg == *opt
+            || arg
+                .strip_prefix(opt)
+                .is_some_and(|rest| rest.starts_with('='))
+    })
+}
+
 /// `nul_separated` asks rg for `file\0line:content` so the filter can parse
 /// paths containing `:digits:`; raw mode passes `false` to get the plain
 /// `file:line:content` that grep prints.
@@ -206,12 +234,16 @@ fn build_rg_args(
         // Passthrough format flags such as -l/-c/-o have their own output shape.
         // Do not force line numbers or NUL separators, otherwise the output is
         // no longer grep-compatible (e.g. -l would emit NUL-terminated paths).
+        // -e: a pattern starting with `-` (e.g. `--pre`) is never read as a flag.
+        args.push("-e".to_string());
         args.push(rg_pattern.to_string());
         args.push(path.to_string());
     } else if has_context_flag(extra_args) {
         // Context flags pass through too, but keep line numbers + filename so the
         // raw -A/-B/-C output stays readable. No NUL: the output isn't parsed.
         args.push("-nH".to_string());
+        // -e: a pattern starting with `-` (e.g. `--pre`) is never read as a flag.
+        args.push("-e".to_string());
         args.push(rg_pattern.to_string());
         args.push(path.to_string());
     } else {
@@ -219,6 +251,8 @@ fn build_rg_args(
         // NUL separation lets parse_match_line disambiguate filenames/content
         // containing `:digits:` patterns (issue #1436).
         args.push(if nul_separated { "-nH0" } else { "-nH" }.to_string());
+        // -e: a pattern starting with `-` (e.g. `--pre`) is never read as a flag.
+        args.push("-e".to_string());
         args.push(rg_pattern.to_string());
         args.push(path.to_string());
     }
@@ -426,6 +460,26 @@ mod tests {
         let args = build_rg_args("needle", ".", None, &["-r".to_string(), "-i".to_string()], true);
         assert!(!args.contains(&"-r".to_string()));
         assert!(args.contains(&"-i".to_string()));
+    }
+
+    #[test]
+    fn test_command_running_rg_options_are_detected() {
+        for arg in ["--pre", "--pre=rm", "--pre-glob", "--pre-glob=*.gz", "--hostname-bin", "--hostname-bin=/x"] {
+            assert!(command_running_rg_option(arg).is_some(), "{arg}");
+        }
+        for arg in ["--prefix", "--preview", "-p", "--pretty", "--hostname", "pre", "src"] {
+            assert!(command_running_rg_option(arg).is_none(), "{arg}");
+        }
+    }
+
+    #[test]
+    fn test_pattern_is_passed_with_e() {
+        // A pattern like `--pre` must reach rg as a pattern, never as a flag.
+        for extra in [vec![], vec!["-l".to_string()], vec!["-A".to_string(), "2".to_string()]] {
+            let args = build_rg_args("--pre", "src", None, &extra, true);
+            let i = args.iter().position(|a| a == "--pre").unwrap();
+            assert_eq!(args[i - 1], "-e", "{args:?}");
+        }
     }
 
     #[test]

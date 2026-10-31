@@ -5,6 +5,27 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **`bdo grep` no longer lets ripgrep run a program.** bdo translates grep to
+  rg and forwarded extra arguments, including rg's `--pre <cmd>` (runs `<cmd>`
+  on every searched file) and `--hostname-bin <cmd>`. Native grep rejects
+  these as unknown options, so a hook-rewritten `grep -rn x . --pre rm` — which
+  a `grep` allow rule auto-approves — deleted the files it searched. bdo grep
+  now refuses `--pre`, `--pre-glob` and `--hostname-bin` (also `--opt=value`)
+  in the path, `-t` value and extra arguments, including under `--raw`, and
+  passes the pattern with `-e` so a pattern like `--pre` is searched for, not
+  parsed as a flag.
+- **`bdo read` streams instead of loading unbounded input.** `cat` / `head` /
+  `tail` become `bdo read`, which loaded the whole file to filter it:
+  `/dev/zero` grew memory until the process was killed, a FIFO showed nothing
+  until the writer closed, and a multi-gigabyte log was held in memory. Files
+  that are not regular files, or are over 16 MiB, are now streamed unfiltered
+  and byte-exact (non-UTF-8 included), honouring `-m` / `--tail-lines`, in
+  constant memory (~8 MB RSS for 200 MB of `/dev/zero`).
+
 ## [0.49.1] (2026-10-29)
 
 ### Security

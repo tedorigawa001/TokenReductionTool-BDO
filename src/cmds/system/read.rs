@@ -152,9 +152,22 @@ fn stream_unfiltered(file: &Path, max_lines: Option<usize>, tail_lines: Option<u
     // Straight to the (line-buffered) stdout lock, not a BufWriter: a FIFO or
     // a growing file must show each line as it arrives, as `cat` does.
     let mut out = io::stdout().lock();
+    let seekable = input.metadata().is_ok_and(|m| m.is_file());
     match (max_lines, tail_lines) {
         (Some(n), _) => copy_first_lines(input, &mut out, n),
-        (None, Some(n)) => copy_last_lines(input, &mut out, n),
+        (None, Some(n)) if seekable => copy_last_lines_seekable(input, &mut out, n),
+        (None, Some(n)) => {
+            let truncated = copy_last_lines_bounded(input, &mut out, n, TAIL_WINDOW)?;
+            if truncated {
+                eprintln!(
+                    "bdo: {}: the requested lines exceed the {} MiB tail buffer; showing only its final {} MiB",
+                    file.display(),
+                    TAIL_WINDOW >> 20,
+                    TAIL_WINDOW >> 20
+                );
+            }
+            Ok(())
+        }
         (None, None) => io::copy(&mut io::BufReader::new(input), &mut out).map(|_| ()),
     }
     .and_then(|()| out.flush())
@@ -187,24 +200,103 @@ fn copy_first_lines(input: impl Read, out: &mut impl Write, n: usize) -> io::Res
     Ok(())
 }
 
-/// Write the last `n` lines (like `tail -n`), holding only those lines.
-fn copy_last_lines(input: impl Read, out: &mut impl Write, n: usize) -> io::Result<()> {
+/// Bytes kept when tailing input that cannot be seeked (a FIFO, `/dev/zero`).
+const TAIL_WINDOW: usize = 16 * 1024 * 1024;
+
+/// Offset in `buf` where its last `n` lines begin, like `tail -n`: a newline
+/// that ends `buf` terminates the last line rather than starting a new one.
+/// `None` when `buf` holds fewer than `n` line starts.
+fn last_lines_start(buf: &[u8], n: usize) -> Option<usize> {
+    if n == 0 {
+        return Some(buf.len());
+    }
+    let body = buf.strip_suffix(b"\n").unwrap_or(buf);
+    let mut need = n;
+    for (i, b) in body.iter().enumerate().rev() {
+        if *b == b'\n' {
+            need -= 1;
+            if need == 0 {
+                return Some(i + 1);
+            }
+        }
+    }
+    None
+}
+
+/// `tail -n` on a regular file: scan backwards from the end in fixed blocks
+/// for the start of the last `n` lines, then stream from there. Memory stays
+/// at one block however long the lines are.
+fn copy_last_lines_seekable(mut file: fs::File, out: &mut impl Write, n: usize) -> io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    const BLOCK: u64 = 64 * 1024;
+    let len = file.seek(SeekFrom::End(0))?;
+    let mut start = 0u64;
+    if n == 0 {
+        start = len;
+    } else {
+        let mut need = n;
+        let mut block = vec![0u8; BLOCK as usize];
+        let mut end = len;
+        'scan: while end > 0 {
+            let from = end.saturating_sub(BLOCK);
+            let chunk = &mut block[..(end - from) as usize];
+            file.seek(SeekFrom::Start(from))?;
+            file.read_exact(chunk)?;
+            for (i, b) in chunk.iter().enumerate().rev() {
+                let pos = from + i as u64;
+                // The newline that ends the file terminates the last line.
+                if *b == b'\n' && pos + 1 != len {
+                    need -= 1;
+                    if need == 0 {
+                        start = pos + 1;
+                        break 'scan;
+                    }
+                }
+            }
+            end = from;
+        }
+    }
+    file.seek(SeekFrom::Start(start))?;
+    io::copy(&mut io::BufReader::new(file), out)?;
+    Ok(())
+}
+
+/// `tail -n` on input that cannot be seeked: keep only the final `window`
+/// bytes, then write the last `n` lines found in them. Memory is bounded by
+/// about twice `window` even for an endless line (`/dev/zero`), where the
+/// native tool would grow without limit. Returns true when the requested
+/// lines did not fit and only the window's tail was written.
+fn copy_last_lines_bounded(
+    input: impl Read,
+    out: &mut impl Write,
+    n: usize,
+    window: usize,
+) -> io::Result<bool> {
     let mut reader = io::BufReader::new(input);
-    let mut lines: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut dropped = false;
     loop {
-        let mut line = Vec::new();
-        if reader.read_until(b'\n', &mut line)? == 0 {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
             break;
         }
-        lines.push_back(line);
-        if lines.len() > n {
-            lines.pop_front();
+        buf.extend_from_slice(chunk);
+        let used = chunk.len();
+        reader.consume(used);
+        if buf.len() > 2 * window {
+            buf.drain(..buf.len() - window);
+            dropped = true;
         }
     }
-    for line in lines {
-        out.write_all(&line)?;
-    }
-    Ok(())
+    let (from, truncated) = match last_lines_start(&buf, n) {
+        Some(i) => (i, false),
+        // Earlier bytes were dropped, so the lines' start is gone: show
+        // exactly the final `window` bytes, as the warning says.
+        None if dropped => (buf.len().saturating_sub(window), true),
+        None => (0, false),
+    };
+    out.write_all(&buf[from..])?;
+    Ok(truncated)
 }
 
 pub fn run_stdin(
@@ -362,13 +454,43 @@ mod tests {
     }
 
     #[test]
-    fn test_copy_last_lines() {
+    fn test_last_lines_start_matches_tail() {
+        assert_eq!(last_lines_start(b"a\nb\nc\n", 2), Some(2));
+        assert_eq!(last_lines_start(b"a\nb\nc", 1), Some(4));
+        assert_eq!(last_lines_start(b"a\nb\n", 5), None);
+        assert_eq!(last_lines_start(b"abc", 0), Some(3));
+    }
+
+    #[test]
+    fn test_copy_last_lines_seekable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        // Lines spanning several 64 KiB blocks, with and without a final newline.
+        let long = "x".repeat(200_000);
+        for body in [format!("a\n{long}\nb\nc\n"), format!("a\n{long}\nb\nc")] {
+            fs::write(&path, &body).unwrap();
+            for n in [0, 1, 2, 3, 4, 10] {
+                let mut out = Vec::new();
+                copy_last_lines_seekable(fs::File::open(&path).unwrap(), &mut out, n).unwrap();
+                let lines: Vec<&str> = body.split_inclusive('\n').collect();
+                let want: String = lines[lines.len().saturating_sub(n)..].concat();
+                assert_eq!(String::from_utf8(out).unwrap(), want, "n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_copy_last_lines_bounded() {
         let mut out = Vec::new();
-        copy_last_lines(&b"a\nb\nc\nd"[..], &mut out, 2).unwrap();
-        assert_eq!(out, b"c\nd");
+        let cut = copy_last_lines_bounded(&b"a\nb\nc\nd"[..], &mut out, 2, 1024).unwrap();
+        assert_eq!((out.as_slice(), cut), (&b"c\nd"[..], false));
+        // An endless-looking line longer than the window: bounded, flagged.
+        let long = vec![b'z'; 10_000];
         let mut out = Vec::new();
-        copy_last_lines(&b"a\nb\n"[..], &mut out, 5).unwrap();
-        assert_eq!(out, b"a\nb\n");
+        let cut = copy_last_lines_bounded(long.as_slice(), &mut out, 1, 1000).unwrap();
+        assert!(cut);
+        assert_eq!(out.len(), 1000);
+        assert!(out.iter().all(|b| *b == b'z'));
     }
     use std::io::Write;
     use tempfile::NamedTempFile;

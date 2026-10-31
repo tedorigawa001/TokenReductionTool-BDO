@@ -24,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   until the writer closed, and a multi-gigabyte log was held in memory. Files
   that are not regular files, or are over 16 MiB, are now streamed unfiltered
   and byte-exact (non-UTF-8 included), honouring `-m` / `--tail-lines`, in
-  constant memory (~8 MB RSS for 200 MB of `/dev/zero`).
+  bounded memory: `-m` counts newlines chunk by chunk (~8 MB RSS for 200 MB of
+  `/dev/zero`); `--tail-lines` scans a regular file backwards from the end
+  (a 300 MB single-line file: ~10 MB RSS) and keeps at most a 16 MiB window of
+  input that cannot be seeked (`/dev/zero` holds at ~38 MB RSS, warning when
+  the requested lines did not fit).
 
 ## [0.49.1] (2026-10-29)
 

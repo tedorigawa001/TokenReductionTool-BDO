@@ -56,6 +56,18 @@ fn a_file_over_the_limit_is_streamed_byte_for_byte() {
     assert_eq!(tail.stdout, b"tail \xff end\n");
 }
 
+#[test]
+fn tail_of_a_huge_line_without_newline_is_exact() {
+    // tail scans a regular file backwards, so a single 17 MiB line with no
+    // newline comes out whole without being buffered.
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![b'q'; 17 * 1024 * 1024];
+    fs::write(dir.path().join("one.line"), &body).unwrap();
+    let out = bdo(dir.path(), &["read", "one.line", "--tail-lines", "1"]);
+    assert!(out.status.success());
+    assert!(out.stdout == body, "got {} bytes", out.stdout.len());
+}
+
 #[cfg(unix)]
 #[test]
 fn a_fifo_is_streamed_before_the_writer_finishes() {

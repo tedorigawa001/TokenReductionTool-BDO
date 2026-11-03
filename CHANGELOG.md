@@ -5,6 +5,28 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Hook permission gate: comments and redirects can no longer hide
+  commands or arguments.**
+  - A quote inside a comment (`git status # it's`) was read as opening a
+    string, so the next line's command was swallowed into "one" `git status`
+    and auto-approved by a `git status` allow rule. Comments (a `#` that
+    starts a word, outside quotes) now run to the end of the line in the
+    tokenizer and in the substitution scan, as in bash.
+  - Each permission segment was cut at its first redirect, so
+    `git push 2>/dev/null --force` was checked as `git push` and a deny rule
+    for `git push --force` never matched. Redirects and their targets are
+    now removed and the words after them kept: it is checked as
+    `git push --force`.
+  - A line continuation split an argument for the check but not for bash:
+    `git push --for\<newline>ce` runs `git push --force` yet dodged a deny
+    rule for it. Backslash-newlines are now removed before checking, as bash
+    does (not inside single quotes, and not at the end of a comment, where
+    the next line remains its own command).
+
 ## [0.49.2] (2026-10-31)
 
 ### Security

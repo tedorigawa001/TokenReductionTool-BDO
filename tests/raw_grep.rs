@@ -19,9 +19,15 @@ impl Fixture {
         let bin = dir.path().join("bin");
         fs::create_dir(&bin).unwrap();
         let rg = bin.join(format!("rg{}", std::env::consts::EXE_SUFFIX));
-        // Copy the native executable: no Unix shell scripts, symlinks or chmod
-        // are needed on Windows. The child's PATH contains rg and nothing else.
-        fs::copy(installed_rg, &rg).unwrap();
+        // The child's PATH contains rg and nothing else. On Unix, link to the
+        // real binary: a freshly written copy can fail to exec with ETXTBSY
+        // ("Text file busy") when a parallel test forks while the copy's write
+        // handle is still open. Windows has no ETXTBSY and needs no symlink
+        // privilege for a plain copy.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&installed_rg, &rg).unwrap();
+        #[cfg(not(unix))]
+        fs::copy(&installed_rg, &rg).unwrap();
         assert!(which::which_in("grep", Some(&bin), dir.path()).is_err());
         let body: String = (1..=300)
             .map(|n| format!("needle {n} {}\n", "x".repeat(150)))

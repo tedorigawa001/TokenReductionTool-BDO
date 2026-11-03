@@ -285,6 +285,67 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
     tokens
 }
 
+/// Remove line continuations the way bash does before it reads words:
+/// a backslash-newline outside single quotes (inside double quotes too)
+/// disappears, so `git push --for\<newline>ce` is `git push --force`. Single
+/// quotes keep it, `\\` before a newline is an escaped backslash followed by a
+/// real newline, and a comment keeps it too: a comment ends at its newline, so
+/// `# note \<newline>rm` still runs `rm` on the next line.
+pub fn remove_line_continuations(cmd: &str) -> std::borrow::Cow<'_, str> {
+    if !cmd.contains("\\\n") {
+        return std::borrow::Cow::Borrowed(cmd);
+    }
+    let mut out = String::with_capacity(cmd.len());
+    let mut chars = cmd.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut prev: Option<char> = None;
+    while let Some(c) = chars.next() {
+        if in_single {
+            if c == '\'' {
+                in_single = false;
+            }
+            out.push(c);
+        } else if c == '\\' {
+            match chars.peek() {
+                Some('\n') => {
+                    chars.next();
+                    continue; // continuation: both characters vanish
+                }
+                Some(&next) => {
+                    chars.next();
+                    out.push(c);
+                    out.push(next);
+                    prev = Some(next);
+                    continue;
+                }
+                None => out.push(c),
+            }
+        } else if c == '"' {
+            in_double = !in_double;
+            out.push(c);
+        } else if c == '\'' && !in_double {
+            in_single = true;
+            out.push(c);
+        } else if c == '#' && !in_double && starts_comment_after(prev) {
+            out.push(c);
+            while let Some(&nc) = chars.peek() {
+                if nc == '\n' {
+                    break;
+                }
+                out.push(nc);
+                chars.next();
+            }
+            prev = Some(' ');
+            continue;
+        } else {
+            out.push(c);
+        }
+        prev = Some(c);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// True when a `#` following `prev` starts a comment (see `tokenize_inner`).
 fn starts_comment_after(prev: Option<char>) -> bool {
     match prev {
@@ -1456,6 +1517,20 @@ mod tests {
             "echo \\# x",
         ] {
             assert_eq!(split_for_permissions(cmd), vec![cmd], "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_remove_line_continuations_matches_bash() {
+        for (input, want) in [
+            ("git push --for\\\nce", "git push --force"),
+            ("echo \"a\\\nb\"", "echo \"ab\""),
+            ("echo 'c\\\nd'", "echo 'c\\\nd'"),
+            ("echo x\\\\\necho y", "echo x\\\\\necho y"),
+            ("echo A # note \\\necho B", "echo A # note \\\necho B"),
+            ("git status", "git status"),
+        ] {
+            assert_eq!(remove_line_continuations(input), want, "{input:?}");
         }
     }
 

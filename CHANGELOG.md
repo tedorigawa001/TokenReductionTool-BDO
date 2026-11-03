@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     for `git push --force` never matched. Redirects and their targets are
     now removed and the words after them kept: it is checked as
     `git push --force`.
+  - A line continuation split an argument for the check but not for bash:
+    `git push --for\<newline>ce` runs `git push --force` yet dodged a deny
+    rule for it. Backslash-newlines are now removed before checking, as bash
+    does (not inside single quotes, and not at the end of a comment, where
+    the next line remains its own command).
 
 ## [0.49.2] (2026-10-31)
 

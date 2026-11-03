@@ -50,6 +50,8 @@ pub(crate) fn check_command_with_rules(
     ask_rules: &[String],
     allow_rules: &[String],
 ) -> PermissionVerdict {
+    // Judge what bash will run: `--for\<newline>ce` is `--force`.
+    let cmd = &*crate::discover::lexer::remove_line_continuations(cmd);
     let segments = split_compound_command(cmd);
 
     // Deny takes highest priority and pre-empts every other construct.
@@ -888,6 +890,29 @@ mod tests {
         assert_eq!(
             check_command_with_rules("git status # just a note", &[], &[], &allow),
             PermissionVerdict::Allow
+        );
+    }
+
+    #[test]
+    fn test_line_continuation_cannot_dodge_deny() {
+        let allow = vec!["git push *".to_string(), "git status".to_string()];
+        let deny = vec!["git push --force*".to_string()];
+        for cmd in [
+            "git push --for\\\nce",
+            "git push \\\n--force",
+            "git pu\\\nsh --force",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &deny, &[], &allow),
+                PermissionVerdict::Deny,
+                "{cmd:?}"
+            );
+        }
+        // A `\` ending a comment is not a continuation: the next line is
+        // still its own command.
+        assert_eq!(
+            check_command_with_rules("git status # note \\\nrm -rf x", &deny, &[], &allow),
+            PermissionVerdict::Default
         );
     }
 

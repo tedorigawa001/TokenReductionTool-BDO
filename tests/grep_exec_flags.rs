@@ -28,7 +28,9 @@ impl Fixture {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        fs::copy(rg, bin.join("rg")).unwrap();
+        // A symlink, not a copy: a freshly written copy can fail to exec with
+        // ETXTBSY when a parallel test forks while its write handle is open.
+        std::os::unix::fs::symlink(rg, bin.join("rg")).unwrap();
         // `rm` resolves to the real one: that is what rg would run.
         Self { dir, bin }
     }

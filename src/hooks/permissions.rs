@@ -400,7 +400,7 @@ fn glob_matches(cmd: &str, pattern: &str) -> bool {
     true
 }
 
-fn split_compound_command(cmd: &str) -> Vec<&str> {
+fn split_compound_command(cmd: &str) -> Vec<String> {
     split_for_permissions(cmd)
 }
 
@@ -870,6 +870,47 @@ mod tests {
                 "{cmd:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_comment_quote_cannot_hide_the_next_line() {
+        let allow = vec!["git status".to_string()];
+        for cmd in [
+            "git status # it's\nrm -rf important '",
+            "git status # it\"s\nrm -rf important \"",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &[], &[], &allow),
+                PermissionVerdict::Default,
+                "{cmd:?}"
+            );
+        }
+        assert_eq!(
+            check_command_with_rules("git status # just a note", &[], &[], &allow),
+            PermissionVerdict::Allow
+        );
+    }
+
+    #[test]
+    fn test_redirect_before_args_cannot_dodge_deny() {
+        let allow = vec!["git push *".to_string()];
+        let deny = vec!["git push --force*".to_string()];
+        for cmd in [
+            "git push --force origin main",
+            "git push 2>/dev/null --force origin main",
+            "git push >/dev/null --force",
+            "git push 2>&1 --force",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &deny, &[], &allow),
+                PermissionVerdict::Deny,
+                "{cmd:?}"
+            );
+        }
+        assert_eq!(
+            check_command_with_rules("git push 2>&1 origin main", &deny, &[], &allow),
+            PermissionVerdict::Allow
+        );
     }
 
     #[test]

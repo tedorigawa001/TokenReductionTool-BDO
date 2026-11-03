@@ -26,9 +26,15 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
     let mut chars = input.chars().peekable();
     let mut quote: Option<char> = None;
     let mut escaped = false;
+    // The previous character, for recognizing a comment: bash starts one at
+    // a `#` that begins a word, i.e. after whitespace, an operator or the
+    // start of input (`foo#bar`, `$#` and `${#x}` are not comments).
+    let mut prev: Option<char> = None;
 
     while let Some(c) = chars.next() {
         let char_len = c.len_utf8();
+        let at_word_start = current.is_empty() && starts_comment_after(prev);
+        prev = Some(c);
 
         if escaped {
             current.push('\\');
@@ -61,6 +67,23 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
             }
             current.push(c);
             byte_pos += char_len;
+            continue;
+        }
+
+        // A comment runs to the end of the line, and nothing in it — a quote
+        // in `# it's` above all — may open a construct that hides the next
+        // line's command from the permission check.
+        if c == '#' && at_word_start {
+            byte_pos += char_len;
+            while let Some(&nc) = chars.peek() {
+                if nc == '\n' || nc == '\r' {
+                    break;
+                }
+                chars.next();
+                byte_pos += nc.len_utf8();
+            }
+            prev = Some(' ');
+            current_start = byte_pos;
             continue;
         }
 
@@ -262,6 +285,14 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
     tokens
 }
 
+/// True when a `#` following `prev` starts a comment (see `tokenize_inner`).
+fn starts_comment_after(prev: Option<char>) -> bool {
+    match prev {
+        None => true,
+        Some(p) => p.is_whitespace() || matches!(p, ';' | '&' | '|' | '(' | ')'),
+    }
+}
+
 fn flush_arg(tokens: &mut Vec<ParsedToken>, current: &mut String, offset: usize) {
     if !current.is_empty() {
         tokens.push(ParsedToken {
@@ -300,6 +331,17 @@ fn contains_unsupported_shell_construct(cmd: &str) -> bool {
         match bytes[i] {
             b'\\' if !in_single => {
                 i += 2;
+                continue;
+            }
+            // Skip a comment to the end of its line: a quote inside it must
+            // not toggle the quote state for the lines that follow.
+            b'#' if !in_single
+                && !in_double
+                && starts_comment_after(i.checked_sub(1).map(|j| bytes[j] as char)) =>
+            {
+                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                    i += 1;
+                }
                 continue;
             }
             b'\'' if !in_double => in_single = !in_single,
@@ -358,9 +400,12 @@ fn redirect_has_file_target(tokens: &[ParsedToken], i: usize) -> bool {
 }
 
 /// Like [`split_on_operators`] but also breaks on newline, background `&`, and
-/// subshell `( ... )`, and truncates each segment at its first redirect.
-/// Callers must still gate on [`contains_unattestable_construct`] first.
-pub fn split_for_permissions(cmd: &str) -> Vec<&str> {
+/// subshell `( ... )`, and removes each redirect — with its file target —
+/// while keeping the words after it: `git push 2>/dev/null --force` is checked
+/// as `git push --force`. (Truncating at the first redirect used to drop the
+/// `--force`, so a deny rule for it never matched.) Comments are dropped by the
+/// tokenizer. Callers must still gate on [`contains_unattestable_construct`].
+pub fn split_for_permissions(cmd: &str) -> Vec<String> {
     let trimmed = cmd.trim();
     if trimmed.is_empty() {
         return vec![];
@@ -368,8 +413,23 @@ pub fn split_for_permissions(cmd: &str) -> Vec<&str> {
 
     let tokens = tokenize_inner(trimmed, true);
     let mut results = Vec::new();
-    let mut seg_start: usize = 0;
-    let mut seg_end: Option<usize> = None;
+    // Original-text runs of the current segment. A run grows token by token
+    // (so `*.rs` and the spacing inside it stay exactly as written); a removed
+    // redirect starts a new run, and runs are joined with one space.
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let mut cut = false;
+    let mut skip_target = false;
+
+    let flush = |runs: &mut Vec<(usize, usize)>, results: &mut Vec<String>| {
+        if !runs.is_empty() {
+            let parts: Vec<&str> = runs.iter().map(|&(a, b)| trimmed[a..b].trim()).collect();
+            let segment = parts.join(" ");
+            if !segment.is_empty() {
+                results.push(segment);
+            }
+            runs.clear();
+        }
+    };
 
     for tok in &tokens {
         let is_boundary = match tok.kind {
@@ -377,26 +437,41 @@ pub fn split_for_permissions(cmd: &str) -> Vec<&str> {
             TokenKind::Shellism => matches!(tok.value.as_str(), "&" | "(" | ")"),
             _ => false,
         };
-
         if is_boundary {
-            let end = seg_end.take().unwrap_or(tok.offset);
-            let segment = trimmed[seg_start..end].trim();
-            if !segment.is_empty() {
-                results.push(segment);
-            }
-            seg_start = tok.offset + tok.value.len();
-        } else if tok.kind == TokenKind::Redirect && seg_end.is_none() {
-            seg_end = Some(tok.offset);
+            flush(&mut runs, &mut results);
+            cut = false;
+            skip_target = false;
+            continue;
         }
+        if tok.kind == TokenKind::Redirect {
+            // `>file`, `2> file`, `<in`, `&>log`, `<<EOF` take the next word
+            // as their target; fd-dups (`2>&1`, `>&2`, `>&-`) take none.
+            skip_target = redirect_takes_target(&tok.value);
+            cut = true;
+            continue;
+        }
+        if skip_target && tok.kind == TokenKind::Arg {
+            skip_target = false;
+            continue;
+        }
+        skip_target = false;
+        let end = (tok.offset + tok.value.len()).min(trimmed.len());
+        match runs.last_mut() {
+            Some(run) if !cut => run.1 = end,
+            _ => runs.push((tok.offset, end)),
+        }
+        cut = false;
     }
-
-    let end = seg_end.unwrap_or(trimmed.len());
-    let tail = trimmed[seg_start..end].trim();
-    if !tail.is_empty() {
-        results.push(tail);
-    }
-
+    flush(&mut runs, &mut results);
     results
+}
+
+/// Whether a redirect operator consumes the following word as its target.
+fn redirect_takes_target(op: &str) -> bool {
+    match op.find(">&") {
+        Some(pos) => op[pos + 2..].is_empty(),
+        None => true,
+    }
 }
 
 /// Split a shell command on operators (`&&`, `||`, `;`) and optionally pipes (`|`),
@@ -1328,6 +1403,72 @@ mod tests {
     }
 
     // --- split_for_permissions ---------------------------------------------
+
+    #[test]
+    fn test_split_perms_keeps_words_after_a_redirect() {
+        // Truncating at the redirect dropped `--force`, so a deny rule for it
+        // never saw it.
+        for (cmd, want) in [
+            (
+                "git push 2>/dev/null --force origin main",
+                "git push --force origin main",
+            ),
+            ("git push >out.log --force", "git push --force"),
+            ("git push 2> err.txt --force", "git push --force"),
+            ("git push 2>&1 --force", "git push --force"),
+            ("git push &>log --force", "git push --force"),
+            ("cmd <in.txt --flag", "cmd --flag"),
+        ] {
+            assert_eq!(split_for_permissions(cmd), vec![want], "{cmd}");
+        }
+        // Text without redirects is kept exactly as written.
+        assert_eq!(
+            split_for_permissions("ls  *.rs 2>&1 | head"),
+            vec!["ls  *.rs", "head"]
+        );
+    }
+
+    #[test]
+    fn test_split_perms_drops_comments() {
+        // A quote inside a comment must not swallow the next line.
+        assert_eq!(
+            split_for_permissions("git status # it's\nrm -rf important '"),
+            vec!["git status", "rm -rf important '"]
+        );
+        assert_eq!(
+            split_for_permissions("git status # it\"s\nrm -rf important \""),
+            vec!["git status", "rm -rf important \""]
+        );
+        assert_eq!(
+            split_for_permissions("git status # note"),
+            vec!["git status"]
+        );
+        assert_eq!(
+            split_for_permissions("# only a comment"),
+            Vec::<String>::new()
+        );
+        // Not comments: `#` inside a word, `$#`, `${#x}`, quoted, escaped.
+        for cmd in [
+            "echo a#b",
+            "echo $#",
+            "echo ${#x}",
+            "echo '# x'",
+            "echo \\# x",
+        ] {
+            assert_eq!(split_for_permissions(cmd), vec![cmd], "{cmd}");
+        }
+    }
+
+    #[test]
+    fn test_comment_quote_does_not_hide_substitution() {
+        assert!(contains_unattestable_construct(
+            "git status # it's\n$(rm -rf x) '"
+        ));
+        assert!(contains_unattestable_construct(
+            "git status # it's\necho `id` '"
+        ));
+        assert!(!contains_unattestable_construct("git status # $(not run)"));
+    }
 
     #[test]
     fn test_split_perms_operators() {

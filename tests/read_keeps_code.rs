@@ -113,8 +113,11 @@ fn rust_nested_comments_do_not_leave_stray_delimiters() {
 fn a_line_window_is_not_recorded_as_a_saving() {
     let dir = tempfile::tempdir().unwrap();
     // Canonical: bdo refuses a tracking database behind a symlink, which is what
-    // the temp directory is on macOS.
-    let root = dir.path().canonicalize().unwrap();
+    // the temp directory is on macOS. Not on Windows, where this yields a `\\?\`
+    // path the database cannot be opened through.
+    let root = dir.path().to_path_buf();
+    #[cfg(unix)]
+    let root = root.canonicalize().unwrap();
     let file = root.join("big.csv");
     fs::write(&file, "a,b,c\n".repeat(5000)).unwrap();
     let db = root.join("track.db");

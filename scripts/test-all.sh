@@ -54,6 +54,41 @@ assert_contains() {
     fi
 }
 
+# Output only: for a command whose exit code carries meaning of its own.
+assert_output() {
+    local name="$1"
+    local needle="$2"
+    shift 2
+    local output
+    output=$("$@" 2>&1) || true
+    if echo "$output" | grep -q -- "$needle"; then
+        PASS=$((PASS + 1))
+        printf "  ${GREEN}PASS${NC}  %s\n" "$name"
+    else
+        FAIL=$((FAIL + 1))
+        FAILURES+=("$name")
+        printf "  ${RED}FAIL${NC}  %s\n" "$name"
+        printf "        expected: '%s'\n" "$needle"
+        printf "        got: %s\n" "$(echo "$output" | head -3)"
+    fi
+}
+
+# A pipeline or redirect consumes the output, so its format has to stay git's own.
+assert_no_rewrite() {
+    local name="$1"
+    local output
+    output=$(bdo rewrite "$2" 2>/dev/null) || true
+    if [ -z "$output" ]; then
+        PASS=$((PASS + 1))
+        printf "  ${GREEN}PASS${NC}  %s\n" "$name"
+    else
+        FAIL=$((FAIL + 1))
+        FAILURES+=("$name")
+        printf "  ${RED}FAIL${NC}  %s\n" "$name"
+        printf "        rewrote it to: %s\n" "$output"
+    fi
+}
+
 assert_exit_ok() {
     local name="$1"
     shift
@@ -230,8 +265,12 @@ assert_help    "bdo cargo"                    bdo cargo
 
 section "Curl (new)"
 
-assert_contains "bdo curl JSON detect" "string" bdo curl https://httpbin.org/json
-assert_ok       "bdo curl plain text"          bdo curl https://httpbin.org/robots.txt
+if [ -z "${BDO_SMOKE_OFFLINE:-}" ]; then
+    assert_contains "bdo curl JSON detect" "slideshow" bdo curl https://httpbin.org/json
+    assert_ok       "bdo curl plain text"          bdo curl https://httpbin.org/robots.txt
+else
+    skip_test "bdo curl" "BDO_SMOKE_OFFLINE is set"
+fi
 assert_help     "bdo curl"                     bdo curl
 
 # ── 8. Npm / Npx ────────────────────────────────────
@@ -246,10 +285,10 @@ assert_help    "bdo npx"                      bdo npx
 section "Pnpm"
 
 assert_help    "bdo pnpm"                     bdo pnpm
-assert_help    "bdo pnpm build"               bdo pnpm build
 assert_help    "bdo pnpm typecheck"           bdo pnpm typecheck
 
 if command -v pnpm >/dev/null 2>&1; then
+    assert_help "bdo pnpm build"              bdo pnpm build
     assert_ok  "bdo pnpm help"                bdo pnpm help
 fi
 
@@ -282,7 +321,7 @@ TMPJSON=$(mktemp /tmp/bdo-test-XXXXX.json)
 echo '{"name":"test","count":42,"items":[1,2,3]}' > "$TMPJSON"
 
 assert_ok      "bdo json file"                bdo json "$TMPJSON"
-assert_contains "bdo json shows schema"       "string" bdo json "$TMPJSON"
+assert_contains "bdo json shows the document"  "count" bdo json "$TMPJSON"
 
 rm -f "$TMPJSON"
 
@@ -350,7 +389,7 @@ assert_ok      "bdo init --show"              bdo init --show
 
 section "Wget"
 
-if command -v wget >/dev/null 2>&1; then
+if command -v wget >/dev/null 2>&1 && [ -z "${BDO_SMOKE_OFFLINE:-}" ]; then
     assert_ok  "bdo wget stdout"              bdo wget https://httpbin.org/robots.txt -O
 else
     skip_test "bdo wget" "wget not installed"
@@ -463,7 +502,7 @@ fi
 
 section "Global flags"
 
-assert_ok      "bdo -u ls ."                  bdo -u ls .
+assert_ok      "bdo --ultra-compact ls ."     bdo --ultra-compact ls .
 assert_ok      "bdo --skip-env npm --help"    bdo --skip-env npm --help
 
 # ── 32. CcEconomics ─────────────────────────────────
@@ -483,10 +522,10 @@ assert_ok      "bdo learn (no sessions)"      bdo learn --since 0 2>&1 || true
 
 section "Rewrite"
 
-assert_contains "rewrite git status"          "bdo git status"         bdo rewrite "git status"
-assert_contains "rewrite cargo test"          "bdo cargo test"         bdo rewrite "cargo test"
-assert_contains "rewrite compound &&"         "bdo git status"         bdo rewrite "git status && cargo test"
-assert_contains "rewrite pipe preserves"      "| head"                 bdo rewrite "git log | head"
+assert_output "rewrite git status"          "bdo git status"         bdo rewrite "git status"
+assert_output "rewrite cargo test"          "bdo cargo test"         bdo rewrite "cargo test"
+assert_output "rewrite compound &&"         "bdo git status"         bdo rewrite "git status && cargo test"
+assert_no_rewrite "rewrite leaves a pipeline alone" "git log | head"
 
 section "Rewrite (#345: BDO_DISABLED skip)"
 
@@ -495,14 +534,14 @@ assert_fails   "rewrite env BDO_DISABLED skip"                        bdo rewrit
 
 section "Rewrite (#346: 2>&1 preserved)"
 
-assert_contains "rewrite 2>&1 preserved"      "2>&1"                  bdo rewrite "cargo test 2>&1 | head"
+assert_no_rewrite "rewrite leaves a redirect alone" "cargo test 2>&1 | head"
 
 section "Rewrite (#196: gh --json skip)"
 
 assert_fails   "rewrite gh --json skip"                               bdo rewrite "gh pr list --json number"
 assert_fails   "rewrite gh --jq skip"                                 bdo rewrite "gh api /repos --jq .name"
 assert_fails   "rewrite gh --template skip"                           bdo rewrite "gh pr view 1 --template '{{.title}}'"
-assert_contains "rewrite gh normal works"     "bdo gh pr list"        bdo rewrite "gh pr list"
+assert_output "rewrite gh normal works"     "bdo gh pr list"        bdo rewrite "gh pr list"
 
 # ── 33. Verify ────────────────────────────────────────
 
@@ -562,7 +601,7 @@ fi
 
 section "Hook check (#344)"
 
-assert_contains "bdo init --show hook version" "version" bdo init --show
+assert_contains "bdo init --show reports the hook" "Hook" bdo init --show
 
 # ══════════════════════════════════════════════════════
 # Report

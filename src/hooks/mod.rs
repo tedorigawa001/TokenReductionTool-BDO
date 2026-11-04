@@ -1,6 +1,8 @@
 //! Hook installation and lifecycle management for AI coding agents.
 
 pub mod constants;
+#[cfg(all(test, unix))]
+mod gate_differential;
 pub mod hook_audit_cmd;
 pub mod hook_check;
 #[deny(clippy::print_stdout, clippy::print_stderr)]

@@ -76,7 +76,7 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
         if c == '#' && at_word_start {
             byte_pos += char_len;
             while let Some(&nc) = chars.peek() {
-                if nc == '\n' || nc == '\r' {
+                if nc == '\n' {
                     break;
                 }
                 chars.next();
@@ -220,14 +220,33 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
                     chars.next();
                     byte_pos += 1;
                     val.push('&');
+                    let mut fd = String::new();
                     while let Some(&nc) = chars.peek() {
                         if !nc.is_ascii_digit() && nc != '-' {
                             break;
                         }
                         chars.next();
-                        val.push(nc);
+                        fd.push(nc);
                         byte_pos += nc.len_utf8();
                     }
+                    // `2>&1` duplicates a descriptor, but `2>&1x` writes to a
+                    // file named `1x`: only a whole word of digits (or `-`) is
+                    // an fd. Otherwise those characters start the target word.
+                    let word_continues = chars.peek().is_some_and(|&nc| {
+                        !is_shell_blank(nc)
+                            && !matches!(nc, ';' | '&' | '|' | '(' | ')' | '<' | '>')
+                    });
+                    if word_continues {
+                        current = fd;
+                        tokens.push(ParsedToken {
+                            kind: TokenKind::Redirect,
+                            value: val,
+                            offset: redir_start,
+                        });
+                        current_start = byte_pos - current.len();
+                        continue;
+                    }
+                    val.push_str(&fd);
                 }
                 tokens.push(ParsedToken {
                     kind: TokenKind::Redirect,
@@ -253,7 +272,7 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
                 });
                 current_start = byte_pos;
             }
-            '\n' | '\r' if emit_newline => {
+            '\n' if emit_newline => {
                 flush_arg(&mut tokens, &mut current, current_start);
                 tokens.push(ParsedToken {
                     kind: TokenKind::Operator,
@@ -263,7 +282,9 @@ fn tokenize_inner(input: &str, emit_newline: bool) -> Vec<ParsedToken> {
                 byte_pos += char_len;
                 current_start = byte_pos;
             }
-            c if c.is_whitespace() => {
+            // Only the shell's blanks separate words. `\r`, `\v`, `\f`, NBSP and
+            // other Unicode spaces are ordinary word characters to bash.
+            c if is_shell_blank(c) => {
                 flush_arg(&mut tokens, &mut current, current_start);
                 byte_pos += c.len_utf8();
                 current_start = byte_pos;
@@ -346,11 +367,18 @@ pub fn remove_line_continuations(cmd: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// The characters that separate words in a shell. Deliberately not
+/// `char::is_whitespace`: treating NBSP as a blank made `x\u{a0}# y; cmd` look
+/// like a comment hiding `cmd`, while bash reads a word and runs `cmd`.
+pub(crate) fn is_shell_blank(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n')
+}
+
 /// True when a `#` following `prev` starts a comment (see `tokenize_inner`).
 fn starts_comment_after(prev: Option<char>) -> bool {
     match prev {
         None => true,
-        Some(p) => p.is_whitespace() || matches!(p, ';' | '&' | '|' | '(' | ')'),
+        Some(p) => is_shell_blank(p) || matches!(p, ';' | '&' | '|' | '(' | ')'),
     }
 }
 
@@ -400,7 +428,7 @@ fn contains_unsupported_shell_construct(cmd: &str) -> bool {
                 && !in_double
                 && starts_comment_after(i.checked_sub(1).map(|j| bytes[j] as char)) =>
             {
-                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                while i < bytes.len() && bytes[i] != b'\n' {
                     i += 1;
                 }
                 continue;
@@ -467,7 +495,7 @@ fn redirect_has_file_target(tokens: &[ParsedToken], i: usize) -> bool {
 /// `--force`, so a deny rule for it never matched.) Comments are dropped by the
 /// tokenizer. Callers must still gate on [`contains_unattestable_construct`].
 pub fn split_for_permissions(cmd: &str) -> Vec<String> {
-    let trimmed = cmd.trim();
+    let trimmed = cmd.trim_matches(is_shell_blank);
     if trimmed.is_empty() {
         return vec![];
     }
@@ -483,7 +511,10 @@ pub fn split_for_permissions(cmd: &str) -> Vec<String> {
 
     let flush = |runs: &mut Vec<(usize, usize)>, results: &mut Vec<String>| {
         if !runs.is_empty() {
-            let parts: Vec<&str> = runs.iter().map(|&(a, b)| trimmed[a..b].trim()).collect();
+            let parts: Vec<&str> = runs
+                .iter()
+                .map(|&(a, b)| trimmed[a..b].trim_matches(is_shell_blank))
+                .collect();
             let segment = parts.join(" ");
             if !segment.is_empty() {
                 results.push(segment);
@@ -525,6 +556,92 @@ pub fn split_for_permissions(cmd: &str) -> Vec<String> {
     }
     flush(&mut runs, &mut results);
     results
+}
+
+/// A permission segment as the shell will read it, for matching deny and ask
+/// rules: quotes and escapes removed, words joined by one space, so `"--force"`,
+/// `--fo''rce`, `--forc\\e` and `push  --force` all read as written in a rule.
+pub struct CanonicalSegment {
+    pub text: String,
+    pub first_word: String,
+    /// A word holds something only the shell can resolve: `$…`, a glob, a
+    /// brace. Its real value is unknown, so a rule cannot be ruled out.
+    pub has_expansion: bool,
+}
+
+pub fn canonicalize_segment(segment: &str) -> CanonicalSegment {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut has_expansion = false;
+    let mut chars = segment.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            c if is_shell_blank(c) => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            '\\' => {
+                in_word = true;
+                if let Some(next) = chars.next() {
+                    if next != '\n' {
+                        word.push(next);
+                    }
+                }
+            }
+            '\'' => {
+                in_word = true;
+                for q in chars.by_ref() {
+                    if q == '\'' {
+                        break;
+                    }
+                    word.push(q);
+                }
+            }
+            '"' => {
+                in_word = true;
+                while let Some(q) = chars.next() {
+                    match q {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some('\n') | None => {}
+                            Some(e @ ('$' | '`' | '"' | '\\')) => word.push(e),
+                            Some(e) => {
+                                word.push('\\');
+                                word.push(e);
+                            }
+                        },
+                        '$' | '`' => {
+                            has_expansion = true;
+                            word.push(q);
+                        }
+                        _ => word.push(q),
+                    }
+                }
+            }
+            // `$"…"` is a locale string: the `$` vanishes.
+            '$' if chars.peek() == Some(&'"') => {}
+            '$' | '*' | '?' | '[' | '{' | '`' => {
+                has_expansion = true;
+                in_word = true;
+                word.push(c);
+            }
+            _ => {
+                in_word = true;
+                word.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(word);
+    }
+    CanonicalSegment {
+        first_word: words.first().cloned().unwrap_or_default(),
+        text: words.join(" "),
+        has_expansion,
+    }
 }
 
 /// Whether a redirect operator consumes the following word as its target.
@@ -1532,6 +1649,41 @@ mod tests {
         ] {
             assert_eq!(remove_line_continuations(input), want, "{input:?}");
         }
+    }
+
+    #[test]
+    fn test_comment_ends_only_at_newline_and_starts_only_after_a_blank() {
+        // A comment runs through a CR, as in bash.
+        assert_eq!(
+            split_for_permissions("git status # x\r; rm y\nls"),
+            vec!["git status", "ls"]
+        );
+        // After NBSP there is no comment: `;` still separates.
+        assert_eq!(
+            split_for_permissions("git status\u{a0}# x; rm y"),
+            vec!["git status\u{a0}# x", "rm y"]
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_segment() {
+        for (input, want, expansion) in [
+            ("git  push\t--force", "git push --force", false),
+            ("git \"push\" --fo''rce", "git push --force", false),
+            ("\\git pu\\sh", "git push", false),
+            ("echo \"a b\"", "echo a b", false),
+            ("echo $\"x\"", "echo x", false),
+            ("echo 'a*b' \"\\$x\"", "echo a*b $x", false),
+            ("echo $X", "echo $X", true),
+            ("echo \"$X\"", "echo $X", true),
+            ("echo a*", "echo a*", true),
+            ("echo {a,b}", "echo {a,b}", true),
+        ] {
+            let c = canonicalize_segment(input);
+            assert_eq!(c.text, want, "{input:?}");
+            assert_eq!(c.has_expansion, expansion, "{input:?}");
+        }
+        assert_eq!(canonicalize_segment("\"git\" x").first_word, "git");
     }
 
     #[test]

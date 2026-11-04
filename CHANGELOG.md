@@ -5,6 +5,38 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+Findings of a differential audit: generated commands were judged by the
+permission gate and then really executed in bash, zsh and dash among recording
+fake programs. The audit now runs in the test suite.
+
+- **The gate's idea of whitespace was wider than the shell's.** NBSP, CR, VT, FF
+  and other Unicode spaces are word characters to a shell, but the tokenizer
+  treated them as blanks. Since the 0.49.3 comment fix that hid commands:
+  `git status<NBSP># x; cmd` looked like a comment, was auto-approved by a
+  `git status` allow rule, and ran `cmd`. Only space, tab and newline separate
+  words now, and a comment ends only at a newline.
+- **A rewrite could change what was judged.** The gate judges the command as
+  written, but the shell runs the rewrite: trimming a trailing NBSP or VT and
+  replacing an in-word line continuation with a space turned
+  `git push --force\<newline>x` into `git push --force x`. Commands whose words
+  a rewrite could change are no longer rewritten (they only lose token savings).
+- **File writes behind an fd-dup.** `2>&1x` writes to a file named `1x`, but was
+  read as a descriptor duplication and auto-approved. Only a whole word of
+  digits (or `-`) is an fd now.
+- **Deny and ask rules matched the literal text.** `git push "--force"`,
+  `--fo''rce`, `--forc\e` and `git push  --force` all ran `--force` past a
+  `git push --force*` deny rule. These rules now also see each segment as the
+  shell reads it (quotes and escapes removed, blanks collapsed). Allow rules
+  still match the text as written, so anything unusual falls back to a prompt.
+- **Expansions could hide a denied argument.** `git push ${X:---force}`,
+  `{--force,}` and `--forc?` have values only the shell knows. If a deny or ask
+  rule concerns the same program, they are no longer auto-approved: the verdict
+  is Ask.
+
 ## [0.49.3] (2026-11-03)
 
 ### Security

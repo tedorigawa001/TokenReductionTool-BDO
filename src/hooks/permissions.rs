@@ -1,6 +1,6 @@
 use super::constants::{CLAUDE_DIR, CURSOR_DIR, GEMINI_DIR, SETTINGS_JSON, SETTINGS_LOCAL_JSON};
 use crate::core::stream::exec_capture;
-use crate::discover::lexer::split_for_permissions;
+use crate::discover::lexer::{canonicalize_segment, split_for_permissions, CanonicalSegment};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -54,11 +54,17 @@ pub(crate) fn check_command_with_rules(
     let cmd = &*crate::discover::lexer::remove_line_continuations(cmd);
     let segments = split_compound_command(cmd);
 
+    // Deny and ask rules are about what runs, so they also see each segment as
+    // the shell will read it: `"--force"`, `--fo''rce`, `push  --force`.
+    let canonical: Vec<CanonicalSegment> =
+        segments.iter().map(|s| canonicalize_segment(s)).collect();
+
     // Deny takes highest priority and pre-empts every other construct.
-    for segment in &segments {
-        let segment = segment.trim();
+    for (segment, canon) in segments.iter().zip(&canonical) {
         for pattern in deny_rules {
-            if command_matches_pattern(segment, pattern) {
+            if command_matches_pattern(segment, pattern)
+                || command_matches_pattern(&canon.text, pattern)
+            {
                 return PermissionVerdict::Deny;
             }
         }
@@ -76,8 +82,7 @@ pub(crate) fn check_command_with_rules(
     let mut all_segments_allowed = true;
     let mut saw_segment = false;
 
-    for segment in &segments {
-        let segment = segment.trim();
+    for (segment, canon) in segments.iter().zip(&canonical) {
         if segment.is_empty() {
             continue;
         }
@@ -86,11 +91,25 @@ pub(crate) fn check_command_with_rules(
         // Ask — if any segment matches an ask rule, the final verdict is Ask.
         if !any_ask {
             for pattern in ask_rules {
-                if command_matches_pattern(segment, pattern) {
+                if command_matches_pattern(segment, pattern)
+                    || command_matches_pattern(&canon.text, pattern)
+                {
                     any_ask = true;
                     break;
                 }
             }
+        }
+
+        // An expansion's value is unknown until it runs: `git push $X`,
+        // `git push {--force,}`. If a deny or ask rule concerns this command,
+        // it cannot be ruled out, so a person decides.
+        if canon.has_expansion
+            && deny_rules
+                .iter()
+                .chain(ask_rules)
+                .any(|rule| rule_concerns_command(rule, canon))
+        {
+            any_ask = true;
         }
 
         // Allow — every non-empty segment must match an allow rule independently.
@@ -114,6 +133,15 @@ pub(crate) fn check_command_with_rules(
     } else {
         PermissionVerdict::Default
     }
+}
+
+/// Whether `rule` is about the same program as `canon`: its first literal word
+/// matches, it starts with a wildcard, or the command name is itself unknown.
+fn rule_concerns_command(rule: &str, canon: &CanonicalSegment) -> bool {
+    let first = rule.split([' ', ':', '*']).next().unwrap_or_default();
+    first.is_empty()
+        || first == canon.first_word
+        || canon.first_word.contains(['$', '*', '?', '[', '{', '`'])
 }
 
 /// Load deny, ask, and allow Bash rules from all Claude Code settings files.
@@ -914,6 +942,104 @@ mod tests {
             check_command_with_rules("git status # note \\\nrm -rf x", &deny, &[], &allow),
             PermissionVerdict::Default
         );
+    }
+
+    #[test]
+    fn test_only_shell_blanks_start_a_comment() {
+        // NBSP, CR, VT and FF are word characters to the shell, so these `#`s
+        // start no comment and the command after `;` really runs.
+        let allow = vec!["git status".to_string()];
+        for cmd in [
+            "git status\u{a0}# x; rm -rf y",
+            "git status\r# x; rm -rf y",
+            "git status\u{b}# x; rm -rf y",
+            "git status\u{c}# x; rm -rf y",
+        ] {
+            assert_ne!(
+                check_command_with_rules(cmd, &[], &[], &allow),
+                PermissionVerdict::Allow,
+                "{cmd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_fd_dup_glued_to_a_word_is_a_file_write() {
+        let allow = vec!["git status".to_string()];
+        for cmd in ["git status 2>&1x", "git status >&1}", "git status 2>&-x"] {
+            assert_eq!(
+                check_command_with_rules(cmd, &[], &[], &allow),
+                PermissionVerdict::Ask,
+                "{cmd:?}"
+            );
+        }
+        assert_eq!(
+            check_command_with_rules("git status 2>&1", &[], &[], &allow),
+            PermissionVerdict::Allow
+        );
+    }
+
+    #[test]
+    fn test_deny_and_ask_see_the_command_as_the_shell_reads_it() {
+        let allow = vec!["git push *".to_string()];
+        let rule = vec!["git push --force*".to_string()];
+        for cmd in [
+            "git push  --force",
+            "git push \t--force",
+            "git push \"--force\"",
+            "git push '--force'",
+            "git push --\"force\"",
+            "git push --fo''rce",
+            "git push --forc\\e",
+            "\"git\" push --force",
+            "g\"\"it push --force",
+            "\\git push --force",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &rule, &[], &allow),
+                PermissionVerdict::Deny,
+                "deny {cmd:?}"
+            );
+            assert_eq!(
+                check_command_with_rules(cmd, &[], &rule, &allow),
+                PermissionVerdict::Ask,
+                "ask {cmd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_unresolvable_expansion_is_not_auto_allowed_under_a_rule() {
+        let allow = vec!["git push *".to_string(), "ls *".to_string()];
+        let deny = vec!["git push --force*".to_string()];
+        for cmd in [
+            "git push $X",
+            "git push --force$X",
+            "git push ${X:---force}",
+            "git push {--force,}",
+            "git push --forc{e,}",
+            "git push --forc?",
+            "git push \"$X\"",
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, &deny, &[], &allow),
+                PermissionVerdict::Ask,
+                "{cmd:?}"
+            );
+        }
+        // A rule about another program does not concern this command, a quoted
+        // `*` is no glob, and without rules nothing changes.
+        for (cmd, rules) in [
+            ("ls $HOME", &deny),
+            ("git push 'a*b'", &deny),
+            ("git push $X", &vec![]),
+        ] {
+            assert_eq!(
+                check_command_with_rules(cmd, rules, &[], &allow),
+                PermissionVerdict::Allow,
+                "{cmd:?}"
+            );
+        }
     }
 
     #[test]

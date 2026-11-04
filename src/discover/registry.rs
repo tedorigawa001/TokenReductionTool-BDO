@@ -448,6 +448,8 @@ lazy_static! {
     /// so commands authored across multiple lines still hit the rewrite rules.
     /// Consuming the trailing whitespace prevents double spaces in cases like
     /// `git diff \<NL>HEAD~1`.
+    static ref ESCAPED_TRAILING_BLANK_RE: Regex =
+        Regex::new(r"\\[ \t]+($|[;&|\n])").unwrap();
     static ref LINE_CONTINUATION_RE: Regex =
         Regex::new(r"(?m)[ \t\x0B\x0C]*\\\r?\n[ \t\x0B\x0C]*").unwrap();
 }
@@ -457,6 +459,41 @@ lazy_static! {
 /// input contains no continuations, so the common fast path allocates nothing.
 fn collapse_line_continuations(s: &str) -> std::borrow::Cow<'_, str> {
     LINE_CONTINUATION_RE.replace_all(s, " ")
+}
+
+/// The permission gate judges the command as written, but the shell runs the
+/// rewrite, so the rewrite must not change what any word means. Where that
+/// can't be guaranteed the command is left alone: it only loses token savings.
+///
+/// - `\r`, `\v`, `\f`, NBSP and other Unicode spaces are word characters to the
+///   shell, but `str::trim` removes them: `git push --force\r` is judged as an
+///   odd argument and would run as `--force`.
+/// - A line continuation inside a word or quotes joins text: replacing it with
+///   a space turns `--force\<newline>x` into `--force x`.
+/// - An escaped blank ending a word (`--force\ `) would lose its blank to trim.
+fn rewrite_preserves_words(cmd: &str, collapsed: &str) -> bool {
+    use crate::discover::lexer::{canonicalize_segment, is_shell_blank, remove_line_continuations};
+    // Leading continuations (including CRLF ones, issue #1564) precede the first
+    // word, so removing them cannot change any word.
+    let mut body = cmd.trim_start_matches(is_shell_blank);
+    while let Some(rest) = body
+        .strip_prefix("\\\r\n")
+        .or_else(|| body.strip_prefix("\\\n"))
+    {
+        body = rest.trim_start_matches(is_shell_blank);
+    }
+    if body
+        .chars()
+        .any(|c| c.is_whitespace() && !is_shell_blank(c))
+    {
+        return false;
+    }
+    if ESCAPED_TRAILING_BLANK_RE.is_match(body) {
+        return false;
+    }
+    collapsed == cmd
+        || canonicalize_segment(&remove_line_continuations(body)).text
+            == canonicalize_segment(collapsed).text
 }
 
 /// Returns `None` if the command is unsupported or ignored (hook should pass through).
@@ -488,6 +525,9 @@ pub fn rewrite_command(
     // not unwrap them so a leading backslash-newline used to defeat the whole matcher.
     // Normalize first, then trim. See issue #1564.
     let normalized = collapse_line_continuations(cmd);
+    if !rewrite_preserves_words(cmd, &normalized) {
+        return None;
+    }
     let trimmed = normalized.trim();
     if trimmed.is_empty() {
         return None;
@@ -4228,6 +4268,29 @@ mod tests {
         // Continuation followed by indentation — also collapsed.
         assert_eq!(
             rewrite_command_no_prefixes("git \\\n    diff HEAD~1", &[]),
+            Some("bdo git diff HEAD~1".into())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_refuses_when_it_could_change_a_word() {
+        // The gate judged these words as written; a rewrite must not turn them
+        // into `--force` by trimming or by splitting at a continuation.
+        for cmd in [
+            "git push --force\r",
+            "git push --force\u{a0}",
+            "git push --force\u{b}",
+            "git push --force\\\nx",
+            "git push \"--fo\\\nrce\"",
+            "git push '--fo\\\nrce'",
+            "git push --force\\ ",
+            "git push --force\\ ; ls",
+        ] {
+            assert_eq!(rewrite_command_no_prefixes(cmd, &[]), None, "{cmd:?}");
+        }
+        // Continuations between words still rewrite.
+        assert_eq!(
+            rewrite_command_no_prefixes("git diff \\\nHEAD~1", &[]),
             Some("bdo git diff HEAD~1".into())
         );
     }

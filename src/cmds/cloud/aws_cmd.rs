@@ -216,6 +216,15 @@ fn is_structured_operation(args: &[String]) -> bool {
 }
 
 /// Generic strategy: force --output json for structured ops, compress via json_cmd compact (values preserved)
+/// What a failed `aws` said. It writes errors to stderr, but not all of them.
+fn failure_text(stdout: &str, stderr: &str) -> String {
+    [stdout.trim(), stderr.trim()]
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn run_generic(subcommand: &str, args: &[String], verbose: u8, full_sub: &str) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
 
@@ -252,7 +261,7 @@ fn run_generic(subcommand: &str, args: &[String], verbose: u8, full_sub: &str) -
             &stderr,
             &stderr,
         );
-        eprintln!("{}", stderr.trim());
+        eprintln!("{}", failure_text(&raw, &stderr));
         return Ok(crate::core::utils::exit_code_from_output(&output, "aws"));
     }
 
@@ -317,10 +326,6 @@ fn run_aws_json(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    if !output.status.success() {
-        eprintln!("{}", stderr.trim());
-    }
-
     Ok((stdout, stderr, output.status))
 }
 
@@ -348,9 +353,9 @@ fn run_aws_filtered(
     if !status.success() {
         let exit_code = exit_code_from_status(&status, "aws");
         if let Some(hint) = crate::core::tee::tee_and_hint(&raw, &slug, exit_code) {
-            eprintln!("{}\n{}", stderr.trim(), hint);
+            eprintln!("{}\n{}", failure_text(&stdout, &stderr), hint);
         } else {
-            eprintln!("{}", stderr.trim());
+            eprintln!("{}", failure_text(&stdout, &stderr));
         }
         timer.track(&cmd_label, &rtk_label, &raw, &stderr);
         return Ok(exit_code);
@@ -401,9 +406,9 @@ fn run_s3_ls(extra_args: &[String], verbose: u8) -> Result<i32> {
     if !output.status.success() {
         let exit_code = exit_code_from_output(&output, "aws");
         if let Some(hint) = crate::core::tee::tee_and_hint(&raw, "aws_s3_ls", exit_code) {
-            eprintln!("{}\n{}", stderr.trim(), hint);
+            eprintln!("{}\n{}", failure_text(&stdout, &stderr), hint);
         } else {
-            eprintln!("{}", stderr.trim());
+            eprintln!("{}", failure_text(&stdout, &stderr));
         }
         timer.track("aws s3 ls", "bdo aws s3 ls", &raw, &stderr);
         return Ok(exit_code);
@@ -454,9 +459,9 @@ fn run_s3_transfer(operation: &str, extra_args: &[String], verbose: u8) -> Resul
     if !output.status.success() {
         let exit_code = exit_code_from_output(&output, "aws");
         if let Some(hint) = crate::core::tee::tee_and_hint(&raw, &slug, exit_code) {
-            eprintln!("{}\n{}", stderr.trim(), hint);
+            eprintln!("{}\n{}", failure_text(&stdout, &stderr), hint);
         } else {
-            eprintln!("{}", stderr.trim());
+            eprintln!("{}", failure_text(&stdout, &stderr));
         }
         timer.track(&cmd_label, &rtk_label, &raw, &stderr);
         return Ok(exit_code);

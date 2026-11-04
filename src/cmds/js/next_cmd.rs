@@ -20,6 +20,9 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
 
     cmd.arg("build");
 
+    // `bdo next build` and `bdo next` mean the same. A second `build` would name
+    // the directory to build.
+    let args = args.strip_prefix(&["build".to_string()]).unwrap_or(args);
     for arg in args {
         cmd.arg(arg);
     }

@@ -479,7 +479,7 @@ enum Commands {
         #[arg(short, long)]
         quota: bool,
         /// Subscription tier for quota calculation: pro, 5x, 20x
-        #[arg(short, long, default_value = "20x", requires = "quota")]
+        #[arg(short, long, default_value = "20x", requires = "quota", value_parser = ["pro", "5x", "20x"])]
         tier: String,
         /// Show detailed daily breakdown (all days)
         #[arg(short, long)]
@@ -494,7 +494,7 @@ enum Commands {
         #[arg(short, long)]
         all: bool,
         /// Output format: text, json, csv
-        #[arg(short, long, default_value = "text")]
+        #[arg(short, long, default_value = "text", value_parser = ["text", "json", "csv"])]
         format: String,
         /// Show parse failure log (commands that fell back to raw execution)
         #[arg(short = 'F', long)]
@@ -2197,16 +2197,18 @@ fn run_cli() -> Result<i32> {
         }
 
         Commands::Wget { url, output, args } => {
-            if output.as_deref() == Some("-") {
-                wget_cmd::run_stdout(&url, &args, cli.verbose)?
+            // Pass -O <file> through to wget via args
+            let mut all_args = Vec::new();
+            if let Some(out_file) = &output {
+                all_args.push("-O".to_string());
+                all_args.push(out_file.clone());
+            }
+            all_args.extend(args);
+            // `args` can spell it too: everything after the URL's first flag
+            // lands there, and so does `-O-`.
+            if wget_cmd::writes_to_stdout(&all_args) {
+                wget_cmd::run_stdout(&url, &all_args, cli.verbose)?
             } else {
-                // Pass -O <file> through to wget via args
-                let mut all_args = Vec::new();
-                if let Some(out_file) = &output {
-                    all_args.push("-O".to_string());
-                    all_args.push(out_file.clone());
-                }
-                all_args.extend(args);
                 wget_cmd::run(&url, &all_args, cli.verbose)?
             }
         }

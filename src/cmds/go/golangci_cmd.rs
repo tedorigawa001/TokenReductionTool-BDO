@@ -139,7 +139,9 @@ fn run_filtered(original_args: &[String], invocation: &RunInvocation, verbose: u
         );
     }
 
-    let exit_code = runner::run_filtered(
+    // Its exit code is kept: 1 means issues were found, and
+    // `golangci-lint run && git push` relies on that.
+    runner::run_filtered(
         cmd,
         "golangci-lint",
         &original_args.join(" "),
@@ -153,11 +155,7 @@ fn run_filtered(original_args: &[String], invocation: &RunInvocation, verbose: u
             filter_golangci_json(json_output, version)
         },
         crate::core::runner::RunOptions::stdout_only(),
-    )?;
-
-    // golangci-lint: exit 0 = clean, exit 1 = lint issues found (not an error),
-    // exit 2+ = config/build error, None = killed by signal (OOM, SIGKILL)
-    Ok(if exit_code == 1 { 0 } else { exit_code })
+    )
 }
 
 fn run_passthrough(args: &[String], verbose: u8) -> Result<i32> {

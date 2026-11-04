@@ -96,7 +96,7 @@ fn run_list(base_cmd: &str, args: &[String], verbose: u8) -> Result<(String, Str
 
     let raw = format!("{}\n{}", result.stdout, result.stderr);
 
-    let filtered = filter_pip_list(&result.stdout);
+    let filtered = crate::core::runner::with_failure_evidence(filter_pip_list(&result.stdout), &result.stdout, &result.stderr, result.exit_code);
     println!("{}", filtered);
 
     Ok((raw, filtered, result.exit_code))
@@ -124,7 +124,7 @@ fn run_outdated(base_cmd: &str, args: &[String], verbose: u8) -> Result<(String,
 
     let raw = format!("{}\n{}", result.stdout, result.stderr);
 
-    let filtered = filter_pip_outdated(&result.stdout);
+    let filtered = crate::core::runner::with_failure_evidence(filter_pip_outdated(&result.stdout), &result.stdout, &result.stderr, result.exit_code);
     println!("{}", filtered);
 
     Ok((raw, filtered, result.exit_code))

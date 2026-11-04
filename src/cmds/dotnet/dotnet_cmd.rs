@@ -54,6 +54,7 @@ pub fn run_format(args: &[String], verbose: u8) -> Result<i32> {
     let check_mode = !has_write_mode_override(args);
     let filtered =
         format_report_summary_or_raw(report_path.as_deref(), check_mode, &raw, command_started_at);
+    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
     println!("{}", filtered);
 
     timer.track(
@@ -222,6 +223,12 @@ fn run_dotnet_with_binlog(subcommand: &str, args: &[String], verbose: u8) -> Res
         filtered
     };
 
+    let output_to_print = crate::core::runner::with_failure_evidence(
+        output_to_print,
+        &result.stdout,
+        &result.stderr,
+        result.exit_code,
+    );
     println!("{}", output_to_print);
 
     timer.track(

@@ -390,7 +390,7 @@ assert_ok      "bdo init --show"              bdo init --show
 section "Wget"
 
 if command -v wget >/dev/null 2>&1 && [ -z "${BDO_SMOKE_OFFLINE:-}" ]; then
-    assert_ok  "bdo wget stdout"              bdo wget https://httpbin.org/robots.txt -O
+    assert_ok  "bdo wget stdout"              bdo wget https://httpbin.org/robots.txt -O -
 else
     skip_test "bdo wget" "wget not installed"
 fi

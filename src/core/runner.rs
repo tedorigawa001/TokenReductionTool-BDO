@@ -14,6 +14,89 @@ pub fn print_with_hint(filtered: &str, raw: &str, tee_label: &str, exit_code: i3
     }
 }
 
+/// Lines of a failed command's output to show when its filter kept none.
+const MAX_FAILURE_LINES: usize = 10;
+
+/// What must be added to a failed command's filtered output, if anything.
+///
+/// A filter recognises the output it expects. A command can fail in a way it does
+/// not expect (a bad flag, a broken config, a crash), and the filter then reports
+/// what it found, which is nothing: "No issues found", with the error gone. So if
+/// a failed command's message appears nowhere in what is shown, this returns the
+/// end of it. The message is stderr if the command wrote any. A filter that got
+/// structured output reports it in its own words; stderr still needs checking.
+pub fn failure_evidence(stdout: &str, stderr: &str, shown: &str, exit_code: i32) -> Option<String> {
+    if exit_code == 0 {
+        return None;
+    }
+    let significant = |text: &str| -> Vec<String> {
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(crate::core::utils::strip_ansi)
+            .collect()
+    };
+    let (out_lines, err_lines) = (significant(stdout), significant(stderr));
+    if out_lines.is_empty() && err_lines.is_empty() {
+        return Some(format!(
+            "[bdo] the command failed (exit {exit_code}) and printed nothing"
+        ));
+    }
+    // A bracketed log prefix is not JSON. Only exempt a complete JSON object
+    // or array, and do not let it hide a separate failure reported on stderr.
+    let structured = matches!(
+        serde_json::from_str::<serde_json::Value>(&out_lines.join("\n")),
+        Ok(serde_json::Value::Object(_) | serde_json::Value::Array(_))
+    );
+    // Compared by their start, since filters shorten long lines.
+    let is_shown = |line: &String| {
+        let end = line.char_indices().nth(40).map_or(line.len(), |(i, _)| i);
+        shown.contains(&line[..end])
+    };
+    if err_lines.iter().any(is_shown) {
+        return None;
+    }
+    let lines = if structured || out_lines.iter().any(is_shown) {
+        // The filter read stdout, so stderr only matters where it reports an
+        // error. The rest is progress, such as cargo's `Compiling`.
+        err_lines
+            .into_iter()
+            .filter(|line| {
+                let lower = line.to_lowercase();
+                ["error", "fatal", "failed", "exception", "panic"]
+                    .iter()
+                    .any(|word| lower.contains(word))
+            })
+            .collect()
+    } else if err_lines.is_empty() {
+        out_lines
+    } else {
+        err_lines
+    };
+    if lines.is_empty() {
+        return None;
+    }
+    let tail = &lines[lines.len().saturating_sub(MAX_FAILURE_LINES)..];
+    Some(format!(
+        "[bdo] the command failed (exit {exit_code}). Its output ended with:\n{}",
+        tail.join("\n")
+    ))
+}
+
+/// `filtered`, followed by [`failure_evidence`] if there is any.
+pub fn with_failure_evidence(
+    filtered: String,
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+) -> String {
+    match failure_evidence(stdout, stderr, &filtered, exit_code) {
+        Some(evidence) if filtered.trim().is_empty() => evidence,
+        Some(evidence) => format!("{}\n{evidence}", filtered.trim_end()),
+        None => filtered,
+    }
+}
+
 #[derive(Default)]
 pub struct RunOptions<'a> {
     pub tee_label: Option<&'a str>,
@@ -124,6 +207,12 @@ where
         );
         text_to_filter.to_string()
     });
+    let filtered = match failure_evidence(raw_stdout, &result.raw_stderr, &filtered, exit_code) {
+        Some(_) => {
+            with_failure_evidence(filtered, raw_stdout, &result.raw_stderr, exit_code) + "\n"
+        }
+        None => filtered,
+    };
 
     if let Some(label) = opts.tee_label {
         print_with_hint(&filtered, raw, label, exit_code);
@@ -180,6 +269,15 @@ pub fn run(
         RunMode::Streamed(filter) => {
             let result =
                 stream::run_streaming(&mut cmd, StdinMode::Null, FilterMode::Streaming(filter))?;
+
+            if let Some(evidence) = failure_evidence(
+                &result.raw_stdout,
+                &result.raw_stderr,
+                &result.filtered,
+                result.exit_code,
+            ) {
+                println!("{evidence}");
+            }
 
             if let Some(label) = opts.tee_label {
                 if let Some(hint) =

@@ -256,6 +256,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         "mypy" => mypy_cmd::filter_mypy_output(&raw),
         _ => filter_generic_lint(&raw),
     };
+    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
 
     if let Some(hint) = crate::core::tee::tee_and_hint(&raw, "lint", result.exit_code) {
         println!("{}\n{}", filtered, hint);

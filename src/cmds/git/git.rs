@@ -437,6 +437,7 @@ fn run_log(
     let has_limit_flag = args.iter().any(|arg| {
         (arg.starts_with('-') && arg.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
             || arg == "-n"
+            || is_attached_n_limit(arg)
             || arg.starts_with("--max-count")
     });
 
@@ -454,12 +455,12 @@ fn run_log(
         (n, true)
     } else if has_format_flag {
         // --oneline / --pretty without -N: user wants compact output, allow more
-        cmd.arg("-50");
-        (50, false)
+        cmd.arg(format!("-{}", LOG_LIMIT_WITH_FORMAT + 1));
+        (LOG_LIMIT_WITH_FORMAT, false)
     } else {
         // No flags at all: default to 10
-        cmd.arg("-10");
-        (10, false)
+        cmd.arg(format!("-{}", LOG_LIMIT_DEFAULT + 1));
+        (LOG_LIMIT_DEFAULT, false)
     };
 
     // Only add --no-merges if user didn't explicitly request merge commits
@@ -501,9 +502,15 @@ fn run_log(
     Ok(0)
 }
 
+/// `-n20`, the attached form of `-n 20`.
+fn is_attached_n_limit(arg: &str) -> bool {
+    arg.strip_prefix("-n")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Filter git log output: truncate long messages, cap lines
 /// Parse the user-specified limit from git log args.
-/// Handles: -20, -n 20, --max-count=20, --max-count 20
+/// Handles: -20, -n 20, -n20, --max-count=20, --max-count 20
 fn parse_user_limit(args: &[String]) -> Option<usize> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -513,6 +520,11 @@ fn parse_user_limit(args: &[String]) -> Option<usize> {
             && arg.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
         {
             if let Ok(n) = arg[1..].parse::<usize>() {
+                return Some(n);
+            }
+        }
+        if is_attached_n_limit(arg) {
+            if let Ok(n) = arg[2..].parse::<usize>() {
                 return Some(n);
             }
         }
@@ -542,6 +554,17 @@ fn parse_user_limit(args: &[String]) -> Option<usize> {
     None
 }
 
+/// Commits `git log` shows when nothing asks for a number. Git is asked for one
+/// more, which is how the output can say there are others without counting them.
+const LOG_LIMIT_DEFAULT: usize = 10;
+const LOG_LIMIT_WITH_FORMAT: usize = 50;
+
+/// Where a capped `git log` says so: native `git log` prints the whole history,
+/// and a reader of ten silent lines concludes there are ten commits.
+fn log_more_notice(limit: usize) -> String {
+    format!("[showing the latest {limit} — use -n N for more]")
+}
+
 /// When `user_set_limit` is true, the user explicitly passed `-N` to git log,
 /// so we skip line capping (git already returns exactly N commits) and use a
 /// wider truncation threshold (120 chars) to preserve commit context that LLMs
@@ -559,12 +582,15 @@ pub(crate) fn filter_log_output(
     if user_format {
         let lines: Vec<&str> = output.lines().collect();
         let max_lines = if user_set_limit { lines.len() } else { limit };
-        return lines
+        let mut shown: Vec<String> = lines
             .iter()
             .take(max_lines)
             .map(|l| truncate_line(l, truncate_width))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect();
+        if lines.len() > max_lines {
+            shown.push(log_more_notice(limit));
+        }
+        return shown.join("\n");
     }
 
     // Bushido injected format: split output into commit blocks separated by ---END---
@@ -609,6 +635,10 @@ pub(crate) fn filter_log_output(
         }
     }
 
+    let commit_count = commits.iter().filter(|c| !c.trim().is_empty()).count();
+    if commit_count > max_commits {
+        result.push(log_more_notice(limit));
+    }
     result.join("\n").trim().to_string()
 }
 
@@ -2221,7 +2251,9 @@ A  added.rs
             .collect::<Vec<_>>()
             .join("\n");
         let result = filter_log_output(&output, 5, false, false);
-        assert_eq!(result.lines().count(), 5);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 6, "five commits and the notice: {result}");
+        assert!(lines[5].contains("use -n N for more"), "{result}");
     }
 
     #[test]
@@ -2461,7 +2493,9 @@ no changes added to commit (use "git add" and/or "git commit -a")
 
         // user_set_limit=false means cap at limit
         let result = filter_log_output(oneline_output, 3, false, true);
-        assert_eq!(result.lines().count(), 3);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 4, "three commits and the notice: {result}");
+        assert!(lines[3].contains("use -n N for more"), "{result}");
     }
 
     /// Regression test: `git branch <name>` must create, not list.

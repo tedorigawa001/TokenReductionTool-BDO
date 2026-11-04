@@ -91,7 +91,7 @@ fn is_char_literal_start(bytes: &[u8], i: usize) -> bool {
 /// literals and after a `//` line comment. `rust` enables lifetime-aware `'`
 /// handling. Good enough for well-formed source; the outline is a best-effort
 /// view, not a compiler.
-fn brace_delta(line: &str, in_block_comment: &mut bool, rust: bool) -> i32 {
+pub(crate) fn brace_delta(line: &str, in_block_comment: &mut bool, rust: bool) -> i32 {
     let bytes = line.as_bytes();
     let mut depth = 0i32;
     let mut i = 0;

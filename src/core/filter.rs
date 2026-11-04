@@ -193,49 +193,52 @@ impl FilterStrategy for AggressiveFilter {
 
         let minimal = MinimalFilter.filter(content, lang);
         let mut result = String::with_capacity(minimal.len() / 2);
-        let mut brace_depth = 0;
-        let mut in_impl_body = false;
+        let rust = *lang == Language::Rust;
+        let has_braces = !matches!(
+            lang,
+            Language::Python | Language::Ruby | Language::Shell | Language::Unknown
+        );
+        let mut in_block_comment = false;
+        // Net braces open in the body being elided, or 0 outside one.
+        let mut body_depth = 0;
+        // A signature continuing over several lines, up to its `{` or `;`.
+        let mut in_signature = false;
+
+        let keep = |result: &mut String, line: &str| {
+            result.push_str(line);
+            result.push('\n');
+        };
 
         for line in minimal.lines() {
             let trimmed = line.trim();
+            let delta = crate::core::outline::brace_delta(line, &mut in_block_comment, rust);
+
+            if body_depth > 0 {
+                body_depth += delta;
+                if body_depth <= 0 {
+                    body_depth = 0;
+                    keep(&mut result, line);
+                }
+                continue;
+            }
+
+            let opens_signature = FUNC_SIGNATURE.is_match(trimmed);
+            if in_signature || opens_signature {
+                keep(&mut result, line);
+                if delta > 0 {
+                    in_signature = false;
+                    body_depth = delta;
+                    keep(&mut result, "    // ... implementation");
+                } else {
+                    let ended = trimmed.contains('{') || trimmed.ends_with(';');
+                    in_signature = has_braces && !ended;
+                }
+                continue;
+            }
 
             // Always keep imports
             if IMPORT_PATTERN.is_match(trimmed) {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            // Always keep function/struct/class signatures
-            if FUNC_SIGNATURE.is_match(trimmed) {
-                result.push_str(line);
-                result.push('\n');
-                in_impl_body = true;
-                brace_depth = 0;
-                continue;
-            }
-
-            // Track brace depth for implementation bodies
-            let open_braces = trimmed.matches('{').count();
-            let close_braces = trimmed.matches('}').count();
-
-            if in_impl_body {
-                brace_depth += open_braces as i32;
-                brace_depth -= close_braces as i32;
-
-                // Only keep the opening and closing braces
-                if brace_depth <= 1 && (trimmed == "{" || trimmed == "}" || trimmed.ends_with('{'))
-                {
-                    result.push_str(line);
-                    result.push('\n');
-                }
-
-                if brace_depth <= 0 {
-                    in_impl_body = false;
-                    if !trimmed.is_empty() && trimmed != "}" {
-                        result.push_str("    // ... implementation\n");
-                    }
-                }
+                keep(&mut result, line);
                 continue;
             }
 
@@ -246,8 +249,7 @@ impl FilterStrategy for AggressiveFilter {
                 || trimmed.starts_with("pub const ")
                 || trimmed.starts_with("pub static ")
             {
-                result.push_str(line);
-                result.push('\n');
+                keep(&mut result, line);
             }
         }
 
@@ -432,6 +434,24 @@ mod tests {
         assert!(
             result.contains("/* not a comment */"),
             "Aggressive filter must not strip comment-like patterns in JSON"
+        );
+    }
+
+    #[test]
+    fn test_aggressive_elides_bodies_and_keeps_what_follows() {
+        let code = "use std::fmt;\nfn a() {\n    let s = \"}\";\n    b();\n}\nfn c() {}\nconst D: u8 = 1;\nfn e(\n    x: u8,\n) -> u8 {\n    x\n}\nfn f();\nconst G: u8 = 2;\n";
+        assert_eq!(
+            AggressiveFilter.filter(code, &Language::Rust),
+            "use std::fmt;\nfn a() {\n    // ... implementation\n}\nfn c() {}\nconst D: u8 = 1;\nfn e(\n    x: u8,\n) -> u8 {\n    // ... implementation\n}\nfn f();\nconst G: u8 = 2;"
+        );
+    }
+
+    #[test]
+    fn test_aggressive_does_not_wait_for_braces_in_python() {
+        let code = "def f():\n    return 1\nimport os\n";
+        assert_eq!(
+            AggressiveFilter.filter(code, &Language::Python),
+            "def f():\nimport os"
         );
     }
 

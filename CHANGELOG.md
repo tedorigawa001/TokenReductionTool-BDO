@@ -5,6 +5,46 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.0] (2026-11-04)
+
+### Fixed
+
+- **`bdo read` deleted code.** `cat` is rewritten to `bdo read`, so its output is
+  what an agent believes a file contains. Any line containing `/*` was taken to
+  open a comment, and everything up to the next `*/`, or to the end of the file,
+  was dropped: `"src/*.ts"`, `x /* c */ + y`, a `/*` inside a JS template, and
+  Python's `SQL = """` all lost code. A new line scanner tracks strings, raw
+  strings, regex literals and heredocs, and removes a line only when it starts
+  outside a string and is entirely comment. Blank lines collapse only outside
+  strings.
+
+  Filtered and original sources were compared with real parsers, which should
+  see no difference if only comments went. Files that differed in 0.49.4: Python
+  267 of 1,498, JS/TS 130 of 1,500, Go 199 of 2,500, Rust 40 of 3,000, C 417 of
+  600, C++ 3 of 300. Now: none in Python, JS/TS (3,060 files), Go and Rust; C and
+  C++ had none when last compared, before the final string fixes. Ruby, compared
+  only on the fixed code, differs in 2 of 1,006 files, both just CRLF becoming LF.
+  Java has unit tests only, and shell a weaker check.
+- **`bdo gain` overstated savings.** `head -N` and `tail -N` were compared against
+  the whole file, so reading three lines of a large CSV recorded thousands of
+  tokens saved. They now record nothing saved. Existing records cannot be
+  corrected and age out with the 90-day retention, so totals stay high for a while.
+
+### Changed
+
+- **`bdo grep` prints each path once.** More than half of recorded runs printed
+  more than the search they replaced. Matches are grouped under their file, and
+  the `N matches in M files:` header is gone; `[+N more]` still reports anything
+  the caps omit. Long paths are no longer abbreviated to `a/.../b/c`, which could
+  not be opened. Pipelines and redirects are not rewritten to `bdo grep`, and
+  `--raw` still prints `file:line:content`.
+- **`bdo read` no longer strips files of unknown format.** Their comment syntax is
+  unknown, and a `.log` or `.output` line starting with `//` is content. This also
+  means no comment removal for formats bdo has no language for, such as `.css`.
+- **`bdo gain` per-command and per-agent percentages are tokens saved over tokens
+  seen**, not a mean of per-run percentages, which let one-line outputs outvote a
+  50,000-token one. The column is renamed from `Avg%` to `Saved%`.
+
 ## [0.49.4] (2026-11-04)
 
 ### Security

@@ -2197,16 +2197,18 @@ fn run_cli() -> Result<i32> {
         }
 
         Commands::Wget { url, output, args } => {
-            if output.as_deref() == Some("-") {
-                wget_cmd::run_stdout(&url, &args, cli.verbose)?
+            // Pass -O <file> through to wget via args
+            let mut all_args = Vec::new();
+            if let Some(out_file) = &output {
+                all_args.push("-O".to_string());
+                all_args.push(out_file.clone());
+            }
+            all_args.extend(args);
+            // `args` can spell it too: everything after the URL's first flag
+            // lands there, and so does `-O-`.
+            if wget_cmd::writes_to_stdout(&all_args) {
+                wget_cmd::run_stdout(&url, &all_args, cli.verbose)?
             } else {
-                // Pass -O <file> through to wget via args
-                let mut all_args = Vec::new();
-                if let Some(out_file) = &output {
-                    all_args.push("-O".to_string());
-                    all_args.push(out_file.clone());
-                }
-                all_args.extend(args);
                 wget_cmd::run(&url, &all_args, cli.verbose)?
             }
         }

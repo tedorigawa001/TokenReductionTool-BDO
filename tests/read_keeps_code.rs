@@ -54,6 +54,60 @@ fn comments_are_still_removed() {
     );
 }
 
+#[test]
+fn heredoc_terminators_follow_their_indentation_rules() {
+    for (name, source) in [
+        ("a.sh", "cat <<EOF\n  EOF\n# literal data\nEOF\n"),
+        ("b.sh", "cat <<-EOF\n  EOF\n# literal data\n\tEOF\n"),
+        ("a.rb", "value = <<EOF\n  EOF\n# literal data\nEOF\n"),
+    ] {
+        assert_eq!(read(name, source), source, "{name}");
+    }
+    // The real terminator ends protection; subsequent comments still go.
+    assert_eq!(
+        read(
+            "tabs.sh",
+            "cat <<-EOF\n# data\n\tEOF\n# comment\necho done\n"
+        ),
+        "cat <<-EOF\n# data\n\tEOF\necho done\n"
+    );
+    assert_eq!(
+        read(
+            "indent.rb",
+            "value = <<~EOF\n# data\n  EOF\n# comment\nputs value\n"
+        ),
+        "value = <<~EOF\n# data\n  EOF\nputs value\n"
+    );
+    // Each heredoc has its own terminator and is consumed in declaration order.
+    let multiple = "cat 3<<FIRST <<SECOND\nSECOND\n# first data\nFIRST\n# second data\nSECOND\n";
+    assert_eq!(read("multiple.sh", multiple), multiple);
+}
+
+#[test]
+fn ruby_percent_literals_are_kept_verbatim() {
+    for source in [
+        "payload = %q{\n# literal data\n}\nputs payload\n",
+        "payload = %Q[\n# literal data\n[nested]\n]\nputs payload\n",
+        "payload = %{\n# literal data\n}\n# keep uncertain later syntax too\n",
+    ] {
+        assert_eq!(read("a.rb", source), source);
+    }
+}
+
+#[test]
+fn rust_nested_comments_do_not_leave_stray_delimiters() {
+    let with_code = "/* outer\n/* inner */\n*/ fn main() {}\n";
+    assert_eq!(read("a.rs", with_code), with_code);
+    assert_eq!(
+        read("b.rs", "/* outer\n/* inner */\n*/\nfn main() {}\n"),
+        "fn main() {}\n"
+    );
+    let doc = "/** doc\n/* inner */\n// still documentation\n*/\nfn main() {}\n";
+    assert_eq!(read("c.rs", doc), doc);
+    let unfinished = "/* outer\n/* inner */\n// still inside the unclosed comment\n";
+    assert_eq!(read("d.rs", unfinished), unfinished);
+}
+
 /// `head -N` prints this much without bdo, so it must not count as a saving.
 #[test]
 fn a_line_window_is_not_recorded_as_a_saving() {

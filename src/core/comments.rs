@@ -11,6 +11,34 @@
 //! which costs tokens and nothing else.
 
 use crate::core::filter::{CommentPatterns, Language};
+use std::collections::VecDeque;
+
+#[derive(Clone, PartialEq)]
+enum HeredocIndent {
+    Exact,
+    Tabs,
+    SpacesAndTabs,
+}
+
+#[derive(Clone, PartialEq)]
+struct Heredoc {
+    terminator: Vec<u8>,
+    indent: HeredocIndent,
+}
+
+impl Heredoc {
+    fn ends_on(&self, line: &[u8]) -> bool {
+        let skip = line
+            .iter()
+            .take_while(|&&b| match self.indent {
+                HeredocIndent::Exact => false,
+                HeredocIndent::Tabs => b == b'\t',
+                HeredocIndent::SpacesAndTabs => matches!(b, b' ' | b'\t'),
+            })
+            .count();
+        line[skip..] == self.terminator
+    }
+}
 
 #[derive(Clone, PartialEq)]
 enum State {
@@ -22,11 +50,14 @@ enum State {
     },
     /// In a Rust `r#"…"#` or C++ `R"x(…)x"`: no escapes, closes on exact text.
     RawStr(Vec<u8>),
-    /// In a shell or Ruby heredoc, until a line equal to the terminator.
-    Heredoc(Vec<u8>),
+    /// Heredocs are consumed in declaration order, each with its own indent rules.
+    Heredoc(VecDeque<Heredoc>),
+    /// Ruby percent syntax is deliberately not parsed: retain the rest rather
+    /// than guessing where nested delimiters/interpolations end.
+    Verbatim,
     /// In a block comment that is being kept: a doc block, or one opened after
     /// code on the same line.
-    KeptComment,
+    KeptComment(usize),
 }
 
 /// String delimiters of a language: those that may span lines (checked first,
@@ -66,18 +97,50 @@ fn find_close(line: &[u8], from: usize, close: &[u8], escapes: bool) -> Option<u
     None
 }
 
+/// Scan an already-open C-style comment. Rust comments nest; other supported
+/// C-style comment syntaxes stop at the first close. Return the remaining depth
+/// when a line ends so kept/doc comments use the same rules as removed comments.
+fn scan_block_comment(
+    line: &[u8],
+    from: usize,
+    mut depth: usize,
+    nested: bool,
+) -> (Option<usize>, usize) {
+    let mut i = from;
+    while i < line.len() {
+        if nested && line[i..].starts_with(b"/*") {
+            depth += 1;
+            i += 2;
+        } else if line[i..].starts_with(b"*/") {
+            depth -= 1;
+            i += 2;
+            if depth == 0 {
+                return (Some(i), 0);
+            }
+        } else {
+            i += 1;
+        }
+    }
+    (None, depth)
+}
+
 fn is_identifier_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// A heredoc opening at `line[i..]`, which starts with `<<`: its terminator and
 /// the index past it. A false positive only means keeping lines.
-fn heredoc_at(line: &[u8], i: usize, lang: &Language) -> Option<(Vec<u8>, usize)> {
+fn heredoc_at(line: &[u8], i: usize, lang: &Language) -> Option<(Heredoc, usize)> {
     let mut j = i + 2;
     if line.get(j) == Some(&b'<') {
         return None; // here-string
     }
-    if matches!(line.get(j), Some(b'-' | b'~')) {
+    let indent = match (lang, line.get(j)) {
+        (Language::Shell, Some(b'-')) => HeredocIndent::Tabs,
+        (Language::Ruby, Some(b'-' | b'~')) => HeredocIndent::SpacesAndTabs,
+        _ => HeredocIndent::Exact,
+    };
+    if indent != HeredocIndent::Exact {
         j += 1;
     }
     if *lang == Language::Shell {
@@ -107,7 +170,7 @@ fn heredoc_at(line: &[u8], i: usize, lang: &Language) -> Option<(Vec<u8>, usize)
         }
         j += 1;
     }
-    Some((terminator, j))
+    Some((Heredoc { terminator, indent }, j))
 }
 
 /// The closing text of a raw string opening at `line[i..]`, and the index past
@@ -163,8 +226,11 @@ fn scan_line(
     lang: &Language,
     patterns: &CommentPatterns,
 ) -> State {
-    if let State::Heredoc(terminator) = &state {
-        return if line.trim_ascii() == terminator.as_slice() {
+    if let State::Heredoc(pending) = &mut state {
+        if pending.front().is_some_and(|doc| doc.ends_on(line)) {
+            pending.pop_front();
+        }
+        return if pending.is_empty() {
             State::Code
         } else {
             state
@@ -178,10 +244,9 @@ fn scan_line(
         .block_start
         .filter(|s| *s == "/*")
         .map(str::as_bytes);
-    let block_end = patterns.block_end.unwrap_or_default().as_bytes();
     // `$#`, `${#a}` and `?#` are not comments in these two.
     let hash_needs_word_start = matches!(lang, Language::Shell | Language::Ruby);
-    let mut pending_heredoc = None;
+    let mut pending_heredocs = VecDeque::new();
 
     let mut i = from;
     'scan: while i < line.len() {
@@ -202,14 +267,16 @@ fn scan_line(
                 }
                 None => return state,
             },
-            State::KeptComment => match find_close(line, i, block_end, false) {
-                Some(end) => {
+            State::KeptComment(depth) => {
+                let (end, remaining) = scan_block_comment(line, i, *depth, *lang == Language::Rust);
+                if let Some(end) = end {
                     i = end;
                     state = State::Code;
+                } else {
+                    return State::KeptComment(remaining);
                 }
-                None => return state,
-            },
-            State::Heredoc(_) => return state,
+            }
+            State::Heredoc(_) | State::Verbatim => return state,
             State::Code => {
                 let rest = &line[i..];
                 if rest[0] == b'\\' {
@@ -224,14 +291,19 @@ fn scan_line(
                         break;
                     }
                 }
+                // `%` also means modulo in Ruby. Conservatively keeping the
+                // remainder in that case only costs savings, never source data.
+                if *lang == Language::Ruby && rest[0] == b'%' {
+                    return State::Verbatim;
+                }
                 if block_start.is_some_and(|s| rest.starts_with(s)) {
-                    state = State::KeptComment;
+                    state = State::KeptComment(1);
                     i += 2;
                     continue;
                 }
                 if hash_needs_word_start && rest.starts_with(b"<<") {
-                    if let Some((terminator, end)) = heredoc_at(line, i, lang) {
-                        pending_heredoc = Some(terminator);
+                    if let Some((heredoc, end)) = heredoc_at(line, i, lang) {
+                        pending_heredocs.push_back(heredoc);
                         i = end;
                         continue;
                     }
@@ -280,9 +352,10 @@ fn scan_line(
         }
     }
 
-    match (state, pending_heredoc) {
-        (State::Code, Some(terminator)) => State::Heredoc(terminator),
-        (state, _) => state,
+    if state == State::Code && !pending_heredocs.is_empty() {
+        State::Heredoc(pending_heredocs)
+    } else {
+        state
     }
 }
 
@@ -294,6 +367,7 @@ fn find_block_end(
     open_at: usize,
     block_start: &str,
     block_end: &str,
+    nested: bool,
 ) -> Option<(usize, usize)> {
     // Ruby's `=end` only counts at the start of a line.
     if block_start == "=begin" {
@@ -302,14 +376,20 @@ fn find_block_end(
             .position(|l| l.starts_with(block_end))
             .map(|n| (start + 1 + n, lines[start + 1 + n].len()));
     }
-    let close = block_end.as_bytes();
-    let first = lines[start].as_bytes();
-    if let Some(end) = find_close(first, open_at + block_start.len(), close, false) {
-        return Some((start, end));
+    let mut depth = 1;
+    for (index, line) in lines.iter().enumerate().skip(start) {
+        let from = if index == start {
+            open_at + block_start.len()
+        } else {
+            0
+        };
+        let (end, remaining) = scan_block_comment(line.as_bytes(), from, depth, nested);
+        if let Some(end) = end {
+            return Some((index, end));
+        }
+        depth = remaining;
     }
-    lines[start + 1..].iter().enumerate().find_map(|(n, l)| {
-        find_close(l.as_bytes(), 0, close, false).map(|end| (start + 1 + n, end))
-    })
+    None
 }
 
 /// `content` with its whole-line comments removed and runs of blank lines
@@ -360,7 +440,7 @@ pub fn strip_comment_lines(content: &str, lang: &Language) -> String {
                     .is_some_and(|d| trimmed.starts_with(d));
                 if opens && !is_doc && !no_block_end_ahead {
                     let open_at = line.len() - line.trim_start().len();
-                    match find_block_end(&lines, i, open_at, start, end) {
+                    match find_block_end(&lines, i, open_at, start, end, *lang == Language::Rust) {
                         Some((close_line, after_close)) => {
                             let tail = lines[close_line].as_bytes()[after_close..].trim_ascii();
                             if !tail.is_empty() {

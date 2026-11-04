@@ -94,10 +94,11 @@ impl Language {
             },
             Language::Python => CommentPatterns {
                 line: Some("#"),
-                block_start: Some("\"\"\""),
-                block_end: Some("\"\"\""),
+                // `"""` opens a string, not a comment: `SQL = """…"""` is code.
+                block_start: None,
+                block_end: None,
                 doc_line: None,
-                doc_block_start: Some("\"\"\""),
+                doc_block_start: None,
             },
             Language::JavaScript
             | Language::TypeScript
@@ -132,10 +133,12 @@ impl Language {
                 doc_line: None,
                 doc_block_start: None,
             },
+            // An unknown format has no known comment syntax: `.log`, `.output`
+            // and `.conf` lines starting with `//` or `/*` are content.
             Language::Unknown => CommentPatterns {
-                line: Some("//"),
-                block_start: Some("/*"),
-                block_end: Some("*/"),
+                line: None,
+                block_start: None,
+                block_end: None,
                 doc_line: None,
                 doc_block_start: None,
             },
@@ -162,78 +165,11 @@ impl FilterStrategy for NoFilter {
 
 pub struct MinimalFilter;
 
-lazy_static! {
-    static ref MULTIPLE_BLANK_LINES: Regex = Regex::new(r"\n{3,}").unwrap();
-    static ref TRAILING_WHITESPACE: Regex = Regex::new(r"[ \t]+$").unwrap();
-}
-
 impl FilterStrategy for MinimalFilter {
     fn filter(&self, content: &str, lang: &Language) -> String {
-        let patterns = lang.comment_patterns();
-        let mut result = String::with_capacity(content.len());
-        let mut in_block_comment = false;
-        let mut in_docstring = false;
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Handle block comments
-            if let (Some(start), Some(end)) = (patterns.block_start, patterns.block_end) {
-                if !in_docstring
-                    && trimmed.contains(start)
-                    && !trimmed.starts_with(patterns.doc_block_start.unwrap_or("###"))
-                {
-                    in_block_comment = true;
-                }
-                if in_block_comment {
-                    if trimmed.contains(end) {
-                        in_block_comment = false;
-                    }
-                    continue;
-                }
-            }
-
-            // Handle Python docstrings (keep them in minimal mode)
-            if *lang == Language::Python && trimmed.starts_with("\"\"\"") {
-                in_docstring = !in_docstring;
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            if in_docstring {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            // Skip single-line comments (but keep doc comments)
-            if let Some(line_comment) = patterns.line {
-                if trimmed.starts_with(line_comment) {
-                    // Keep doc comments
-                    if let Some(doc) = patterns.doc_line {
-                        if trimmed.starts_with(doc) {
-                            result.push_str(line);
-                            result.push('\n');
-                        }
-                    }
-                    continue;
-                }
-            }
-
-            // Skip empty lines at this point, we'll normalize later
-            if trimmed.is_empty() {
-                result.push('\n');
-                continue;
-            }
-
-            result.push_str(line);
-            result.push('\n');
-        }
-
-        // Normalize multiple blank lines to max 2
-        let result = MULTIPLE_BLANK_LINES.replace_all(&result, "\n\n");
-        result.trim().to_string()
+        let result = crate::core::comments::strip_comment_lines(content, lang);
+        // Blank lines only at the start: the first line's indentation is content.
+        result.trim_start_matches('\n').trim_end().to_string()
     }
 }
 

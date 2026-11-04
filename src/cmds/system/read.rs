@@ -128,12 +128,24 @@ pub fn run(
             file.display()
         ));
     }
-    timer.track(
-        &format!("cat {}", file.display()),
-        "bdo read",
-        &content,
-        &rtk_output,
-    );
+    if explicit_window {
+        // `head -N` and `tail -N` print this much without bdo: nothing was saved.
+        // Comparing against the whole file would credit bdo for what was asked.
+        let tool = if max_lines.is_some() { "head" } else { "tail" };
+        timer.track(
+            &format!("{tool} {}", file.display()),
+            "bdo read",
+            &rtk_output,
+            &rtk_output,
+        );
+    } else {
+        timer.track(
+            &format!("cat {}", file.display()),
+            "bdo read",
+            &content,
+            &rtk_output,
+        );
+    }
     Ok(())
 }
 
@@ -353,7 +365,13 @@ pub fn run_stdin(
     };
     print!("{}", rtk_output);
 
-    timer.track("cat - (stdin)", "bdo read -", &content, &rtk_output);
+    // As in `run`: a line window is what was asked for, not a saving.
+    let baseline = if max_lines.is_some() || tail_lines.is_some() {
+        &rtk_output
+    } else {
+        &content
+    };
+    timer.track("cat - (stdin)", "bdo read -", baseline, &rtk_output);
     Ok(())
 }
 

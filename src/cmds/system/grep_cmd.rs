@@ -1,4 +1,4 @@
-//! Filters grep output by grouping matches by file.
+//! Filters grep output: matches grouped under their file, long lines cut, results capped.
 
 use crate::core::config;
 use crate::core::stream::exec_capture;
@@ -110,9 +110,9 @@ pub fn run(
         return Ok(exit_code);
     }
 
-    // Always filter: truncate long lines, apply per-file and global caps.
-    // Output in standard file:line:content format that AI agents can parse.
-    // (A passthrough approach yields 0% savings — no reason for Bushido to exist on that path.)
+    // Always filter: truncate long lines, apply per-file and global caps, and
+    // print each path once. (A passthrough approach yields 0% savings — no reason
+    // for Bushido to exist on that path.)
     let total_matches = result.stdout.lines().count();
 
     let context_re = if context_only {
@@ -130,45 +130,13 @@ pub fn run(
         by_file.entry(file).or_default().push((line_num, cleaned));
     }
 
-    let mut rtk_output = String::new();
-    rtk_output.push_str(&format!(
-        "{} matches in {} files:\n\n",
-        total_matches,
-        by_file.len()
-    ));
-
-    let mut shown = 0;
-    let mut files: Vec<_> = by_file.iter().collect();
-    files.sort_by_key(|(f, _)| *f);
-
     // `--all` arrives as max_results == usize::MAX; lift the per-file cap too.
     let per_file = if max_results == usize::MAX {
         usize::MAX
     } else {
         config::limits().grep_max_per_file
     };
-    for (file, matches) in files {
-        if shown >= max_results {
-            break;
-        }
-
-        let file_display = compact_path(file);
-        for (line_num, content) in matches.iter().take(per_file) {
-            if shown >= max_results {
-                break;
-            }
-            rtk_output.push_str(&format!("{}:{}:{}\n", file_display, line_num, content));
-            shown += 1;
-        }
-    }
-
-    if total_matches > shown {
-        // Show the omitted count AND how to recover them — never drop matches silently.
-        rtk_output.push_str(&format!(
-            "[+{} more — use --all to show every match]\n",
-            total_matches - shown
-        ));
-    }
+    let rtk_output = format_matches(&by_file, total_matches, max_results, per_file);
 
     print!("{}", rtk_output);
     timer.track(
@@ -385,22 +353,53 @@ fn clean_line(line: &str, max_len: usize, context_re: Option<&Regex>, pattern: &
     }
 }
 
-fn compact_path(path: &str) -> String {
-    if path.len() <= 50 {
-        return path.to_string();
+/// Matches grouped under their file, so a path is paid for once however many
+/// lines it has:
+///
+/// ```text
+/// src/a.rs
+/// 12:fn first()
+/// 40:fn second()
+/// src/b.rs
+/// 7:fn third()
+/// ```
+///
+/// A path line has no `N:` prefix, which is what tells the two apart. Paths are
+/// printed whole: they are what the reader opens next.
+fn format_matches(
+    by_file: &HashMap<String, Vec<(usize, String)>>,
+    total_matches: usize,
+    max_results: usize,
+    per_file: usize,
+) -> String {
+    let mut out = String::new();
+    let mut shown = 0;
+    let mut files: Vec<_> = by_file.iter().collect();
+    files.sort_by_key(|(f, _)| *f);
+
+    for (file, matches) in files {
+        if shown >= max_results {
+            break;
+        }
+        out.push_str(file);
+        out.push('\n');
+        for (line_num, content) in matches.iter().take(per_file) {
+            if shown >= max_results {
+                break;
+            }
+            out.push_str(&format!("{}:{}\n", line_num, content));
+            shown += 1;
+        }
     }
 
-    let parts: Vec<&str> = path.split('/').collect();
-    if parts.len() <= 3 {
-        return path.to_string();
+    if total_matches > shown {
+        // Show the omitted count AND how to recover them — never drop matches silently.
+        out.push_str(&format!(
+            "[+{} more — use --all to show every match]\n",
+            total_matches - shown
+        ));
     }
-
-    format!(
-        "{}/.../{}/{}",
-        parts[0],
-        parts[parts.len() - 2],
-        parts[parts.len() - 1]
-    )
+    out
 }
 
 #[cfg(test)]
@@ -415,11 +414,53 @@ mod tests {
         assert!(cleaned.len() <= 50);
     }
 
+    fn matches(entries: &[(&str, &[usize])]) -> HashMap<String, Vec<(usize, String)>> {
+        entries
+            .iter()
+            .map(|(file, lines)| {
+                let found = lines.iter().map(|n| (*n, format!("line {n}"))).collect();
+                (file.to_string(), found)
+            })
+            .collect()
+    }
+
     #[test]
-    fn test_compact_path() {
-        let path = "/Users/patrick/dev/project/src/components/Button.tsx";
-        let compact = compact_path(path);
-        assert!(compact.len() <= 60);
+    fn test_format_prints_each_path_once_and_sorted() {
+        let by_file = matches(&[("src/b.rs", &[7]), ("src/a.rs", &[12, 40])]);
+        assert_eq!(
+            format_matches(&by_file, 3, 200, 25),
+            "src/a.rs\n12:line 12\n40:line 40\nsrc/b.rs\n7:line 7\n"
+        );
+    }
+
+    #[test]
+    fn test_format_is_never_longer_than_flat_grep_output() {
+        // The worst case for grouping is one match per file: `:` becomes `\n`.
+        let by_file = matches(&[("a.rs", &[1]), ("b.rs", &[2]), ("c.rs", &[3])]);
+        let flat = "a.rs:1:line 1\nb.rs:2:line 2\nc.rs:3:line 3\n";
+        assert_eq!(format_matches(&by_file, 3, 200, 25).len(), flat.len());
+    }
+
+    #[test]
+    fn test_format_keeps_long_paths_whole() {
+        let path = "/Users/patrick/dev/project/src/components/deeply/nested/Button.tsx";
+        let by_file = matches(&[(path, &[1])]);
+        assert!(format_matches(&by_file, 1, 200, 25).starts_with(path));
+    }
+
+    #[test]
+    fn test_format_reports_what_the_caps_omit() {
+        let by_file = matches(&[("a.rs", &[1, 2, 3]), ("b.rs", &[4])]);
+        // Per-file cap of 2 hides one match in a.rs.
+        assert_eq!(
+            format_matches(&by_file, 4, 200, 2),
+            "a.rs\n1:line 1\n2:line 2\nb.rs\n4:line 4\n[+1 more — use --all to show every match]\n"
+        );
+        // Global cap of 2 stops before b.rs, and prints no empty heading for it.
+        assert_eq!(
+            format_matches(&by_file, 4, 2, 25),
+            "a.rs\n1:line 1\n2:line 2\n[+2 more — use --all to show every match]\n"
+        );
     }
 
     #[test]

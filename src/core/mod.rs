@@ -2,6 +2,7 @@
 
 pub mod args_utils;
 pub mod changes;
+pub mod comments;
 pub mod config;
 pub mod constants;
 pub mod display_helpers;

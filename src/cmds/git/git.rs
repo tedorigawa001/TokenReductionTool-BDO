@@ -30,7 +30,21 @@ pub enum GitCommand {
 
 /// Create a git Command with global options (e.g. -C, -c, --git-dir, --work-tree)
 /// prepended before any subcommand arguments.
+///
+/// Paths print as they are rather than as `"\\346\\227\\245.txt"`, git's default for
+/// non-ASCII names, which the reader could not open. A `-c` the user passed comes
+/// later and still wins.
 fn git_cmd(global_args: &[String]) -> Command {
+    let mut cmd = resolved_command("git");
+    cmd.args(["-c", "core.quotepath=false"]);
+    for arg in global_args {
+        cmd.arg(arg);
+    }
+    cmd
+}
+
+/// A git Command for output that is passed through untouched.
+fn unfiltered_git_cmd(global_args: &[String]) -> Command {
     let mut cmd = resolved_command("git");
     for arg in global_args {
         cmd.arg(arg);
@@ -423,6 +437,13 @@ fn run_log(
     verbose: u8,
     global_args: &[String],
 ) -> Result<i32> {
+    // The summary below keeps a few lines per commit, which would cut a patch off.
+    if log_shows_changes(args) {
+        let mut full: Vec<std::ffi::OsString> = vec!["log".into()];
+        full.extend(args.iter().map(Into::into));
+        return run_passthrough(&full, global_args, verbose);
+    }
+
     let timer = tracking::TimedExecution::start();
 
     let mut cmd = git_cmd(global_args);
@@ -500,6 +521,29 @@ fn run_log(
     );
 
     Ok(0)
+}
+
+/// `git log` options asking for each commit's changes, not just its message.
+fn log_shows_changes(args: &[String]) -> bool {
+    args.iter().take_while(|arg| *arg != "--").any(|arg| {
+        matches!(
+            arg.as_str(),
+            "-p" | "-u"
+                | "--patch"
+                | "--patch-with-stat"
+                | "--patch-with-raw"
+                | "--cc"
+                | "--stat"
+                | "--shortstat"
+                | "--numstat"
+                | "--summary"
+                | "--name-only"
+                | "--name-status"
+                | "--raw"
+        ) || arg.starts_with("--stat=")
+            || arg.starts_with("-L")
+            || arg.starts_with("--dirstat")
+    })
 }
 
 /// `-n20`, the attached form of `-n 20`.
@@ -1068,13 +1112,11 @@ fn run_commit(args: &[String], verbose: u8, global_args: &[String]) -> Result<i3
 
         timer.track(&original_cmd, "bdo git commit", &raw_output, &compact);
     } else if stderr.contains("nothing to commit") || stdout.contains("nothing to commit") {
-        println!("ok (nothing to commit)");
-        timer.track(
-            &original_cmd,
-            "bdo git commit",
-            &raw_output,
-            "ok (nothing to commit)",
-        );
+        // Short, but still git's failure: `git commit && git push` must stop here.
+        let message = "nothing to commit";
+        println!("{message}");
+        timer.track(&original_cmd, "bdo git commit", &raw_output, message);
+        return Ok(exit_code);
     } else {
         if !stderr.trim().is_empty() {
             eprint!("{}", stderr);
@@ -1612,8 +1654,11 @@ fn run_stash(
                 msg
             } else {
                 eprintln!("FAILED: git stash {}", sub);
-                if !result.stderr.trim().is_empty() {
-                    eprintln!("{}", result.stderr);
+                // git reports a merge conflict on stdout.
+                for stream in [&result.stdout, &result.stderr] {
+                    if !stream.trim().is_empty() {
+                        eprintln!("{}", stream.trim_end());
+                    }
                 }
                 combined.clone()
             };
@@ -1654,8 +1699,11 @@ fn run_stash(
                 msg
             } else {
                 eprintln!("FAILED: git stash {}", sub);
-                if !result.stderr.trim().is_empty() {
-                    eprintln!("{}", result.stderr);
+                // git reports a merge conflict on stdout.
+                for stream in [&result.stdout, &result.stderr] {
+                    if !stream.trim().is_empty() {
+                        eprintln!("{}", stream.trim_end());
+                    }
                 }
                 combined.clone()
             };
@@ -1790,7 +1838,7 @@ pub fn run_passthrough(args: &[OsString], global_args: &[String], verbose: u8) -
     if verbose > 0 {
         eprintln!("git passthrough: {:?}", args);
     }
-    let status = git_cmd(global_args)
+    let status = unfiltered_git_cmd(global_args)
         .args(args)
         .status()
         .context("Failed to run git")?;

@@ -53,3 +53,42 @@ fn comments_are_still_removed() {
         "fn main() {}\nfn other() {}\n"
     );
 }
+
+/// `head -N` prints this much without bdo, so it must not count as a saving.
+#[test]
+fn a_line_window_is_not_recorded_as_a_saving() {
+    let dir = tempfile::tempdir().unwrap();
+    // Canonical: bdo refuses a tracking database behind a symlink, which is what
+    // the temp directory is on macOS.
+    let root = dir.path().canonicalize().unwrap();
+    let file = root.join("big.csv");
+    fs::write(&file, "a,b,c\n".repeat(5000)).unwrap();
+    let db = root.join("track.db");
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_bdo"))
+            .arg("read")
+            .args(args)
+            .arg(&file)
+            .env("BDO_DB_PATH", &db)
+            .env("BDO_TELEMETRY_DISABLED", "1")
+            .env_remove("BDO_RAW")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    };
+    run(&["-m", "3"]);
+    run(&["--tail-lines", "3"]);
+
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let rows: Vec<(String, i64)> = conn
+        .prepare("SELECT original_cmd, saved_tokens FROM commands ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].0.starts_with("head "), "{:?}", rows[0]);
+    assert!(rows[1].0.starts_with("tail "), "{:?}", rows[1]);
+    assert_eq!((rows[0].1, rows[1].1), (0, 0));
+}

@@ -61,7 +61,7 @@ Ces drapeaux s'appliquent a **toutes** les sous-commandes :
 ```bash
 bdo -v git status          # Status compact + details de filtrage sur stderr
 bdo -vvv cargo test        # Verbosite maximale (debug)
-bdo -u git log             # Log ultra-compact, icones ASCII
+bdo --ultra-compact git log # Log ultra-compact, icones ASCII
 bdo --skip-env next build  # Desactive la validation d'env de Next.js
 ```
 

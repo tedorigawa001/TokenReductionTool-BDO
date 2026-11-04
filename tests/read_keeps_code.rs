@@ -149,3 +149,80 @@ fn a_line_window_is_not_recorded_as_a_saving() {
     assert!(rows[1].0.starts_with("tail "), "{:?}", rows[1]);
     assert_eq!((rows[0].1, rows[1].1), (0, 0));
 }
+
+fn bdo_read(args: &[&str], name: &str, source: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(name);
+    fs::write(&file, source).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_bdo"))
+        .arg("read")
+        .args(args)
+        .arg(&file)
+        .env("BDO_DB_PATH", dir.path().join("track.db"))
+        .env("BDO_TELEMETRY_DISABLED", "1")
+        .env_remove("BDO_RAW")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+const NUMBERED_SOURCE: &str = "const a = 1;\n\n\n\n// comment\nconst b = 2;\nconst c = 3;\n";
+
+/// `cat -n` is rewritten to `bdo read -n`. Numbering what is left after removing
+/// comments sent every later reference to the wrong line.
+#[test]
+fn line_numbers_are_the_files() {
+    assert_eq!(
+        bdo_read(&["-n"], "a.ts", NUMBERED_SOURCE),
+        "1 │ const a = 1;\n2 │ \n3 │ \n4 │ \n5 │ // comment\n6 │ const b = 2;\n7 │ const c = 3;\n"
+    );
+}
+
+#[test]
+fn line_numbers_follow_a_window() {
+    assert_eq!(
+        bdo_read(&["-n", "--tail-lines", "2"], "a.ts", NUMBERED_SOURCE),
+        "6 │ const b = 2;\n7 │ const c = 3;\n"
+    );
+    // The marker is not a line of the file, so it gets no number.
+    assert_eq!(
+        bdo_read(&["-n", "-m", "1"], "a.ts", NUMBERED_SOURCE),
+        "1 │ const a = 1;\n[6 more lines]\n"
+    );
+    assert_eq!(bdo_read(&["-n", "-m", "0"], "a.ts", NUMBERED_SOURCE), "");
+}
+
+#[test]
+fn a_level_that_rewrites_lines_shows_no_numbers() {
+    let out = bdo_read(&["-n", "-l", "aggressive"], "a.rs", "const A: u8 = 1;\n");
+    assert!(!out.contains('│'), "{out}");
+    assert!(out.contains("const A: u8 = 1;"), "{out}");
+}
+
+#[test]
+fn line_numbers_work_on_stdin() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_bdo"))
+        .args(["read", "-n", "-"])
+        .env("BDO_DB_PATH", dir.path().join("track.db"))
+        .env("BDO_TELEMETRY_DISABLED", "1")
+        .env_remove("BDO_RAW")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"a\n\n\n\nb\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "1 │ a\n2 │ \n3 │ \n4 │ \n5 │ b\n"
+    );
+}

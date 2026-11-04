@@ -31,6 +31,12 @@ pub fn run(
     }
 
     if should_stream(file) {
+        if line_numbers {
+            crate::core::quiet::note(format_args!(
+                "bdo: {}: too large to number lines; showing them without numbers",
+                file.display()
+            ));
+        }
         stream_unfiltered(file, max_lines, tail_lines)?;
         timer.track_passthrough(
             &format!("cat {}", file.display()),
@@ -42,6 +48,19 @@ pub fn run(
     // Read file content
     let content = fs::read_to_string(file)
         .with_context(|| format!("Failed to read file: {}", file.display()))?;
+
+    if line_numbers && can_number_lines(level) {
+        let output = numbered_lines(&content, max_lines, tail_lines);
+        print!("{}", output);
+        // `cat -n` prints this much without bdo: nothing was saved.
+        timer.track(
+            &format!("cat -n {}", file.display()),
+            "bdo read",
+            &output,
+            &output,
+        );
+        return Ok(());
+    }
 
     // Detect language from extension
     let lang = file
@@ -101,11 +120,13 @@ pub fn run(
         (out, changed, summarized)
     };
 
-    let rtk_output = if line_numbers {
-        format_with_line_numbers(&body)
-    } else {
-        body
-    };
+    if line_numbers {
+        crate::core::quiet::note(format_args!(
+            "bdo: {}: no line numbers at level {level}: its lines are not the file's",
+            file.display()
+        ));
+    }
+    let rtk_output = body;
     print!("{}", rtk_output);
 
     // `cat`/`head` are often run to get exact bytes. When the shown content is a
@@ -331,6 +352,13 @@ pub fn run_stdin(
         .read_to_string(&mut content)
         .context("Failed to read from stdin")?;
 
+    if line_numbers && can_number_lines(level) {
+        let output = numbered_lines(&content, max_lines, tail_lines);
+        print!("{}", output);
+        timer.track("cat -n - (stdin)", "bdo read -", &output, &output);
+        return Ok(());
+    }
+
     // No file extension, so use Unknown language
     let lang = Language::Unknown;
 
@@ -358,11 +386,12 @@ pub fn run_stdin(
 
     filtered = apply_line_window(&filtered, level, max_lines, tail_lines, &lang);
 
-    let rtk_output = if line_numbers {
-        format_with_line_numbers(&filtered)
-    } else {
-        filtered.clone()
-    };
+    if line_numbers {
+        crate::core::quiet::note(format_args!(
+            "bdo: stdin: no line numbers at level {level}: its lines are not the input's"
+        ));
+    }
+    let rtk_output = filtered;
     print!("{}", rtk_output);
 
     // As in `run`: a line window is what was asked for, not a saving.
@@ -375,12 +404,39 @@ pub fn run_stdin(
     Ok(())
 }
 
-fn format_with_line_numbers(content: &str) -> String {
+/// Whether `level` can show lines under their real numbers: it either keeps the
+/// file as it is, or `-n` can bypass it without changing what was asked for.
+fn can_number_lines(level: FilterLevel) -> bool {
+    matches!(
+        level,
+        FilterLevel::Auto | FilterLevel::Minimal | FilterLevel::None
+    )
+}
+
+/// The lines of `content`, or of its `-m` / `--tail-lines` window, each under its
+/// number in the file. `cat -n` is asked for when line numbers are about to be
+/// used, so this is the unfiltered text: numbering what is left after removing
+/// comments would point every later reference at the wrong line.
+fn numbered_lines(content: &str, max_lines: Option<usize>, tail_lines: Option<usize>) -> String {
     let lines: Vec<&str> = content.lines().collect();
-    let width = lines.len().to_string().len();
+    let total = lines.len();
+    let (start, end) = match (max_lines, tail_lines) {
+        (_, Some(n)) => (total.saturating_sub(n), total),
+        (Some(n), None) => (0, n.min(total)),
+        (None, None) => (0, total),
+    };
+    let width = end.to_string().len();
     let mut out = String::new();
-    for (i, line) in lines.iter().enumerate() {
-        out.push_str(&format!("{:>width$} │ {}\n", i + 1, line, width = width));
+    for (i, line) in lines[start..end].iter().enumerate() {
+        out.push_str(&format!(
+            "{:>width$} │ {}\n",
+            start + i + 1,
+            line,
+            width = width
+        ));
+    }
+    if end < total && end > 0 {
+        out.push_str(&format!("[{} more lines]\n", total - end));
     }
     out
 }

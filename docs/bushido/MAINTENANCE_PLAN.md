@@ -626,3 +626,26 @@ Allow と判定したものを記録用の偽 `git`/`canary` だけの PATH で�
   `.log` だけで約1,145万トークンの見かけの削減）。削減ゼロとして記録する。コマンド別の
   率は実行ごとの単純平均をやめ、総量ベース（列名も `Saved%`）に。
   過去の記録は行数指定か判別できず修正不可、90日の保持期間で自然に消える。
+
+### 2026-11-04 — テスト網羅の点検（カバレッジ計測）
+
+`cargo test` を `-C instrument-coverage` で計測。本番コードのみ（`#[cfg(test)] mod tests`
+を除く）で 59.6% → 65.7%、未実行の実行入口（`run` 系）は 141 中 123 → 100。テストの
+穴を実際に試すと、バグが出た。
+
+- **修正**: `cat -n` の行番号ずれ、`git log` の省略に告知なし、`git log -p` の差分消失、
+  `git stash pop` の衝突理由の消失、`git commit`（変更なし）の終了コード 0、日本語
+  ファイル名の文字化け、`bdo env` の URL 内パスワード平文、`read -l aggressive` の行落ち、
+  Gemini の `tools.exclude` 未読み込み（Gemini CLI 実機では未確認）。
+- **追加**: `tests/hook_agents.rs`、`trust_and_integrity.rs`、`git_commands.rs`、
+  `gh_commands.rs`（偽の gh）、`git_log_notice.rs`、`env_masking.rs`。安全装置を本体側で
+  わざと壊す10通りは、すべてこれらのテストが検出した（手動で実施、CI には未収録）。
+- **CI**: `scripts/test-all.sh` は 11 件古くなっていたので修正し、`Smoke tests` ジョブで
+  実行。外部サイトが要る確認は `BDO_SMOKE_OFFLINE` で飛ばす。
+- **環境を空にするテストと計測**: `env_clear` は `LLVM_PROFILE_FILE` も消すので、集計から
+  漏れて作業ディレクトリに profraw を残す。テスト側で引き継いでいる。
+- **未解決**: 計測ビルドで1度だけ5件失敗し、再現しなかった（ログを消しており原因不明）。
+  通常実行では6回連続で全件成功。
+- **残り**: `gh_cmd.rs` 67.5%、`main.rs` 44.5%。`ls`、`wget`、`stale`、`deps`、`summary`、
+  `gain` は未着手。Windows は計測対象外で、`HOME` を差し替えるテストは Unix のみ。
+

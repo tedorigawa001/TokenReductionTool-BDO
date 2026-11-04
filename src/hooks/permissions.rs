@@ -291,14 +291,24 @@ fn gemini_settings() -> Option<Value> {
 }
 
 fn load_gemini_rules() -> (Vec<String>, Vec<String>, Vec<String>) {
+    let mut deny = Vec::new();
     let mut ask = Vec::new();
     let mut allow = Vec::new();
     let shells = ["run_shell_command(", "ShellTool("];
-    if let Some(tools) = gemini_settings().as_ref().and_then(|j| j.get("tools")) {
+    let settings = gemini_settings();
+    // The hook's rewrite puts `BDO_AGENT=gemini bdo` in front of the command, which
+    // the host's blocklist would no longer match, so bdo has to apply it itself.
+    append_wrapped_rules(
+        settings.as_ref().and_then(|j| j.get("excludeTools")),
+        &shells,
+        &mut deny,
+    );
+    if let Some(tools) = settings.as_ref().and_then(|j| j.get("tools")) {
+        append_wrapped_rules(tools.get("exclude"), &shells, &mut deny);
         append_wrapped_rules(tools.get("allowed"), &shells, &mut allow);
         append_wrapped_rules(tools.get("confirmationRequired"), &shells, &mut ask);
     }
-    (Vec::new(), ask, allow)
+    (deny, ask, allow)
 }
 
 /// Locate the project root by walking up from CWD looking for `.claude/`.

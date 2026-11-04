@@ -178,6 +178,17 @@ fn ls_recursive_does_not_list_inside_what_it_hid() {
 }
 
 #[test]
+fn ls_does_not_hide_another_explicit_directory_with_the_same_name() {
+    let d = Dir::new();
+    d.dir("a/build").file("b/build/important.txt", "keep me");
+    for args in [vec!["ls", "a", "b/build"], vec!["ls", "-R", "a", "b/build"]] {
+        let out = d.ok(&args);
+        assert!(out.contains("a:\n[hidden: build/"), "{out}");
+        assert!(out.contains("b/build:\nimportant.txt  7B"), "{out}");
+    }
+}
+
+#[test]
 fn ls_classify_flags_do_not_double_the_slash() {
     let d = Dir::new();
     d.dir("sub").dir("target");
@@ -473,6 +484,20 @@ fn summary_adds_up_the_totals_of_every_test_binary() {
     assert!(out.contains("[ok] 7 passed"), "{out}");
     assert!(out.contains("[FAIL] 2 failed"), "{out}");
     assert!(out.contains("skip 1 skipped"), "{out}");
+}
+
+#[test]
+fn summary_does_not_add_suite_totals_to_test_totals() {
+    for suite in ["Test Files", "Test Suites:"] {
+        let (out, code) = summary(&format!(
+            "echo '{suite} 1 failed | 3 passed | 1 skipped (5)'; \
+             echo 'Tests 1 failed | 2 passed | 4 skipped (7)'; exit 1"
+        ));
+        assert_eq!(code, 1);
+        assert!(out.contains("[ok] 2 passed"), "{out}");
+        assert!(out.contains("[FAIL] 1 failed"), "{out}");
+        assert!(out.contains("skip 4 skipped"), "{out}");
+    }
 }
 
 #[test]

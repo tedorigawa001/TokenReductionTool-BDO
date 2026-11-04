@@ -24,7 +24,7 @@ const MAX_FAILURE_LINES: usize = 10;
 /// what it found, which is nothing: "No issues found", with the error gone. So if
 /// a failed command's message appears nowhere in what is shown, this returns the
 /// end of it. The message is stderr if the command wrote any. A filter that got
-/// structured output has read it, and reports it in its own words.
+/// structured output reports it in its own words; stderr still needs checking.
 pub fn failure_evidence(stdout: &str, stderr: &str, shown: &str, exit_code: i32) -> Option<String> {
     if exit_code == 0 {
         return None;
@@ -42,12 +42,12 @@ pub fn failure_evidence(stdout: &str, stderr: &str, shown: &str, exit_code: i32)
             "[bdo] the command failed (exit {exit_code}) and printed nothing"
         ));
     }
-    if out_lines
-        .iter()
-        .any(|l| l.starts_with('{') || l.starts_with('['))
-    {
-        return None;
-    }
+    // A bracketed log prefix is not JSON. Only exempt a complete JSON object
+    // or array, and do not let it hide a separate failure reported on stderr.
+    let structured = matches!(
+        serde_json::from_str::<serde_json::Value>(&out_lines.join("\n")),
+        Ok(serde_json::Value::Object(_) | serde_json::Value::Array(_))
+    );
     // Compared by their start, since filters shorten long lines.
     let is_shown = |line: &String| {
         let end = line.char_indices().nth(40).map_or(line.len(), |(i, _)| i);
@@ -56,7 +56,7 @@ pub fn failure_evidence(stdout: &str, stderr: &str, shown: &str, exit_code: i32)
     if err_lines.iter().any(is_shown) {
         return None;
     }
-    let lines = if out_lines.iter().any(is_shown) {
+    let lines = if structured || out_lines.iter().any(is_shown) {
         // The filter read stdout, so stderr only matters where it reports an
         // error. The rest is progress, such as cargo's `Compiling`.
         err_lines

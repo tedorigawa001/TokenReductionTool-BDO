@@ -23,6 +23,7 @@ lazy_static! {
     static ref PASSED_COUNT_RE: Regex = Regex::new(r"(\d+)\s*passed").unwrap();
     static ref FAILED_COUNT_RE: Regex = Regex::new(r"(\d+)\s*failed").unwrap();
     static ref SKIPPED_COUNT_RE: Regex = Regex::new(r"(\d+)\s*(?:skipped|ignored)").unwrap();
+    static ref SUITE_TOTAL_RE: Regex = Regex::new(r"^\s*test (?:files|suites)\b").unwrap();
     static ref PASS_WORD_RE: Regex = Regex::new(r"\b(?:ok|passed)\b|✓").unwrap();
     static ref FAIL_WORD_RE: Regex = Regex::new(r"\b(?:fail|failed|failure|failures)\b|\[x\]|✗").unwrap();
     static ref NO_ERRORS_RE: Regex = Regex::new(r"\b0 errors?\b").unwrap();
@@ -165,6 +166,14 @@ fn summarize_tests(output: &str, result: &mut Vec<String>) {
 
     for line in output.lines() {
         let lower = line.to_lowercase();
+        // Vitest and Jest print file/suite totals as well as test totals.
+        // Keep a failed suite as evidence, but never add its counts to tests.
+        if SUITE_TOTAL_RE.is_match(&lower) {
+            if captured_count(&FAILED_COUNT_RE, &lower).unwrap_or(0) > 0 {
+                failures.push(line);
+            }
+            continue;
+        }
         if let Some(n) = captured_count(&PASSED_COUNT_RE, &lower) {
             passed = Some(passed.unwrap_or(0) + n);
         } else if PASS_WORD_RE.is_match(&lower) {

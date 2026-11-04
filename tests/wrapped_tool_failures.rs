@@ -201,6 +201,20 @@ fn a_failure_on_stdout_is_never_hidden() {
     assert_eq!(hidden, Vec::<String>::new());
 }
 
+#[test]
+fn bracketed_logs_do_not_hide_a_failure() {
+    let env = Env::new();
+    for stdout in [
+        "[ERROR] broken configuration",
+        "{broken configuration}",
+        "Starting compiler\n[INFO] loading config\nbroken configuration",
+    ] {
+        let out = env.bdo(&["tsc", "--noEmit"], 3, stdout, "");
+        assert_eq!(out.status.code(), Some(3));
+        assert!(shown(&out).contains("broken configuration"), "{out:?}");
+    }
+}
+
 /// With nothing to quote, the failure itself still has to be stated. The exit code
 /// alone does not reach a reader of the output.
 #[test]
@@ -274,6 +288,17 @@ fn no_note_when_the_filter_read_structured_output() {
     let text = shown(&out);
     assert!(text.contains("no-undef"), "{text}");
     assert!(!text.contains("the command failed"), "{text}");
+}
+
+#[test]
+fn structured_stdout_does_not_hide_a_separate_stderr_failure() {
+    let env = Env::new();
+    let out = env.bdo(&["lint", "a.js"], 3, "[]", "fatal: broken configuration");
+    assert_eq!(out.status.code(), Some(3));
+    assert!(
+        shown(&out).contains("fatal: broken configuration"),
+        "{out:?}"
+    );
 }
 
 #[test]

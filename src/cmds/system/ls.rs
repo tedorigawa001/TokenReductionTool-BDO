@@ -8,6 +8,7 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::IsTerminal;
+use std::path::{Component, Path, PathBuf};
 
 lazy_static! {
     /// Matches the date+time portion in `ls -la` output, which serves as a
@@ -213,6 +214,13 @@ fn is_dotdir(line: &str) -> bool {
     line.split_whitespace().next_back().is_some_and(is_dot_entry)
 }
 
+/// `ls -R` may spell the same path as `target` or `./target`.
+fn listing_path(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect()
+}
+
 /// One directory's entries. `ls` prints a `name:` header per directory when it
 /// lists several, and entries mean nothing without it.
 #[derive(Default)]
@@ -321,7 +329,7 @@ fn compact_ls(
     use std::collections::{HashMap, HashSet};
 
     let mut sections = vec![Section::default()];
-    let mut hidden_dirs: HashSet<String> = HashSet::new();
+    let mut hidden_dirs: HashSet<PathBuf> = HashSet::new();
     let mut skipping = false;
     let mut by_ext: HashMap<String, usize> = HashMap::new();
     let mut lines_seen: usize = 0;
@@ -336,7 +344,8 @@ fn compact_ls(
         let Some((file_type, perms, size, name)) = parse_ls_line(line) else {
             if let Some(header) = line.strip_suffix(':') {
                 // `-R` goes on to list what was just reported as hidden.
-                skipping = header.split('/').any(|part| hidden_dirs.contains(part));
+                let path = listing_path(Path::new(header));
+                skipping = path.ancestors().any(|parent| hidden_dirs.contains(parent));
                 if !skipping {
                     sections.push(Section {
                         header: Some(header.to_string()),
@@ -384,7 +393,8 @@ fn compact_ls(
         if !show_all && noise {
             if is_dir {
                 section.hidden.push(format!("{}/", name));
-                hidden_dirs.insert(name);
+                let parent = section.header.as_deref().unwrap_or(".");
+                hidden_dirs.insert(listing_path(&Path::new(parent).join(name)));
             } else {
                 section.hidden.push(name);
             }

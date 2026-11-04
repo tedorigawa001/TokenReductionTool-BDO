@@ -270,11 +270,7 @@ pub fn run(
                 println!("──────────────────────────────────────────────────────────");
                 for rec in recent {
                     let time = rec.timestamp.with_timezone(&Local).format("%m-%d %H:%M");
-                    let cmd_short = if rec.rtk_cmd.len() > 25 {
-                        format!("{}...", &rec.rtk_cmd[..22])
-                    } else {
-                        rec.rtk_cmd.clone()
-                    };
+                    let cmd_short = truncate_for_column(&rec.rtk_cmd, 25);
                     // added: tier indicators by savings level
                     let sign = if rec.savings_pct >= 70.0 {
                         "▲"
@@ -284,7 +280,7 @@ pub fn run(
                         "•"
                     };
                     println!(
-                        "{} {} {:<25} -{:.0}% ({})",
+                        "{} {} {} -{:.0}% ({})",
                         time,
                         sign,
                         cmd_short,
@@ -594,6 +590,25 @@ fn export_csv(
     all: bool,
     project_scope: Option<&str>, // added: project scope
 ) -> Result<()> {
+    // Without a period there is still the summary, as in the JSON export.
+    if !(all || daily || weekly || monthly) {
+        let summary = tracker
+            .get_summary_filtered(project_scope)
+            .context("Failed to load token savings summary from database")?;
+        println!("commands,input_tokens,output_tokens,saved_tokens,savings_pct,total_time_ms,avg_time_ms");
+        println!(
+            "{},{},{},{},{:.2},{},{}",
+            summary.total_commands,
+            summary.total_input,
+            summary.total_output,
+            summary.total_saved,
+            summary.avg_savings_pct,
+            summary.total_time_ms,
+            summary.avg_time_ms
+        );
+        return Ok(());
+    }
+
     if all || daily {
         let days = tracker.get_all_days_filtered(project_scope)?; // changed: use filtered
         println!("# Daily Data");

@@ -2,6 +2,15 @@ use crate::core::stream::exec_capture;
 use crate::core::tracking;
 use crate::core::utils::resolved_command;
 use anyhow::Result;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    // Where wget and BusyBox state a server's answer. A bare number will not do:
+    // `500` also appears in host names, paths, sizes and ports.
+    static ref HTTP_STATUS_RE: Regex =
+        Regex::new(r"(?:\bERROR |awaiting response\.\.\. |HTTP/\d(?:\.\d)? )(\d{3})\b").unwrap();
+}
 
 /// Compact wget - strips progress bars, shows only result
 pub fn run(url: &str, args: &[String], verbose: u8) -> Result<i32> {
@@ -20,7 +29,7 @@ pub fn run(url: &str, args: &[String], verbose: u8) -> Result<i32> {
     }
     cmd_args.push(url);
 
-    let mut cmd = resolved_command("wget");
+    let mut cmd = untranslated_wget();
     cmd.args(&cmd_args);
     let result = exec_capture(&mut cmd)?;
 
@@ -56,13 +65,14 @@ pub fn run_stdout(url: &str, args: &[String], verbose: u8) -> Result<i32> {
         eprintln!("wget: {} -> stdout", url);
     }
 
-    let mut cmd_args = vec!["-q", "-O", "-"];
+    // Not `-q`: it would silence the error message this reports on failure.
+    let mut cmd_args = vec!["-O", "-"];
     for arg in args {
         cmd_args.push(arg);
     }
     cmd_args.push(url);
 
-    let mut cmd = resolved_command("wget");
+    let mut cmd = untranslated_wget();
     cmd.args(&cmd_args);
     let result = exec_capture(&mut cmd)?;
 
@@ -82,7 +92,10 @@ pub fn run_stdout(url: &str, args: &[String], verbose: u8) -> Result<i32> {
             for line in lines.iter().take(10) {
                 rtk_output.push_str(&format!("{}\n", truncate_line(line, 100)));
             }
-            rtk_output.push_str(&format!("... +{} more lines", total - 10));
+            rtk_output.push_str(&format!(
+                "... +{} more lines — use `bdo proxy wget -O - URL` for all\n",
+                total - 10
+            ));
         } else {
             rtk_output.push_str(&format!("{} ok | {} lines\n", compact_url(url), total));
             for line in &lines {
@@ -105,6 +118,14 @@ pub fn run_stdout(url: &str, args: &[String], verbose: u8) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+/// wget whose messages can be parsed. `LANGUAGE` changes only the messages:
+/// `LC_ALL` could also change how wget names a file it saves.
+fn untranslated_wget() -> std::process::Command {
+    let mut cmd = resolved_command("wget");
+    cmd.env("LANGUAGE", "C");
+    cmd
 }
 
 fn extract_filename_from_output(stderr: &str, url: &str, args: &[String]) -> String {
@@ -130,10 +151,10 @@ fn extract_filename_from_output(stderr: &str, url: &str, args: &[String]) -> Str
             let mut end_idx = None;
 
             for (i, c) in chars.iter().enumerate() {
-                if *c == '«' || (*c == '\'' && start_idx.is_none()) {
+                if matches!(*c, '«' | '‘') || (*c == '\'' && start_idx.is_none()) {
                     start_idx = Some(i);
                 }
-                if *c == '»' || (*c == '\'' && start_idx.is_some()) {
+                if matches!(*c, '»' | '’') || (*c == '\'' && start_idx.is_some()) {
                     end_idx = Some(i);
                 }
             }
@@ -147,17 +168,18 @@ fn extract_filename_from_output(stderr: &str, url: &str, args: &[String]) -> Str
         }
     }
 
-    // Fallback: extract from URL
-    let path = url.rsplit("://").next().unwrap_or(url);
-    let filename = path
-        .rsplit('/')
-        .next()
-        .unwrap_or("index.html")
+    // Fallback, with `-q` or an unknown wget: the last part of the URL's path,
+    // as wget names it. `https://example.com` has no path at all.
+    let without_scheme = url.rsplit("://").next().unwrap_or(url);
+    let filename = without_scheme
+        .split_once('/')
+        .map(|(_, path)| path.rsplit('/').next().unwrap_or(""))
+        .unwrap_or("")
         .split('?')
         .next()
-        .unwrap_or("index.html");
+        .unwrap_or("");
 
-    if filename.is_empty() || !filename.contains('.') {
+    if filename.is_empty() {
         "index.html".to_string()
     } else {
         filename.to_string()
@@ -206,17 +228,16 @@ fn parse_error(stderr: &str, stdout: &str) -> String {
     // Common wget error patterns
     let combined = format!("{}\n{}", stderr, stdout);
 
-    if combined.contains("404") {
-        return "404 Not Found".to_string();
-    }
-    if combined.contains("403") {
-        return "403 Forbidden".to_string();
-    }
-    if combined.contains("401") {
-        return "401 Unauthorized".to_string();
-    }
-    if combined.contains("500") {
-        return "500 Server Error".to_string();
+    let status = HTTP_STATUS_RE
+        .captures(&combined)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str());
+    match status {
+        Some("404") => return "404 Not Found".to_string(),
+        Some("403") => return "403 Forbidden".to_string(),
+        Some("401") => return "401 Unauthorized".to_string(),
+        Some("500") => return "500 Server Error".to_string(),
+        _ => {}
     }
     if combined.contains("Connection refused") {
         return "Connection refused".to_string();
@@ -231,19 +252,26 @@ fn parse_error(stderr: &str, stdout: &str) -> String {
         return "SSL/TLS error".to_string();
     }
 
-    // Return first meaningful line
-    for line in stderr.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("--") {
-            if trimmed.len() > 60 {
-                let t: String = trimmed.chars().take(60).collect();
-                return format!("{}...", t);
-            }
-            return trimmed.to_string();
+    // The line that states the error. wget's output opens with progress such
+    // as "Resolving…", so without one the last line is the best guess.
+    let lines = || {
+        stderr
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("--"))
+    };
+    let stated = lines().find(|l| {
+        let lower = l.to_lowercase();
+        lower.contains("error") || lower.contains("failed") || lower.contains("wget:")
+    });
+    match stated.or_else(|| lines().next_back()) {
+        Some(line) if line.chars().count() > 60 => {
+            let t: String = line.chars().take(60).collect();
+            format!("{}...", t)
         }
+        Some(line) => line.to_string(),
+        None => "Unknown error".to_string(),
     }
-
-    "Unknown error".to_string()
 }
 
 fn truncate_line(line: &str, max: usize) -> String {
@@ -303,7 +331,16 @@ mod tests {
 
     #[test]
     fn test_parse_error_404() {
-        assert_eq!(parse_error("HTTP request failed: 404", ""), "404 Not Found");
+        assert_eq!(
+            parse_error("HTTP request sent, awaiting response... 404 Not Found", ""),
+            "404 Not Found"
+        );
+        assert_eq!(parse_error("ERROR 404: Not Found.", ""), "404 Not Found");
+        // BusyBox.
+        assert_eq!(
+            parse_error("wget: server returned error: HTTP/1.1 404 Not Found", ""),
+            "404 Not Found"
+        );
     }
 
     #[test]

@@ -479,7 +479,7 @@ enum Commands {
         #[arg(short, long)]
         quota: bool,
         /// Subscription tier for quota calculation: pro, 5x, 20x
-        #[arg(short, long, default_value = "20x", requires = "quota")]
+        #[arg(short, long, default_value = "20x", requires = "quota", value_parser = ["pro", "5x", "20x"])]
         tier: String,
         /// Show detailed daily breakdown (all days)
         #[arg(short, long)]
@@ -494,7 +494,7 @@ enum Commands {
         #[arg(short, long)]
         all: bool,
         /// Output format: text, json, csv
-        #[arg(short, long, default_value = "text")]
+        #[arg(short, long, default_value = "text", value_parser = ["text", "json", "csv"])]
         format: String,
         /// Show parse failure log (commands that fell back to raw execution)
         #[arg(short = 'F', long)]

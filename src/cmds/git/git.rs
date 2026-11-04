@@ -32,13 +32,15 @@ pub enum GitCommand {
 /// prepended before any subcommand arguments.
 ///
 /// Paths print as they are rather than as `"\\346\\227\\245.txt"`, git's default for
-/// non-ASCII names, which the reader could not open. A `-c` the user passed comes
-/// later and still wins.
+/// non-ASCII names, which the reader could not open. Set through the environment
+/// so it sits below the user's own config on the command line, and left alone if
+/// the user is already using these variables.
 fn git_cmd(global_args: &[String]) -> Command {
-    let mut cmd = resolved_command("git");
-    cmd.args(["-c", "core.quotepath=false"]);
-    for arg in global_args {
-        cmd.arg(arg);
+    let mut cmd = unfiltered_git_cmd(global_args);
+    if std::env::var_os("GIT_CONFIG_COUNT").is_none() {
+        cmd.env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.quotepath")
+            .env("GIT_CONFIG_VALUE_0", "false");
     }
     cmd
 }

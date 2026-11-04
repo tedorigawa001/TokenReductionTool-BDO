@@ -175,6 +175,14 @@ fn status_keeps_awkward_file_names_readable() {
 }
 
 #[test]
+fn a_users_quotepath_setting_still_wins() {
+    let repo = Repo::new();
+    repo.write("日本語.txt", "x\n");
+    let s = repo.ok(&["-c", "core.quotepath=true", "status"]);
+    assert!(!s.contains("日本語.txt"), "{s}");
+}
+
+#[test]
 fn status_says_when_the_tree_is_clean() {
     let s = Repo::new().ok(&["status"]);
     assert!(s.to_lowercase().contains("clean"), "{s}");

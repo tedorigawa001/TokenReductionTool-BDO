@@ -6,7 +6,8 @@ use std::process::Command;
 fn bdo_env(vars: &[(&str, &str)], args: &[&str]) -> String {
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_bdo"));
-    cmd.arg("env")
+    cmd.current_dir(dir.path())
+        .arg("env")
         .args(args)
         .env_clear()
         .env("BDO_DB_PATH", dir.path().join("track.db"))

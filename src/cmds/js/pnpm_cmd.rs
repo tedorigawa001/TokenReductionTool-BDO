@@ -376,6 +376,7 @@ fn run_list(depth: usize, args: &[String], verbose: u8) -> Result<i32> {
     let result = exec_capture(&mut cmd).context("Failed to run pnpm list")?;
 
     if !result.success() {
+        print!("{}", result.stdout);
         eprint!("{}", result.stderr);
         return Ok(result.exit_code);
     }
@@ -454,6 +455,7 @@ fn run_outdated(args: &[String], verbose: u8) -> Result<i32> {
             raw
         }
     };
+    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
 
     if filtered.trim().is_empty() {
         println!("All packages up-to-date");
@@ -463,7 +465,8 @@ fn run_outdated(args: &[String], verbose: u8) -> Result<i32> {
 
     timer.track("pnpm outdated", "bdo pnpm outdated", &combined, &filtered);
 
-    Ok(0)
+    // pnpm exits 1 when something is outdated, which scripts rely on.
+    Ok(result.exit_code)
 }
 
 fn run_install(args: &[String], verbose: u8) -> Result<i32> {
@@ -483,6 +486,7 @@ fn run_install(args: &[String], verbose: u8) -> Result<i32> {
     let result = exec_capture(&mut cmd).context("Failed to run pnpm install")?;
 
     if !result.success() {
+        print!("{}", result.stdout);
         eprint!("{}", result.stderr);
         return Ok(result.exit_code);
     }

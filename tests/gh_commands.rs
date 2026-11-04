@@ -331,3 +331,239 @@ fn unknown_subcommands_pass_through() {
     assert_eq!(env.ok(&["secret", "list"]), "x\n");
     assert_eq!(env.received(), ["secret", "list"]);
 }
+
+// ---- gh run view, from what real gh prints ----
+
+const FAILED_RUN: &str = r#"
+X feature CI o/r#51 · 417
+Triggered via pull_request about 7 hours ago
+
+JOBS
+✓ Rust formatting in 14s (ID 1)
+✓ fail-fast in 14s (ID 4)
+X Tests in 2m7s (ID 2)
+  ✓ Set up job
+  X Run tests
+- Skipped job (ID 3)
+
+ANNOTATIONS
+- "The label will migrate"
+Rust formatting: .github#1
+
+X Process completed with exit code 1.
+Tests: .github#2
+
+To see what failed, try: gh run view 417 --log-failed
+View this run on GitHub: https://github.com/o/r/actions/runs/417
+"#;
+
+/// It used to print only the hint, since gh's mark for a failed job is `X`.
+#[test]
+fn run_view_names_the_job_and_step_that_failed() {
+    let env = Env::new();
+    env.answer(FAILED_RUN);
+    let s = env.ok(&["run", "view", "417"]);
+    assert!(s.starts_with("Workflow Run #417\n"), "{s}");
+    assert!(s.contains("X feature CI"), "the outcome: {s}");
+    assert!(s.contains("X Tests in 2m7s"), "the job: {s}");
+    assert!(s.contains("X Run tests"), "the step: {s}");
+    assert!(s.contains("Process completed with exit code 1."), "{s}");
+    assert!(s.contains("Tests: .github#2"), "{s}");
+    assert!(s.contains("--log-failed"), "{s}");
+    assert!(s.contains("Jobs: 2 passed, 1 skipped"), "{s}");
+}
+
+#[test]
+fn run_view_leaves_out_what_needs_no_attention() {
+    let env = Env::new();
+    env.answer(FAILED_RUN);
+    let s = env.ok(&["run", "view", "417"]);
+    for gone in [
+        "Rust formatting",
+        "Set up job",
+        "Skipped job",
+        "will migrate",
+    ] {
+        assert!(!s.contains(gone), "{gone}: {s}");
+    }
+}
+
+/// A job's name decides nothing: `fail-fast` passed above, and this one did not.
+#[test]
+fn run_view_goes_by_the_mark_not_the_name() {
+    let env = Env::new();
+    env.answer("✓ main CI · 1\n\nJOBS\nX success-report in 1s (ID 1)\n* still-running (ID 2)\n");
+    let s = env.ok(&["run", "view", "1"]);
+    assert!(s.contains("X success-report"), "{s}");
+    assert!(s.contains("* still-running"), "{s}");
+}
+
+#[test]
+fn run_view_of_a_passing_run_says_so() {
+    let env = Env::new();
+    env.answer("✓ main CI · 1\nTriggered via push\n\nJOBS\n✓ a in 1s (ID 1)\n✓ b in 1s (ID 2)\n");
+    let s = env.ok(&["run", "view", "1"]);
+    assert!(s.contains("✓ main CI"), "{s}");
+    assert!(s.contains("Jobs: 2 passed, 0 skipped"), "{s}");
+}
+
+#[test]
+fn run_view_output_flags_are_gh_own_output() {
+    for flag in ["--log", "--log-failed"] {
+        let env = Env::new();
+        env.answer("the whole log\n");
+        assert_eq!(env.ok(&["run", "view", "1", flag]), "the whole log\n");
+    }
+}
+
+// ---- gh pr checks ----
+
+/// Only the state column counts. These names and this URL all contain a state.
+#[test]
+fn pr_checks_reads_the_state_column_only() {
+    let env = Env::new();
+    env.answer(
+        "bypass-check\tfail\t1m\thttps://example.com/compass/1\n\
+         fail-fast\tpass\t1m\thttps://example.com/2\n\
+         pending-report\tpass\t1m\thttps://example.com/3\n\
+         deploy\tpending\t0\thttps://example.com/4\n\
+         cleanup\tskipping\t0\thttps://example.com/5\n\
+         flaky\tcancel\t1m\thttps://example.com/6\n",
+    );
+    let s = env.ok(&["pr", "checks", "7"]);
+    assert!(s.contains("Passed: 2"), "{s}");
+    assert!(s.contains("Failed: 2"), "{s}");
+    assert!(s.contains("Pending: 1"), "{s}");
+    assert!(s.contains("Skipped: 1"), "{s}");
+    assert!(s.contains("bypass-check"), "{s}");
+    assert!(s.contains("flaky"), "{s}");
+    assert!(!s.contains("fail-fast"), "{s}");
+}
+
+// ---- gh pr view and pr status ----
+
+#[test]
+fn pr_view_counts_every_way_a_check_can_end() {
+    let env = Env::new();
+    env.answer(
+        &json!({
+            "number": 7, "title": "t", "state": "OPEN", "author": author("a"),
+            "url": "https://example.com/7", "mergeable": "MERGEABLE", "body": "",
+            "statusCheckRollup": [
+                { "conclusion": "SUCCESS" },
+                { "state": "SUCCESS" },
+                { "conclusion": "FAILURE" },
+                { "conclusion": "TIMED_OUT" },
+                { "conclusion": "CANCELLED" },
+                { "state": "ERROR" },
+                { "conclusion": "SKIPPED" },
+                { "conclusion": "NEUTRAL" },
+                { "status": "IN_PROGRESS", "conclusion": "" },
+                { "state": "PENDING" },
+            ],
+        })
+        .to_string(),
+    );
+    let s = env.ok(&["pr", "view", "7"]);
+    assert!(
+        s.contains("Checks: 2/10 passed (2 pending, 2 skipped)"),
+        "{s}"
+    );
+    assert!(s.contains("4 checks failed"), "{s}");
+}
+
+#[test]
+fn pr_status_shows_all_three_groups() {
+    let env = Env::new();
+    let pr = |number: i64, title: &str| json!({ "number": number, "title": title });
+    env.answer(
+        &json!({
+            "currentBranch": pr(1, "on this branch"),
+            "createdBy": [pr(2, "mine")],
+            "needsReview": [pr(3, "please look")],
+        })
+        .to_string(),
+    );
+    let s = env.ok(&["pr", "status"]);
+    assert!(s.contains("Current Branch"), "{s}");
+    assert!(s.contains("on this branch"), "{s}");
+    assert!(s.contains("Your PRs (1):"), "{s}");
+    assert!(s.contains("mine"), "{s}");
+    assert!(s.contains("Requesting your review (1):"), "{s}");
+    assert!(s.contains("please look"), "{s}");
+}
+
+// ---- the rest ----
+
+#[test]
+fn repo_view_keeps_the_identity_and_the_counts() {
+    let env = Env::new();
+    env.answer(
+        &json!({
+            "name": "r", "owner": { "login": "o" }, "description": "what it is",
+            "url": "https://example.com/o/r", "stargazerCount": 3, "forkCount": 2,
+            "isPrivate": true,
+        })
+        .to_string(),
+    );
+    let s = env.ok(&["repo", "view", "o/r"]);
+    for wanted in [
+        "o/r",
+        "[private]",
+        "what it is",
+        "3 stars | 2 forks",
+        "https://example.com/o/r",
+    ] {
+        assert!(s.contains(wanted), "{wanted}: {s}");
+    }
+    assert_eq!(env.received()[..3], ["repo", "view", "o/r"]);
+}
+
+#[test]
+fn repo_subcommands_other_than_view_pass_through() {
+    let env = Env::new();
+    env.answer("cloned\n");
+    assert_eq!(env.ok(&["repo", "clone", "o/r"]), "cloned\n");
+    assert_eq!(env.received(), ["repo", "clone", "o/r"]);
+}
+
+#[test]
+fn pr_diff_compacts_and_its_opt_outs_do_not() {
+    let diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n";
+    let env = Env::new();
+    env.answer(diff);
+    let s = env.ok(&["pr", "diff", "7"]);
+    assert!(s.contains("+new") && s.contains("-old"), "{s}");
+
+    let env = Env::new();
+    env.answer(diff);
+    assert_eq!(env.ok(&["pr", "diff", "7", "--no-compact"]), diff);
+    assert!(!env.received().contains(&"--no-compact".to_string()));
+
+    let env = Env::new();
+    env.answer("f\n");
+    assert_eq!(env.ok(&["pr", "diff", "7", "--name-only"]), "f\n");
+
+    let env = Env::new();
+    env.answer("");
+    assert!(env.ok(&["pr", "diff", "7"]).contains("No diff"));
+}
+
+#[test]
+fn api_output_is_never_summarised() {
+    let env = Env::new();
+    let body = "{\"a\":[1,2,3]}\n";
+    env.answer(body);
+    assert_eq!(env.ok(&["api", "repos/o/r"]), body);
+}
+
+#[test]
+fn pr_merge_output_is_gh_own() {
+    let env = Env::new();
+    env.answer("Merged pull request #7\n");
+    assert_eq!(
+        env.ok(&["pr", "merge", "7", "--squash"]),
+        "Merged pull request #7\n"
+    );
+    assert_eq!(env.received(), ["pr", "merge", "7", "--squash"]);
+}

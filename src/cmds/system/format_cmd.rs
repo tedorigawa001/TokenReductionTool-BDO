@@ -130,6 +130,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         "black" => filter_black_output(&raw),
         _ => raw.trim().to_string(),
     };
+    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
 
     println!("{}", filtered);
 

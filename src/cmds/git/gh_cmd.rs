@@ -328,6 +328,42 @@ fn pr_status_json_fields() -> &'static str {
     "number,title,reviewDecision,statusCheckRollup"
 }
 
+/// What became of a pull request's checks. A cancelled or timed-out check did not
+/// pass any more than a failed one did.
+struct CheckCounts {
+    passed: usize,
+    failed: usize,
+    pending: usize,
+    skipped: usize,
+}
+
+impl CheckCounts {
+    fn of(checks: &[Value]) -> Self {
+        let mut counts = Self {
+            passed: 0,
+            failed: 0,
+            pending: 0,
+            skipped: 0,
+        };
+        for check in checks {
+            // A check run has a conclusion, and a status context has a state.
+            let result = check["conclusion"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .or(check["state"].as_str())
+                .unwrap_or("");
+            match result {
+                "SUCCESS" => counts.passed += 1,
+                "SKIPPED" | "NEUTRAL" => counts.skipped += 1,
+                "FAILURE" | "ERROR" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED"
+                | "STARTUP_FAILURE" => counts.failed += 1,
+                _ => counts.pending += 1,
+            }
+        }
+        counts
+    }
+}
+
 fn view_pr(args: &[String], _verbose: u8, ultra_compact: bool) -> Result<i32> {
     // `gh pr view` without an identifier defaults to the PR for the current branch.
     let (pr_number_opt, extra_args) = parse_optional_identifier(args);
@@ -395,21 +431,8 @@ fn format_pr_view(json: &Value, ultra_compact: bool) -> String {
     }
 
     if let Some(checks) = json["statusCheckRollup"].as_array() {
-        let total = checks.len();
-        let passed = checks
-            .iter()
-            .filter(|c| {
-                c["conclusion"].as_str() == Some("SUCCESS")
-                    || c["state"].as_str() == Some("SUCCESS")
-            })
-            .count();
-        let failed = checks
-            .iter()
-            .filter(|c| {
-                c["conclusion"].as_str() == Some("FAILURE")
-                    || c["state"].as_str() == Some("FAILURE")
-            })
-            .count();
+        let counts = CheckCounts::of(checks);
+        let (passed, failed, total) = (counts.passed, counts.failed, checks.len());
         if ultra_compact {
             if failed > 0 {
                 out.push_str(&format!("  [x]{}/{}  {} fail\n", passed, total, failed));
@@ -417,7 +440,19 @@ fn format_pr_view(json: &Value, ultra_compact: bool) -> String {
                 out.push_str(&format!("  {}/{}\n", passed, total));
             }
         } else {
-            out.push_str(&format!("  Checks: {}/{} passed\n", passed, total));
+            let mut others = Vec::new();
+            if counts.pending > 0 {
+                others.push(format!("{} pending", counts.pending));
+            }
+            if counts.skipped > 0 {
+                others.push(format!("{} skipped", counts.skipped));
+            }
+            let others = if others.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", others.join(", "))
+            };
+            out.push_str(&format!("  Checks: {}/{} passed{}\n", passed, total, others));
             if failed > 0 {
                 out.push_str(&format!("  [warn] {} checks failed\n", failed));
             }
@@ -473,16 +508,21 @@ fn format_pr_checks(stdout: &str) -> String {
     let mut passed = 0;
     let mut failed = 0;
     let mut pending = 0;
+    let mut skipped = 0;
     let mut failed_checks = Vec::new();
 
     for line in stdout.lines() {
-        if line.contains("[ok]") || line.contains("pass") {
-            passed += 1;
-        } else if line.contains("[x]") || line.contains("fail") {
-            failed += 1;
-            failed_checks.push(line.trim().to_string());
-        } else if line.contains('*') || line.contains("pending") {
-            pending += 1;
+        // `name<TAB>state<TAB>duration<TAB>url`. Only the state field counts: the
+        // name or the URL can contain "pass" or "fail".
+        match line.split('\t').nth(1).map(str::trim) {
+            Some("pass") => passed += 1,
+            Some("fail") | Some("cancel") => {
+                failed += 1;
+                failed_checks.push(line.trim().to_string());
+            }
+            Some("pending") => pending += 1,
+            Some("skipping") => skipped += 1,
+            _ => {}
         }
     }
 
@@ -492,6 +532,9 @@ fn format_pr_checks(stdout: &str) -> String {
     out.push_str(&format!("  [FAIL] Failed: {}\n", failed));
     if pending > 0 {
         out.push_str(&format!("  [pending] Pending: {}\n", pending));
+    }
+    if skipped > 0 {
+        out.push_str(&format!("  [skip] Skipped: {}\n", skipped));
     }
     if !failed_checks.is_empty() {
         out.push_str("\n  Failed checks:\n");
@@ -539,6 +582,15 @@ fn format_pr_status(json: &Value) -> String {
             }
         }
     }
+
+    if let Some(needs_review) = json["needsReview"].as_array() {
+        if !needs_review.is_empty() {
+            out.push_str(&format!("Requesting your review ({}):\n", needs_review.len()));
+            for pr in needs_review.iter().take(5) {
+                out.push_str(&format_pr_status_entry(pr));
+            }
+        }
+    }
     out
 }
 
@@ -555,24 +607,10 @@ fn format_pr_status_entry(pr: &Value) -> String {
     if let Some(checks) = pr["statusCheckRollup"].as_array() {
         let total = checks.len();
         if total > 0 {
-            let passed = checks
-                .iter()
-                .filter(|c| {
-                    c["conclusion"].as_str() == Some("SUCCESS")
-                        || c["state"].as_str() == Some("SUCCESS")
-                })
-                .count();
-            let failed = checks
-                .iter()
-                .filter(|c| {
-                    c["conclusion"].as_str() == Some("FAILURE")
-                        || c["state"].as_str() == Some("FAILURE")
-                })
-                .count();
-
-            out.push_str(&format!(" checks {}/{}", passed, total));
-            if failed > 0 {
-                out.push_str(&format!(" fail {}", failed));
+            let counts = CheckCounts::of(checks);
+            out.push_str(&format!(" checks {}/{}", counts.passed, total));
+            if counts.failed > 0 {
+                out.push_str(&format!(" fail {}", counts.failed));
             }
         }
     }
@@ -812,9 +850,42 @@ fn view_run(args: &[String], _verbose: u8) -> Result<i32> {
     )
 }
 
+/// What `gh run view` prints, without what succeeded or was skipped:
+///
+/// ```text
+/// X branch CI repo#51 · 417
+/// Triggered via pull_request about 7 hours ago
+///
+/// JOBS
+/// ✓ Rust formatting in 14s (ID 1)
+/// X Tests in 2m7s (ID 2)
+///   ✓ Set up job
+///   X Run tests
+/// - Skipped job (ID 3)
+///
+/// ANNOTATIONS
+/// - "A notice"
+/// Rust formatting: .github#1
+///
+/// X Process completed with exit code 1.
+/// Tests: .github#2
+///
+/// To see what failed, try: gh run view 417 --log-failed
+/// ```
+///
+/// gh marks a failed job with `X`, a running one with `*`, and passed and skipped
+/// ones with `✓` and `-`. A job's own name decides nothing.
 fn format_run_view(stdout: &str, run_id: &str) -> String {
+    #[derive(PartialEq)]
+    enum Section {
+        Summary,
+        Jobs,
+        Annotations,
+    }
+    let mut section = Section::Summary;
     let mut out = String::new();
-    let mut in_jobs = false;
+    let (mut passed, mut skipped) = (0, 0);
+    let mut skip_location = false;
 
     if run_id.is_empty() {
         out.push_str("Workflow Run\n");
@@ -822,19 +893,50 @@ fn format_run_view(stdout: &str, run_id: &str) -> String {
         out.push_str(&format!("Workflow Run #{}\n", run_id));
     }
     for line in stdout.lines() {
-        if line.contains("JOBS") {
-            in_jobs = true;
-        }
-        if in_jobs {
-            if line.contains('✓') || line.contains("success") {
+        let trimmed = line.trim();
+        match trimmed {
+            "" => {
+                skip_location = false;
                 continue;
             }
-            if line.contains("[x]") || line.contains("fail") {
-                out.push_str(&format!("  [FAIL] {}\n", line.trim()));
+            "JOBS" => {
+                section = Section::Jobs;
+                continue;
             }
-        } else if line.contains("Status:") || line.contains("Conclusion:") {
-            out.push_str(&format!("  {}\n", line.trim()));
+            "ANNOTATIONS" => {
+                section = Section::Annotations;
+                continue;
+            }
+            _ => {}
         }
+        if section == Section::Jobs {
+            // The job's own lines are unindented; steps are not counted.
+            if trimmed.starts_with('✓') {
+                passed += usize::from(!line.starts_with(' '));
+                continue;
+            }
+            if trimmed.starts_with("- ") {
+                skipped += usize::from(!line.starts_with(' '));
+                continue;
+            }
+        }
+        if section == Section::Annotations {
+            // Notices and their locations, such as a runner label's migration.
+            if trimmed.starts_with("- ") {
+                skip_location = true;
+                continue;
+            }
+            if skip_location {
+                continue;
+            }
+        }
+        // "For more information" repeats itself on every run.
+        if !trimmed.starts_with("For more information about") {
+            out.push_str(&format!("  {}\n", line.trim_end()));
+        }
+    }
+    if passed > 0 || skipped > 0 {
+        out.push_str(&format!("  Jobs: {} passed, {} skipped\n", passed, skipped));
     }
     out
 }

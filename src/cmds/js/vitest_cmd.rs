@@ -273,6 +273,7 @@ pub fn run_test(command: &Commands, args: &[String], verbose: u8) -> Result<i32>
             raw
         }
     };
+    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
 
     if let Some(hint) =
         crate::core::tee::tee_and_hint(&combined, format!("{}_run", framework).as_str(), result.exit_code)

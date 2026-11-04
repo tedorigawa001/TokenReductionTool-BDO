@@ -124,6 +124,96 @@ fn scan_block_comment(
     (None, depth)
 }
 
+/// Index just past the backtick closing a JS template, walking `${…}` so that
+/// quotes and backticks inside an interpolation are not mistaken for the close.
+/// One pass with an explicit stack: a template can be a whole minified line.
+fn find_template_close(line: &[u8], from: usize) -> Option<usize> {
+    const TEMPLATE: u8 = b'`';
+    const BRACE: u8 = b'{';
+    let mut stack = vec![TEMPLATE];
+    let mut i = from;
+    while i < line.len() {
+        let in_template = stack.last() == Some(&TEMPLATE);
+        match line[i] {
+            b'\\' => i += 2,
+            b'`' if in_template => {
+                stack.pop();
+                i += 1;
+                if stack.is_empty() {
+                    return Some(i);
+                }
+            }
+            b'$' if in_template && line.get(i + 1) == Some(&b'{') => {
+                stack.push(BRACE);
+                i += 2;
+            }
+            b'{' if !in_template => {
+                stack.push(BRACE);
+                i += 1;
+            }
+            b'}' if !in_template => {
+                stack.pop();
+                i += 1;
+            }
+            b'`' => {
+                stack.push(TEMPLATE);
+                i += 1;
+            }
+            quote @ (b'"' | b'\'') if !in_template => {
+                i = find_close(line, i + 1, &[quote], true).unwrap_or(i + 1);
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Whether a `/` after `before` opens a regex rather than divides: a literal
+/// cannot follow a value. On a wrong guess the quotes in between are read as
+/// code, as they would be without this check.
+fn regex_can_follow(before: &[u8], lang: &Language) -> bool {
+    let before = before.trim_ascii_end();
+    match before.last() {
+        None => true,
+        Some(
+            b'(' | b',' | b'=' | b':' | b'[' | b'!' | b'&' | b'|' | b'?' | b'{' | b';' | b'+'
+            | b'-' | b'*' | b'%' | b'~' | b'^',
+        ) => true,
+        Some(_) => {
+            let keywords: &[&[u8]] = match lang {
+                Language::Ruby => &[b"if", b"unless", b"when", b"and", b"or", b"not", b"return"],
+                _ => &[
+                    b"return", b"typeof", b"case", b"in", b"of", b"void", b"throw", b"yield",
+                ],
+            };
+            let word_len = before
+                .iter()
+                .rev()
+                .take_while(|b| is_identifier_byte(**b))
+                .count();
+            keywords.contains(&&before[before.len() - word_len..])
+        }
+    }
+}
+
+/// Index just past a regex literal whose opening `/` is at `line[i]`. Regex
+/// literals do not span lines.
+fn regex_literal_end(line: &[u8], i: usize) -> Option<usize> {
+    let mut in_class = false;
+    let mut j = i + 1;
+    while j < line.len() {
+        match line[j] {
+            b'\\' => j += 1,
+            b'[' => in_class = true,
+            b']' => in_class = false,
+            b'/' if !in_class => return Some(j + 1),
+            _ => {}
+        }
+        j += 1;
+    }
+    None
+}
+
 fn is_identifier_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
@@ -132,7 +222,7 @@ fn is_identifier_byte(b: u8) -> bool {
 /// the index past it. A false positive only means keeping lines.
 fn heredoc_at(line: &[u8], i: usize, lang: &Language) -> Option<(Heredoc, usize)> {
     let mut j = i + 2;
-    if line.get(j) == Some(&b'<') {
+    if line.get(j) == Some(&b'<') || (i > 0 && line[i - 1] == b'<') {
         return None; // here-string
     }
     let indent = match (lang, line.get(j)) {
@@ -153,22 +243,21 @@ fn heredoc_at(line: &[u8], i: usize, lang: &Language) -> Option<(Heredoc, usize)
         }
     }
     let quote = line.get(j).copied().filter(|b| matches!(b, b'\'' | b'"'));
-    if quote.is_some() {
-        j += 1;
-    }
-    let start = j;
-    while line.get(j).copied().is_some_and(is_identifier_byte) {
-        j += 1;
-    }
-    if j == start {
-        return None;
-    }
-    let terminator = line[start..j].to_vec();
-    if let Some(q) = quote {
-        if line.get(j) != Some(&q) {
-            return None;
+    let terminator = if let Some(q) = quote {
+        // Quoted, a terminator may be any text: `<<-"begin;"`.
+        let start = j + 1;
+        let len = line[start..].iter().position(|b| *b == q)?;
+        j = start + len + 1;
+        line[start..start + len].to_vec()
+    } else {
+        let start = j;
+        while line.get(j).copied().is_some_and(is_identifier_byte) {
+            j += 1;
         }
-        j += 1;
+        line[start..j].to_vec()
+    };
+    if terminator.is_empty() {
+        return None;
     }
     Some((Heredoc { terminator, indent }, j))
 }
@@ -193,7 +282,9 @@ fn raw_string_at(line: &[u8], i: usize, lang: &Language) -> Option<(Vec<u8>, usi
             Some((close, j + 1))
         }
         Language::Cpp if line[i] == b'R' && line.get(i + 1) == Some(&b'"') => {
-            let open = line[i + 2..].iter().position(|&b| b == b'(')?;
+            // The standard caps the delimiter at 16 characters, which also keeps
+            // a line of repeated `R"` linear.
+            let open = line[i + 2..].iter().take(17).position(|&b| b == b'(')?;
             let mut close = vec![b')'];
             close.extend_from_slice(&line[i + 2..i + 2 + open]);
             close.push(b'"');
@@ -237,6 +328,25 @@ fn scan_line(
         };
     }
 
+    // Everything after Ruby's `__END__` is data for `DATA.read`, not source.
+    if *lang == Language::Ruby && state == State::Code && line == b"__END__" {
+        return State::Verbatim;
+    }
+
+    // `"#{<<~X}"` and `"$(cat <<X)"` open a heredoc from inside a string, and its
+    // body follows the line the string may close on. Tracking both is not worth
+    // it: keep the rest of the file. A line that merely looks like this costs
+    // savings, nothing else.
+    let contains = |needle: &[u8]| line.windows(needle.len()).any(|w| w == needle);
+    let heredoc_in_string = match lang {
+        Language::Ruby => contains(b"#{<<"),
+        Language::Shell => contains(b"\"$(") && contains(b"<<"),
+        _ => false,
+    };
+    if heredoc_in_string {
+        return State::Verbatim;
+    }
+
     let (multi, single) = string_delimiters(lang);
     let line_comment = patterns.line.map(str::as_bytes);
     // Mid-line block comments exist only for `/*`: Ruby's `=begin` is column-0.
@@ -246,13 +356,20 @@ fn scan_line(
         .map(str::as_bytes);
     // `$#`, `${#a}` and `?#` are not comments in these two.
     let hash_needs_word_start = matches!(lang, Language::Shell | Language::Ruby);
+    let is_js = matches!(lang, Language::JavaScript | Language::TypeScript);
+    let mut regex_may_close = is_js || *lang == Language::Ruby;
     let mut pending_heredocs = VecDeque::new();
 
     let mut i = from;
     'scan: while i < line.len() {
         match &state {
             State::Str { close, escapes } => {
-                match find_close(line, i, close.as_bytes(), *escapes) {
+                let end = if is_js && *close == "`" {
+                    find_template_close(line, i)
+                } else {
+                    find_close(line, i, close.as_bytes(), *escapes)
+                };
+                match end {
                     Some(end) => {
                         i = end;
                         state = State::Code;
@@ -286,7 +403,7 @@ fn scan_line(
                 if let Some(comment) = line_comment {
                     let at_word_start = i == 0
                         || !hash_needs_word_start
-                        || matches!(line[i - 1], b' ' | b'\t' | b';');
+                        || matches!(line[i - 1], b' ' | b'\t' | b';' | b'(' | b')' | b'|' | b'&');
                     if rest.starts_with(comment) && at_word_start {
                         break;
                     }
@@ -317,6 +434,33 @@ fn scan_line(
                     i += rust_char_literal_len(line, i).unwrap_or(1);
                     continue;
                 }
+                if regex_may_close && rest[0] == b'/' && regex_can_follow(&line[..i], lang) {
+                    match regex_literal_end(line, i) {
+                        Some(end) => {
+                            i = end;
+                            continue;
+                        }
+                        // Unlike a JS one, a Ruby literal can span lines, and a `#`
+                        // line inside it is part of the pattern.
+                        None if *lang == Language::Ruby => {
+                            return State::Str {
+                                close: "/",
+                                escapes: true,
+                            };
+                        }
+                        // Nothing closes later on this line either: do not rescan.
+                        None => regex_may_close = false,
+                    }
+                }
+                // `$'…'` is the one shell single quote that honours backslashes.
+                if *lang == Language::Shell && rest.starts_with(b"$'") {
+                    state = State::Str {
+                        close: "'",
+                        escapes: true,
+                    };
+                    i += 2;
+                    continue;
+                }
                 for &delimiter in multi {
                     if rest.starts_with(delimiter.as_bytes()) {
                         state = State::Str {
@@ -342,8 +486,12 @@ fn scan_line(
                                     escapes: true,
                                 };
                             }
-                            // A stray quote, as in JSX text: `<p>don't</p>`.
-                            None => break 'scan,
+                            // A stray quote, as in JSX text: `<p>don't</p>`. A
+                            // string may still open later on this line.
+                            None => {
+                                i = open_end;
+                                continue 'scan;
+                            }
                         }
                     }
                 }
@@ -477,6 +625,9 @@ pub fn strip_comment_lines(content: &str, lang: &Language) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod string_tests;
 
 #[cfg(test)]
 mod tests {

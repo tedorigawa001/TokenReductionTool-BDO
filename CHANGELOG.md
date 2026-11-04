@@ -5,6 +5,53 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.2] (2026-11-05)
+
+Found by running the commands no test reached, and comparing them with the real tools.
+
+### Changed
+
+- **`golangci-lint` with findings now exits 1, and `pnpm outdated` keeps the tool's
+  exit code.** Both exited 0 before, so a script relying on that will now stop.
+- **`ls` says what it hid:** `[hidden: dist/ target/ — use -a to show]`.
+- **`bdo gain --format` and `--tier` refuse unknown values, and `bdo deps <missing>`
+  exits 1.**
+- **`wget` errors use the server's wording:** `500 Internal Server Error`, not
+  `500 Server Error`.
+
+### Fixed
+
+- **A failed command could look like a success.** Filters read only the output they
+  expect, so on any other failure, such as a bad flag or a broken config, `tsc` said
+  `No errors found`, `cargo clippy` and `go vet` `No issues found`, and `prettier`
+  `All files formatted`, with the tool's error gone. `cargo nextest`, when not
+  installed, printed nothing. A failed command now gains
+  `[bdo] the command failed` and up to 10 lines of its output when its filter showed
+  none of it. Output grows only on failure.
+- **`gh run view` dropped the failed job and the run's outcome.** They are now shown,
+  and passed jobs are counted.
+- **`gh pr checks` counted a failed check as passed** if its name or URL contained
+  `pass`. Timed-out and cancelled checks now count as failures, and `pr status` shows
+  requested reviews.
+- **`wget URL -qO-` and `wget URL -O-` threw the page away** and reported a file that
+  does not exist.
+- **`wget` misreported other runs.** Errors carried a timestamp, a redirect hid the
+  failure after it, and over several URLs a successful one was called `FAILED`, only
+  one failure was named, and pages arrived in reverse order. `-r` reported one file of
+  many, `--spider` a file it never wrote, and `-q -P` the wrong path. `-q` failures
+  said `Unknown error`. Binary pages are no longer printed.
+- **`summary` lost test failures** by overwriting totals, and called failed builds
+  successful.
+- **`ls` lost or merged entries.** It dropped files ending in a dot, hid regular files
+  named like noise directories, such as `build`, and merged the entries of several
+  directories.
+- **`deps` misread manifests.** It took the rest of a `pyproject.toml` as dependencies,
+  and missed Cargo path, git, workspace and target dependencies. It no longer prints
+  pip options, which can hold passwords.
+- **`gain --history` panicked on non-ASCII commands**, and `gain --format csv` without
+  a period was empty.
+- **`bdo next build` ran `next build build`.**
+
 ## [0.50.1] (2026-11-04)
 
 Found by measuring test coverage and then running the paths no test reached.

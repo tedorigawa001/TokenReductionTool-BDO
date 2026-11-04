@@ -19,6 +19,7 @@ fn bdo_env(vars: &[(&str, &str)], args: &[&str]) -> String {
         }
     }
     cmd.envs(vars.iter().copied());
+    cmd.envs(std::env::var("LLVM_PROFILE_FILE").map(|p| ("LLVM_PROFILE_FILE", p)));
     let out = cmd.output().unwrap();
     assert!(out.status.success(), "{out:?}");
     String::from_utf8_lossy(&out.stdout).into_owned()

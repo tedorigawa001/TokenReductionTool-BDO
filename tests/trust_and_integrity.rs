@@ -49,6 +49,7 @@ impl Env {
             .env("BDO_DB_PATH", self.home.join("track.db"))
             .env("BDO_TELEMETRY_DISABLED", "1")
             .envs(extra_env.iter().copied())
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|p| ("LLVM_PROFILE_FILE", p)))
             .output()
             .unwrap()
     }

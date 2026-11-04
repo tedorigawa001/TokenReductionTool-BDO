@@ -348,6 +348,41 @@ fn log_with_a_patch_or_stat_shows_it() {
     assert!(repo.ok(&["log", "-1", "--stat"]).contains("f.txt"));
 }
 
+/// Each of these asks for a commit's changes, so the summary must not replace them.
+#[test]
+fn log_options_that_imply_a_diff_are_gits_own_output() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "two\n", "second");
+    for option in [
+        "-p",
+        "-u",
+        "--patch",
+        "--patch-with-stat",
+        "--stat",
+        "--stat=40",
+        "--shortstat",
+        "--numstat",
+        "--summary",
+        "--compact-summary",
+        "--name-only",
+        "--name-status",
+        "--raw",
+        "-U1",
+        "--unified=1",
+        "--word-diff",
+        "--word-diff=plain",
+        "--color-words",
+        "-W",
+        "--function-context",
+    ] {
+        let args = ["log", "-1", option];
+        let raw = raw_git(&repo.work, &args);
+        assert!(raw.status.success(), "{args:?}: {raw:?}");
+        let expected = String::from_utf8_lossy(&raw.stdout);
+        assert_eq!(repo.ok(&args), expected, "{args:?}");
+    }
+}
+
 #[test]
 fn log_keeps_the_complete_combined_merge_diff() {
     let repo = Repo::new();

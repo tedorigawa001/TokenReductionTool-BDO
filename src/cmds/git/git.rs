@@ -534,6 +534,7 @@ fn log_shows_changes(args: &[String]) -> bool {
                 | "--patch"
                 | "--patch-with-stat"
                 | "--patch-with-raw"
+                | "-c"
                 | "--cc"
                 | "--stat"
                 | "--shortstat"
@@ -542,7 +543,8 @@ fn log_shows_changes(args: &[String]) -> bool {
                 | "--name-only"
                 | "--name-status"
                 | "--raw"
-        ) || arg.starts_with("--stat=")
+        ) || arg.starts_with("--diff-merges=")
+            || arg.starts_with("--stat=")
             || arg.starts_with("-L")
             || arg.starts_with("--dirstat")
     })

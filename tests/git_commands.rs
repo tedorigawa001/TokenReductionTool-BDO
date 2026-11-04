@@ -349,6 +349,32 @@ fn log_with_a_patch_or_stat_shows_it() {
 }
 
 #[test]
+fn log_keeps_the_complete_combined_merge_diff() {
+    let repo = Repo::new();
+    repo.git(&["checkout", "-q", "-b", "other"]);
+    repo.commit_file("f.txt", "other\n", "other change");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.commit_file("f.txt", "main\n", "main change");
+    assert!(!raw_git(&repo.work, &["merge", "--no-ff", "other"])
+        .status
+        .success());
+    repo.commit_file("f.txt", "resolved\n", "resolve merge");
+
+    for args in [
+        vec!["log", "-1", "-c"],
+        vec!["log", "-1", "--cc"],
+        vec!["log", "-1", "--diff-merges=combined"],
+        vec!["log", "-1", "--diff-merges=dense-combined"],
+    ] {
+        let raw = raw_git(&repo.work, &args);
+        assert!(raw.status.success(), "{args:?}: {raw:?}");
+        let expected = String::from_utf8_lossy(&raw.stdout);
+        assert!(expected.contains("++resolved"), "{args:?}: {expected}");
+        assert_eq!(repo.ok(&args), expected, "{args:?}");
+    }
+}
+
+#[test]
 fn log_of_a_path_or_range_is_limited_to_it() {
     let repo = Repo::new();
     repo.commit_file("a.txt", "x\n", "touches a");

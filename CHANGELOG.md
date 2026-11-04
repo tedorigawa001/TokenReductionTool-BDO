@@ -5,6 +5,48 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.1] (2026-11-04)
+
+Found by measuring test coverage and then running the paths no test reached.
+
+### Fixed
+
+- **`cat -n` showed the wrong line numbers.** `bdo read -n` numbered what was left
+  after removing comments and collapsing blank lines, so line 7 could show as 4 and
+  a later reference or edit landed on the wrong line. It now numbers the unfiltered
+  text, so it saves nothing. Levels that rewrite lines (`aggressive`, `outline`) show
+  no numbers and say why.
+- **`git log` hid that it was capped.** It showed 10 commits, or 50 with a format
+  flag, and nothing about the rest. It now ends with
+  `[showing the latest 10 — use -n N for more]`. `-n20` counts as an explicit limit.
+- **`git log` lost diffs to its summary.** `-p`, `--stat`, `-c`, `-U<n>`,
+  `--word-diff` and the other options asking for a commit's changes are now git's
+  own output.
+- **`git commit` with nothing to commit exited 0**, so `git commit && git push`
+  carried on. It now keeps git's exit code. Anything relying on the old 0 will see 1.
+- **A conflicting `git stash pop` printed only `FAILED`**, because git reports the
+  conflict on stdout. Both streams are shown.
+- **Non-ASCII file names printed as `"\346\227\245.txt"`**, which could not be
+  opened. Filtered git commands now print them as they are.
+- **`bdo env` printed secrets held under ordinary names:** the password in
+  `DATABASE_URL`, `SENTRY_DSN`, `SESSION_COOKIE`. Values with URL credentials or
+  known token formats are now redacted whatever the name, and more names are masked.
+  `--show-all` still shows values.
+- **The Gemini hook ignored `tools.exclude` and `excludeTools`.** Its rewrite puts
+  `BDO_AGENT=gemini bdo` in front of the command, which a blocklist on `git push`
+  might no longer match. The hook now refuses those commands. This follows the
+  Gemini settings schema and was not run against the Gemini CLI.
+- **`read -l aggressive`** dropped the line after a signature and left bodies
+  unclosed.
+
+### Tests
+
+- End-to-end tests for the Claude, Cursor, Gemini and Copilot hooks, `bdo trust`,
+  `bdo verify`, `bdo git` against real git, and `bdo gh` against a stand-in.
+  Production line coverage went from 59.6% to 65.7%, measured on macOS.
+- `scripts/test-all.sh` now runs in CI as `Smoke tests`. It had run nowhere, and 11
+  of its checks had gone stale.
+
 ## [0.50.0] (2026-11-04)
 
 ### Fixed

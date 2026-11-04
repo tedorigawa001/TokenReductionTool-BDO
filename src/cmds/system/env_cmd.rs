@@ -3,6 +3,8 @@
 use crate::core::tracking;
 use crate::core::truncate::{CAP_LIST, CAP_WARNINGS};
 use anyhow::Result;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::collections::HashSet;
 use std::env;
 use std::fmt::Write;
@@ -35,17 +37,22 @@ pub fn run(filter: Option<&str>, show_all: bool, verbose: u8) -> Result<()> {
         }
 
         // Check if sensitive
-        let is_sensitive = sensitive_patterns
-            .iter()
-            .any(|p| key.to_lowercase().contains(p));
+        let is_sensitive = name_looks_sensitive(key, &sensitive_patterns);
 
         let display_value = if is_sensitive && !show_all {
             mask_value(value)
-        } else if value.len() > 100 {
-            let preview: String = value.chars().take(50).collect();
-            format!("{}... ({} chars)", preview, value.chars().count())
         } else {
-            value.clone()
+            let shown = if show_all {
+                value.clone()
+            } else {
+                redact_value(value)
+            };
+            if shown.len() > 100 {
+                let preview: String = shown.chars().take(50).collect();
+                format!("{}... ({} chars)", preview, shown.chars().count())
+            } else {
+                shown
+            }
         };
 
         let entry = (key.clone(), display_value);
@@ -149,7 +156,37 @@ fn get_sensitive_patterns() -> HashSet<&'static str> {
     set.insert("apikey");
     set.insert("access_key");
     set.insert("jwt");
+    set.insert("passwd");
+    set.insert("pwd");
+    set.insert("cookie");
+    set.insert("session");
+    set.insert("dsn");
+    set.insert("bearer");
     set
+}
+
+/// `PWD` and `OLDPWD` are directories, the one exception to matching on the name.
+fn name_looks_sensitive(key: &str, patterns: &HashSet<&'static str>) -> bool {
+    if key == "PWD" || key == "OLDPWD" {
+        return false;
+    }
+    let lower = key.to_lowercase();
+    patterns.iter().any(|p| lower.contains(p))
+}
+
+/// A variable can hold a secret whatever it is called: `DATABASE_URL` carries a
+/// password, `SENTRY_DSN` a key. Known secret formats go through the shared
+/// redaction. A URL's userinfo goes whole here, even with no `:password`, which
+/// that shared rule leaves alone because `git@host` is usually no secret.
+fn redact_value(value: &str) -> String {
+    lazy_static! {
+        static ref URL_USERINFO: Regex =
+            Regex::new(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@").unwrap();
+    }
+    let redacted = crate::core::redact::redact_secrets(value);
+    URL_USERINFO
+        .replace_all(&redacted, "${1}[REDACTED]@")
+        .into_owned()
 }
 
 fn mask_value(value: &str) -> String {
@@ -292,6 +329,29 @@ mod tests {
     fn test_is_interesting_var_negative() {
         assert!(!is_interesting_var("RANDOM_VAR"));
         assert!(!is_interesting_var("MY_CUSTOM_VAR"));
+    }
+
+    #[test]
+    fn test_name_looks_sensitive() {
+        let patterns = get_sensitive_patterns();
+        for key in ["DB_PASSWD", "MYSQL_PWD", "SESSION_COOKIE", "SENTRY_DSN", "API_KEY"] {
+            assert!(name_looks_sensitive(key, &patterns), "{key}");
+        }
+        for key in ["PWD", "OLDPWD", "HOME", "DATABASE_URL"] {
+            assert!(!name_looks_sensitive(key, &patterns), "{key}");
+        }
+    }
+
+    #[test]
+    fn test_redact_value_removes_url_userinfo() {
+        for (value, want) in [
+            ("postgres://u:hunter2@db/app", "postgres://[REDACTED]@db/app"),
+            ("https://abc123@sentry.io/1", "https://[REDACTED]@sentry.io/1"),
+            ("https://example.com/a@b", "https://example.com/a@b"),
+            ("/usr/local/bin", "/usr/local/bin"),
+        ] {
+            assert_eq!(redact_value(value), want);
+        }
     }
 
     #[test]

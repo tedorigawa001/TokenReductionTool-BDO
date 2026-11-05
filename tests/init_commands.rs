@@ -540,6 +540,70 @@ fn rules_files_keep_their_line_endings() {
     }
 }
 
+/// The same for files that get a marked block, as those take a different path.
+#[test]
+fn marked_blocks_keep_line_endings() {
+    for (install, uninstall, path) in [
+        (
+            &["init", "-g", "--claude-md"][..],
+            &["init", "-g", "--uninstall"][..],
+            "home/.claude/CLAUDE.md",
+        ),
+        (
+            &["init", "--codex", "-g"],
+            &["init", "--codex", "-g", "--uninstall"],
+            "home/.codex/AGENTS.md",
+        ),
+        (
+            &["init", "--gemini", "-g", "--auto-patch"],
+            &["init", "--gemini", "-g", "--uninstall"],
+            "home/.gemini/GEMINI.md",
+        ),
+        (
+            &["init", "--copilot"],
+            &["init", "--copilot", "--uninstall"],
+            "proj/.github/copilot-instructions.md",
+        ),
+    ] {
+        for mine in [
+            "# Mine\r\n",
+            "  # Indented\r\n",
+            "# Mine\r\nline two\r\n",
+            "# Mine\nline two\n",
+            "  # Indented\n",
+        ] {
+            let env = Env::new();
+            env.write(path, mine);
+            assert_ok(&env.bdo(install));
+            assert!(env.read(path).starts_with(mine), "{install:?}");
+            assert_ok(&env.bdo(uninstall));
+            assert_eq!(env.read(path), mine, "{install:?}");
+        }
+    }
+}
+
+/// An older block being replaced takes the same care as a new one being added.
+#[test]
+fn updating_an_older_block_keeps_line_endings() {
+    let env = Env::new();
+    let path = "proj/.github/copilot-instructions.md";
+    env.write(
+        path,
+        "# Mine\r\n\r\n<!-- bdo-instructions v0 -->\nold\n<!-- /bdo-instructions -->\r\n\r\nafter\r\n",
+    );
+    assert_ok(&env.bdo(&["init", "--copilot"]));
+    let updated = env.read(path);
+    assert!(
+        updated.starts_with("# Mine\r\n\r\n<!-- bdo-instructions"),
+        "{updated:?}"
+    );
+    assert!(updated.ends_with("-->\r\n\r\nafter\r\n"), "{updated:?}");
+    assert!(!updated.contains("\nold\n"), "{updated:?}");
+
+    assert_ok(&env.bdo(&["init", "--copilot", "--uninstall"]));
+    assert_eq!(env.read(path), "# Mine\r\n\r\nafter\r\n");
+}
+
 /// This file holds people's own instructions to Gemini. bdo used to replace it on
 /// install and delete it on uninstall, even under `--hook-only`.
 #[test]

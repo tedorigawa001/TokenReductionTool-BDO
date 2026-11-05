@@ -1516,18 +1516,23 @@ fn rules_installed(existing: &str, rules: &str) -> bool {
     existing.lines().any(|line| line.trim() == heading)
 }
 
+/// The line ending of a file's text. Give it the text untrimmed: the only CRLF may
+/// be the last newline.
+fn line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 /// The user's rules followed by bdo's, in the file's own line endings.
 fn append_rules(existing: &str, rules: &str) -> String {
     let kept = existing.trim_end();
     if kept.is_empty() {
         return rules.to_string();
     }
-    // The only CRLF may be the final newline removed by `trim_end`.
-    let newline = if existing.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let newline = line_ending(existing);
     format!("{kept}{newline}{newline}{rules}")
 }
 
@@ -2412,14 +2417,9 @@ fn run_codex_mode_with_paths(
 /// Drop legacy `@Bushido.md` reference lines (relative or absolute). Codex CLI
 /// has no `@import`, so these lines were inert text — replaced by an inline block.
 fn strip_codex_at_refs(content: &str) -> String {
-    content
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            !(t.starts_with('@') && t.ends_with("Bushido.md"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    remove_lines_matching(content, |line| {
+        line.starts_with('@') && line.ends_with("Bushido.md")
+    })
 }
 
 // --- upsert_rtk_block: idempotent Bushido block management ---
@@ -2458,12 +2458,15 @@ fn upsert_rtk_block(content: &str, block: &str) -> (String, RtkBlockUpsert) {
             // Replace stale block with desired block
             let before = content[..start].trim_end();
             let after = content[end_pos..].trim_start();
+            let newline = line_ending(&content[..start]);
 
             let result = match (before.is_empty(), after.is_empty()) {
                 (true, true) => desired_block.to_string(),
-                (true, false) => format!("{desired_block}\n\n{after}"),
-                (false, true) => format!("{before}\n\n{desired_block}"),
-                (false, false) => format!("{before}\n\n{desired_block}\n\n{after}"),
+                (true, false) => format!("{desired_block}{newline}{newline}{after}"),
+                (false, true) => format!("{before}{newline}{newline}{desired_block}"),
+                (false, false) => {
+                    format!("{before}{newline}{newline}{desired_block}{newline}{newline}{after}")
+                }
             };
 
             return (result, RtkBlockUpsert::Updated);
@@ -2478,7 +2481,11 @@ fn upsert_rtk_block(content: &str, block: &str) -> (String, RtkBlockUpsert) {
     if kept.is_empty() {
         (block.to_string(), RtkBlockUpsert::Added)
     } else {
-        (format!("{kept}\n\n{}", block.trim()), RtkBlockUpsert::Added)
+        let newline = line_ending(content);
+        (
+            format!("{kept}{newline}{newline}{}", block.trim()),
+            RtkBlockUpsert::Added,
+        )
     }
 }
 
@@ -2607,11 +2614,7 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
         "@Bushido.md\n".to_string()
     } else {
         // In the file's own line endings, so the reference comes out cleanly too.
-        let newline = if content.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
-        };
+        let newline = line_ending(&content);
         format!(
             "{}{newline}{newline}@Bushido.md{newline}",
             content.trim_end()
@@ -2692,11 +2695,7 @@ fn remove_rtk_block(content: &str) -> (String, bool) {
         let after = content[end_pos..].trim_start();
 
         // In the file's own line endings.
-        let newline = if before.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
-        };
+        let newline = line_ending(&content[..start]);
         let result = match (before.is_empty(), after.is_empty()) {
             (true, _) => after.to_string(),
             (false, true) => format!("{before}{newline}"),

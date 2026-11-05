@@ -5,6 +5,36 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.4] (2026-11-05)
+
+Found by running `bdo init` for every agent against a temporary `HOME`.
+
+### Changed
+
+- **`--agent cursor` sets up Cursor alone.** It used to set up Claude Code as well. A
+  Claude Code setup made by an earlier version stays until you run
+  `bdo init -g --uninstall`, and Cursor's uninstall says so.
+- **`-g --agent X --uninstall` and `-g --opencode --uninstall` remove only what was
+  named.** They used to remove the Claude Code setup too.
+- **`GEMINI.md` now holds a marked block**, so your own instructions can sit beside it.
+- **The success message says `Bushido set up`** rather than `Bushido hook registered`,
+  which was printed for partial installs too.
+
+### Fixed
+
+- **`GEMINI.md` was overwritten on install and deleted on uninstall.** Content already
+  lost this way can't be recovered.
+- **Broken Gemini settings were replaced.** They are now refused and left alone.
+- **Rules files that aren't UTF-8, such as Shift_JIS, were overwritten.**
+- **Uninstalling removed your own hooks** when they shared an entry with bdo's, and your
+  own content from rules files bdo had appended to.
+- **CRLF files came back as LF.** A Codex install rewrote all of `AGENTS.md` to LF every
+  time.
+- **A hook mentioning `bdo` anywhere counted as bdo's own.**
+- **Setup failed on a fresh `~/.claude`**, as the directory did not exist yet.
+- **The Codex dry run wrote files.**
+- **Uninstalling left files behind.**
+
 ## [0.50.3] (2026-11-05)
 
 Found by comparing `docker` and `kubectl` output with the real clients.

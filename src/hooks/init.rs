@@ -1522,7 +1522,12 @@ fn append_rules(existing: &str, rules: &str) -> String {
     if kept.is_empty() {
         return rules.to_string();
     }
-    let newline = if kept.contains("\r\n") { "\r\n" } else { "\n" };
+    // The only CRLF may be the final newline removed by `trim_end`.
+    let newline = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     format!("{kept}{newline}{newline}{rules}")
 }
 

@@ -523,6 +523,8 @@ fn rules_files_keep_their_line_endings() {
     ] {
         let uninstall = [install.as_slice(), &["--uninstall"]].concat();
         for mine in [
+            "# Mine\r\n",
+            "  # Indented\r\n",
             "# Mine\r\nline two\r\n",
             "# Mine\nline two\n",
             "  # Indented\n",

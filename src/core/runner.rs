@@ -103,6 +103,9 @@ pub struct RunOptions<'a> {
     pub filter_stdout_only: bool,
     pub skip_filter_on_failure: bool,
     pub no_trailing_newline: bool,
+    /// On failure, leave stdout out when stderr has the explanation. For flags
+    /// bdo added itself: `kubectl -o json` prints an empty List even when refused.
+    pub hide_stdout_when_stderr_explains: bool,
     /// Forward rtk's own stdin to the child process. Needed for commands that
     /// can read from a pipe (e.g. `cat file | rtk wc`); without it the child
     /// gets an empty stdin and reports zero.
@@ -131,6 +134,11 @@ impl<'a> RunOptions<'a> {
 
     pub fn early_exit_on_failure(mut self) -> Self {
         self.skip_filter_on_failure = true;
+        self
+    }
+
+    pub fn hide_stdout_when_stderr_explains(mut self) -> Self {
+        self.hide_stdout_when_stderr_explains = true;
         self
     }
 
@@ -179,7 +187,9 @@ where
     let raw_stdout = &result.raw_stdout;
 
     if opts.skip_filter_on_failure && exit_code != 0 {
-        if !result.raw_stdout.trim().is_empty() {
+        let hide_stdout =
+            opts.hide_stdout_when_stderr_explains && !result.raw_stderr.trim().is_empty();
+        if !hide_stdout && !result.raw_stdout.trim().is_empty() {
             print!("{}", result.raw_stdout);
         }
         if !result.raw_stderr.trim().is_empty() {

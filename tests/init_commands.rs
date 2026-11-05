@@ -149,6 +149,11 @@ const AGENTS: &[(&str, &[&str], &[&str])] = &[
         &["init", "-g", "--uninstall"],
     ),
     (
+        "cursor",
+        &["init", "-g", "--agent", "cursor"],
+        &["init", "-g", "--agent", "cursor", "--uninstall"],
+    ),
+    (
         "opencode",
         &["init", "-g", "--opencode", "--auto-patch"],
         &["init", "-g", "--opencode", "--uninstall"],
@@ -370,7 +375,6 @@ fn installing_keeps_every_line_the_user_wrote() {
     }
 }
 
-/// `-g --auto-patch` on Cursor also sets up Claude Code, so it has its own test.
 #[test]
 fn uninstalling_restores_what_the_user_had() {
     for (name, install, uninstall) in AGENTS {
@@ -456,17 +460,34 @@ fn uninstalling_one_agent_leaves_the_others_alone() {
 }
 
 #[test]
-fn cursor_uninstall_removes_its_hook_and_says_claude_stays() {
+fn cursor_setup_touches_only_cursor() {
     let env = Env::new();
-    env.write(
-        "home/.cursor/hooks.json",
-        &json!({"version": 1, "hooks": {"preToolUse": [{"command": "mine.sh"}]}}).to_string(),
-    );
-    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor", "--auto-patch"]));
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
     assert!(env
         .read("home/.cursor/hooks.json")
         .contains("bdo hook cursor"));
-    assert!(env.exists("home/.claude/Bushido.md"));
+    assert!(!env.exists("home/.claude"), "created ~/.claude");
+
+    // Someone who also has Claude Code keeps it as it was.
+    let env = Env::new();
+    env.write("home/.claude/settings.json", "{\"theme\": \"dark\"}\n");
+    env.write("home/.claude/CLAUDE.md", "# Mine\n");
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
+    assert_eq!(
+        env.read("home/.claude/settings.json"),
+        "{\"theme\": \"dark\"}\n"
+    );
+    assert_eq!(env.read("home/.claude/CLAUDE.md"), "# Mine\n");
+    assert!(!env.exists("home/.claude/Bushido.md"));
+}
+
+/// Earlier versions set up Claude Code too. That is not undone by removing Cursor,
+/// and the message says how to.
+#[test]
+fn cursor_uninstall_says_how_to_remove_an_earlier_claude_setup() {
+    let env = Env::new();
+    assert_ok(&env.bdo(&["init", "-g", "--auto-patch"]));
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
 
     let out = env.bdo(&["init", "-g", "--agent", "cursor", "--uninstall"]);
     assert_ok(&out);
@@ -475,13 +496,46 @@ fn cursor_uninstall_removes_its_hook_and_says_claude_stays() {
         "{}",
         text(&out)
     );
-    let cursor = env.read("home/.cursor/hooks.json");
-    assert!(cursor.contains("mine.sh"), "{cursor}");
-    assert!(!cursor.contains("bdo hook"), "{cursor}");
+    assert!(!env.read("home/.cursor/hooks.json").contains("bdo hook"));
     assert!(env.exists("home/.claude/Bushido.md"));
 
     assert_ok(&env.bdo(&["init", "-g", "--uninstall"]));
     assert!(!env.exists("home/.claude/Bushido.md"));
+}
+
+/// A file in CRLF stays in CRLF, down to its last line.
+#[test]
+fn rules_files_keep_their_line_endings() {
+    for (install, path) in [
+        (vec!["init", "--agent", "cline"], "proj/.clinerules"),
+        (
+            vec!["init", "-g", "--agent", "windsurf"],
+            "proj/.windsurfrules",
+        ),
+        (
+            vec!["init", "--agent", "kilocode"],
+            "proj/.kilocode/rules/bdo-rules.md",
+        ),
+        (
+            vec!["init", "--agent", "antigravity"],
+            "proj/.agents/rules/antigravity-bdo-rules.md",
+        ),
+    ] {
+        let uninstall = [install.as_slice(), &["--uninstall"]].concat();
+        for mine in [
+            "# Mine\r\nline two\r\n",
+            "# Mine\nline two\n",
+            "  # Indented\n",
+        ] {
+            let env = Env::new();
+            env.write(path, mine);
+            assert_ok(&env.bdo(&install));
+            let installed = env.read(path);
+            assert!(installed.starts_with(mine), "{install:?}: {installed:?}");
+            assert_ok(&env.bdo(&uninstall));
+            assert_eq!(env.read(path), mine, "{install:?}");
+        }
+    }
 }
 
 /// This file holds people's own instructions to Gemini. bdo used to replace it on

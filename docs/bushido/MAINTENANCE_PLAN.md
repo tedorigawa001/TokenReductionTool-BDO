@@ -754,8 +754,9 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
 - **行末**: CRLF のファイルが LF に変わり、末尾の改行が消えた。
 - **誤判定**: `abdomen` を含む `.clinerules` を「設定済み」と判定。
 - **テスト**: `tests/init_commands.rs`。全エージェントの性質を表で回す。
-- **未対応 / 判断待ち**: `--agent cursor` は Claude Code も設定する（元からの仕様で、アンインストールでは
-  残ると案内する）。`settings.json` のインデントは 2 スペースに変わる（内容は同じ）。JSONC（コメント付き）は
+- **`--agent cursor`**: Claude Code も設定していたのをやめ、Cursor だけにした。過去に入った Claude の
+  設定は残し、アンインストール時に案内する。
+- **未対応**: `settings.json` のインデントは 2 スペースに変わる（内容は同じ）。JSONC（コメント付き）は
   読めず拒否する。ローカルの `bdo init` と `--codex` のアンインストールは未対応で、手順を案内する。
   ホストの実物（Claude Code、Gemini CLI など）では動かしていない。
 

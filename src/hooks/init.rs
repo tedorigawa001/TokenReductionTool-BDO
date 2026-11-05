@@ -318,7 +318,7 @@ pub fn run(
                 }
             }
 
-            // Cursor hooks (additive, installed alongside Claude Code)
+            // Cursor hooks. `--agent cursor` sets up Cursor alone.
             if install_cursor {
                 install_cursor_hooks(ctx)?;
             }
@@ -772,8 +772,9 @@ pub fn uninstall(
             }
             if !dry_run {
                 println!("\nRestart Cursor to apply changes.");
-                println!("`bdo init -g --agent cursor` also set up Claude Code, which stays.");
-                println!("To remove that too: bdo init -g --uninstall");
+                println!(
+                    "Any Claude Code setup stays. To remove that too: bdo init -g --uninstall"
+                );
             }
         } else {
             println!("Bushido Cursor support was not installed (nothing to remove)");
@@ -1515,6 +1516,16 @@ fn rules_installed(existing: &str, rules: &str) -> bool {
     existing.lines().any(|line| line.trim() == heading)
 }
 
+/// The user's rules followed by bdo's, in the file's own line endings.
+fn append_rules(existing: &str, rules: &str) -> String {
+    let kept = existing.trim_end();
+    if kept.is_empty() {
+        return rules.to_string();
+    }
+    let newline = if kept.contains("\r\n") { "\r\n" } else { "\n" };
+    format!("{kept}{newline}{newline}{rules}")
+}
+
 /// Takes rules bdo appended out of a file the user may have rules of their own in.
 fn remove_appended_rules(path: &Path, rules: &str, ctx: InitContext) -> Result<bool> {
     let existing = read_if_exists(path)?;
@@ -1535,7 +1546,9 @@ fn remove_appended_rules(path: &Path, rules: &str, ctx: InitContext) -> Result<b
     let before = &existing[..start];
     // Installation adds a blank separator after the user's last line. Remove
     // just that separator, not the user's indentation or other whitespace.
-    let before = if before.ends_with("\n\n") {
+    let before = if before.ends_with("\r\n\r\n") {
+        &before[..before.len() - 2]
+    } else if before.ends_with("\n\n") {
         &before[..before.len() - 1]
     } else {
         before
@@ -1620,11 +1633,7 @@ fn run_cline_mode(ctx: InitContext) -> Result<()> {
             println!("  Rules: .clinerules (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            CLINE_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), CLINE_RULES)
-        };
+        let new_content = append_rules(&existing, CLINE_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write .clinerules: {}",
@@ -1666,11 +1675,7 @@ fn run_windsurf_mode(ctx: InitContext) -> Result<()> {
             println!("  Rules: .windsurfrules (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            WINDSURF_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), WINDSURF_RULES)
-        };
+        let new_content = append_rules(&existing, WINDSURF_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write .windsurfrules: {}",
@@ -1720,11 +1725,7 @@ fn run_kilocode_mode_at(base_dir: &Path, ctx: InitContext) -> Result<()> {
             println!("  Rules: .kilocode/rules/bdo-rules.md (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            KILOCODE_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), KILOCODE_RULES)
-        };
+        let new_content = append_rules(&existing, KILOCODE_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write {}: (and create parent dir if missing)",
@@ -1779,11 +1780,7 @@ fn run_antigravity_mode_at(base_dir: &Path, ctx: InitContext) -> Result<()> {
             println!("  Rules: .agents/rules/antigravity-bdo-rules.md (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            ANTIGRAVITY_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), ANTIGRAVITY_RULES)
-        };
+        let new_content = append_rules(&existing, ANTIGRAVITY_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write {}: (and create parent dir if missing)",

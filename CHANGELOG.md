@@ -5,6 +5,46 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.3] (2026-11-05)
+
+Found by comparing `docker` and `kubectl` output with the real clients.
+
+### Changed
+
+- **Log output is laid out differently.** Short logs are shown as they are instead of
+  as a summary. Long ones gain `[other] N lines` and their last 10 lines, so they print
+  up to 10 more lines. This covers `docker logs`, `kubectl logs`, `docker compose logs`,
+  `bdo log` and `bdo pipe`.
+- **`kubectl pods` labels its counts:** `8 pods: 1 running, 1 completed, …` rather than
+  `8 pods: 4, …`.
+
+### Fixed
+
+- **Log summaries dropped most of the log.** They kept only lines they could call an
+  error, warning or info, so a server's ordinary output, stack traces and the last lines
+  before a crash were gone, even from a one-line log.
+- **Crashing pods looked healthy.** A pod in `CrashLoopBackOff` keeps the phase `Running`,
+  and one in `ImagePullBackOff` keeps `Pending`. `kubectl pods` now reads container states
+  and names the reason. It also tells apart `OOMKilled`, failing init containers, pods
+  that are not ready, terminating and completed, and its counts add up. Faults are listed
+  first.
+- **`kubectl get pods NAME` and `get svc NAME` said `No pods found`** for pods that exist.
+- **The `logs` commands read only the last 100 lines without saying so.** They now say so
+  when they reach the limit, and how to get the rest.
+- **`kubectl get` summarised what was asked for as a table:** `-L`, `--no-headers`,
+  `--sort-by` and `--template` now pass through.
+- **Failed `kubectl` commands printed an empty JSON list**, produced by the `-o json` bdo
+  adds.
+- **`kubectl services` hid** named target ports, node ports and outside addresses.
+- **`docker ps -a` called paused containers stopped**, though `docker ps` lists them.
+- **Ports published on both IPv4 and IPv6 counted twice** in `docker ps` and
+  `docker compose ps`.
+- **`docker images` left kB sizes out of its total**, and added units that docker prints
+  in decimal as if they were binary.
+- **`docker compose build`** found no steps in captured output, and took `[INFO]` from a
+  step's output for a service.
+- **Error lines in log summaries** were cut at 100 characters, now 200.
+
 ## [0.50.2] (2026-11-05)
 
 Found by running the commands no test reached, and comparing them with the real tools.

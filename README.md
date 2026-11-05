@@ -611,6 +611,7 @@ For the full config reference (all sections, env vars, per-project filters), see
 
 ```bash
 bdo init -g --uninstall     # Remove hook, Bushido.md, settings.json entry
+bdo init --agent cline --uninstall   # One agent only: --agent <name>, --gemini -g, --codex -g, --opencode
 cargo uninstall bushido      # Remove binary (if installed via Cargo)
 brew uninstall bushido       # If installed via Homebrew
 ```

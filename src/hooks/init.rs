@@ -318,7 +318,7 @@ pub fn run(
                 }
             }
 
-            // Cursor hooks (additive, installed alongside Claude Code)
+            // Cursor hooks. `--agent cursor` sets up Cursor alone.
             if install_cursor {
                 install_cursor_hooks(ctx)?;
             }
@@ -447,6 +447,10 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         )
     })?;
 
+    // An agent that has never run has no config directory yet.
+    fs::create_dir_all(parent)
+        .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+
     // Create temp file in same directory (ensures same filesystem for atomic rename)
     let mut temp_file = NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {}", parent.display()))?;
@@ -465,6 +469,89 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     })?;
 
     Ok(())
+}
+
+/// A file's text, or nothing if it does not exist. Any other failure stops the
+/// caller: treating an unreadable file as empty would overwrite it.
+fn read_if_exists(path: &Path) -> Result<String> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(content),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e).with_context(|| format!("Failed to read {}", path.display())),
+    }
+}
+
+/// Writes what is left of a file bdo took something out of. With nothing left, the
+/// file goes: only bdo's own text was in it.
+fn write_or_remove_if_empty(path: &Path, content: &str) -> Result<()> {
+    if content.trim().is_empty() {
+        // nosemgrep: filesystem-deletion -- nothing but bdo's own text was in this file.
+        fs::remove_file(path).with_context(|| format!("Failed to remove {}", path.display()))
+    } else {
+        atomic_write(path, content).with_context(|| format!("Failed to write {}", path.display()))
+    }
+}
+
+/// Takes bdo's marked block out of a file and keeps the rest.
+fn remove_block_from_file(path: &Path, ctx: InitContext) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    if !content.contains(BDO_BLOCK_START) {
+        return Ok(false);
+    }
+    let (cleaned, did_remove) = remove_rtk_block(&content);
+    if !did_remove {
+        return Ok(false);
+    }
+    if ctx.dry_run {
+        println!(
+            "[dry-run] would remove bdo-instructions block from {}",
+            path.display()
+        );
+    } else {
+        write_or_remove_if_empty(path, &cleaned)?;
+    }
+    Ok(true)
+}
+
+/// Removes matching lines and the blank line before each, which is what bdo adds
+/// with them. Every other line keeps its exact bytes, line ending included.
+fn remove_lines_matching(content: &str, matches: impl Fn(&str) -> bool) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    for line in content.split_inclusive('\n') {
+        if matches(line.trim()) {
+            if kept.last().is_some_and(|l| l.trim().is_empty()) {
+                kept.pop();
+            }
+        } else {
+            kept.push(line);
+        }
+    }
+    kept.concat()
+}
+
+/// Removes hook commands bdo owns from a host's list of hook entries. An entry
+/// can hold the user's own hooks too, and those stay.
+fn remove_hook_commands(entries: &mut Vec<serde_json::Value>, ours: impl Fn(&str) -> bool) -> bool {
+    let mut removed = false;
+    entries.retain_mut(|entry| {
+        let Some(hooks) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|hook| {
+            !hook
+                .get("command")
+                .and_then(|c| c.as_str())
+                .is_some_and(&ours)
+        });
+        removed |= hooks.len() < before;
+        before == 0 || !hooks.is_empty()
+    });
+    removed
 }
 
 /// Prompt user for consent to patch settings.json
@@ -586,22 +673,10 @@ fn remove_hook_from_json(root: &mut serde_json::Value) -> bool {
         None => return false,
     };
 
-    let original_len = pre_tool_use_array.len();
-    pre_tool_use_array.retain(|entry| {
-        if let Some(hooks_array) = entry.get("hooks").and_then(|h| h.as_array()) {
-            for hook in hooks_array {
-                if let Some(command) = hook.get("command").and_then(|c| c.as_str()) {
-                    // Match both legacy script path and new binary command
-                    if command.contains(REWRITE_HOOK_FILE) || command == CLAUDE_HOOK_COMMAND {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    });
-
-    pre_tool_use_array.len() < original_len
+    // Match both legacy script path and new binary command
+    remove_hook_commands(pre_tool_use_array, |command| {
+        command.contains(REWRITE_HOOK_FILE) || command == CLAUDE_HOOK_COMMAND
+    })
 }
 
 /// Remove Bushido hook from settings.json file
@@ -697,6 +772,9 @@ pub fn uninstall(
             }
             if !dry_run {
                 println!("\nRestart Cursor to apply changes.");
+                println!(
+                    "Any Claude Code setup stays. To remove that too: bdo init -g --uninstall"
+                );
             }
         } else {
             println!("Bushido Cursor support was not installed (nothing to remove)");
@@ -797,13 +875,8 @@ pub fn uninstall(
         let mut working_content = content.clone();
 
         if working_content.contains(BDO_MD_REF) {
-            let new_content = working_content
-                .lines()
-                .filter(|line| !line.trim().starts_with(BDO_MD_REF))
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            working_content = clean_double_blanks(&new_content);
+            working_content =
+                remove_lines_matching(&working_content, |line| line.starts_with(BDO_MD_REF));
             claude_md_changed = true;
             removed.push("CLAUDE.md: removed @Bushido.md reference".to_string());
         }
@@ -845,7 +918,7 @@ pub fn uninstall(
                     println!("[dry-run] content:\n{}", working_content);
                 }
             } else {
-                fs::write(&claude_md_path, &working_content).with_context(|| {
+                atomic_write(&claude_md_path, &working_content).with_context(|| {
                     format!("Failed to write CLAUDE.md: {}", claude_md_path.display())
                 })?;
             }
@@ -948,27 +1021,8 @@ fn uninstall_codex_at(codex_dir: &Path, ctx: InitContext) -> Result<Vec<String>>
     }
 
     let agents_md_path = codex_dir.join(AGENTS_MD);
-    if agents_md_path.exists() {
-        let content = fs::read_to_string(&agents_md_path)
-            .with_context(|| format!("Failed to read AGENTS.md: {}", agents_md_path.display()))?;
-
-        let mut working_content = content.clone();
-        let mut agents_changed = false;
-
-        if working_content.contains(BDO_BLOCK_START) {
-            let (cleaned, did_remove) = remove_rtk_block(&working_content);
-            if did_remove {
-                working_content = cleaned;
-                agents_changed = true;
-                removed.push("AGENTS.md: removed bdo-instructions block".to_string());
-            }
-        }
-
-        if agents_changed {
-            atomic_write(&agents_md_path, &working_content).with_context(|| {
-                format!("Failed to write AGENTS.md: {}", agents_md_path.display())
-            })?;
-        }
+    if remove_block_from_file(&agents_md_path, ctx)? {
+        removed.push("AGENTS.md: removed bdo-instructions block".to_string());
     }
 
     if remove_rtk_reference_from_agents(
@@ -1085,46 +1139,29 @@ fn patch_settings_json_command(
     Ok(PatchResult::Patched)
 }
 
-/// Clean up consecutive blank lines (collapse 3+ to 2)
-/// Used when removing @Bushido.md line from CLAUDE.md
-fn clean_double_blanks(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut result = Vec::new();
-    let mut i = 0;
-
-    while i < lines.len() {
-        let line = lines[i];
-
-        if line.trim().is_empty() {
-            // Count consecutive blank lines
-            let mut blank_count = 0;
-            while i < lines.len() && lines[i].trim().is_empty() {
-                blank_count += 1;
-                i += 1;
-            }
-
-            // Keep at most 2 blank lines
-            let keep = blank_count.min(2);
-            result.extend(std::iter::repeat_n("", keep));
-        } else {
-            result.push(line);
-            i += 1;
-        }
+/// Stops before anything is written if settings.json could not take the hook. Without
+/// this, a broken file fails the install halfway, with CLAUDE.md already changed.
+fn ensure_claude_settings_usable() -> Result<()> {
+    let settings_path = resolve_claude_dir()?.join(SETTINGS_JSON);
+    let content = read_if_exists(&settings_path)?;
+    if content.trim().is_empty() {
+        return Ok(());
     }
-
-    result.join("\n")
+    let mut root: serde_json::Value = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse {} as JSON", settings_path.display()))?;
+    if hook_already_present(&root, CLAUDE_HOOK_COMMAND) {
+        return Ok(());
+    }
+    insert_hook_entry(&mut root, CLAUDE_HOOK_COMMAND)
+        .with_context(|| format!("Cannot add the hook to {}", settings_path.display()))
 }
 
 /// Deep-merge Bushido hook entry into settings.json
 /// Creates hooks.PreToolUse structure if missing, preserves existing hooks
 fn insert_hook_entry(root: &mut serde_json::Value, hook_command: &str) -> Result<()> {
-    let root_obj = match root.as_object_mut() {
-        Some(obj) => obj,
-        None => {
-            *root = serde_json::json!({});
-            root.as_object_mut().expect("just-created json object")
-        }
-    };
+    let root_obj = root
+        .as_object_mut()
+        .context("settings.json is not a JSON object")?;
 
     let hooks = root_obj
         .entry("hooks")
@@ -1185,6 +1222,8 @@ fn run_default_mode(
         return Ok(());
     }
 
+    ensure_claude_settings_usable()?;
+
     let claude_dir = resolve_claude_dir()?;
     let rtk_md_path = claude_dir.join(BDO_MD);
     let claude_md_path = claude_dir.join(CLAUDE_MD);
@@ -1205,7 +1244,7 @@ fn run_default_mode(
 
     // 3. Print success message (skip in dry-run)
     if !dry_run {
-        println!("\nBushido hook registered (global).\n");
+        println!("\nBushido set up (global).\n");
         println!("  Command:   {}", CLAUDE_HOOK_COMMAND);
         println!("  Bushido.md:    {} (10 lines)", rtk_md_path.display());
         if let Some(path) = &opencode_plugin_path {
@@ -1339,6 +1378,8 @@ fn run_hook_only_mode(
         return Ok(());
     }
 
+    ensure_claude_settings_usable()?;
+
     let opencode_plugin_path = if install_opencode {
         let path = prepare_opencode_plugin_path()?;
         ensure_opencode_plugin_installed(&path, ctx)?;
@@ -1348,7 +1389,7 @@ fn run_hook_only_mode(
     };
 
     if !dry_run {
-        println!("\nBushido hook registered (hook-only mode).\n");
+        println!("\nBushido set up (hook-only mode).\n");
         println!("  Command: {}", CLAUDE_HOOK_COMMAND);
         if let Some(path) = &opencode_plugin_path {
             println!("  OpenCode: {}", path.display());
@@ -1464,24 +1505,145 @@ const CLINE_RULES: &str = include_str!("../../hooks/cline/rules.md");
 
 // ─── Cline / Roo Code support ─────────────────────────────────
 
+/// Whether a rules file holds bdo's rules, going by their heading. A word such as
+/// "bdo" could be in anyone's rules.
+fn rules_installed(existing: &str, rules: &str) -> bool {
+    let heading = rules
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    existing.lines().any(|line| line.trim() == heading)
+}
+
+/// The line ending of a file's text. Give it the text untrimmed: the only CRLF may
+/// be the last newline.
+fn line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+/// The user's rules followed by bdo's, in the file's own line endings.
+fn append_rules(existing: &str, rules: &str) -> String {
+    let kept = existing.trim_end();
+    if kept.is_empty() {
+        return rules.to_string();
+    }
+    let newline = line_ending(existing);
+    format!("{kept}{newline}{newline}{rules}")
+}
+
+/// Takes rules bdo appended out of a file the user may have rules of their own in.
+fn remove_appended_rules(path: &Path, rules: &str, ctx: InitContext) -> Result<bool> {
+    let existing = read_if_exists(path)?;
+    if !rules_installed(&existing, rules) {
+        return Ok(false);
+    }
+    let Some(start) = existing.find(rules.trim()) else {
+        eprintln!(
+            "[warn] {} holds an edited copy of bdo's rules. Remove them by hand.",
+            path.display()
+        );
+        return Ok(false);
+    };
+    if ctx.dry_run {
+        println!("[dry-run] would remove bdo rules from {}", path.display());
+        return Ok(true);
+    }
+    let before = &existing[..start];
+    // Installation adds a blank separator after the user's last line. Remove
+    // just that separator, not the user's indentation or other whitespace.
+    let before = if before.ends_with("\r\n\r\n") {
+        &before[..before.len() - 2]
+    } else if before.ends_with("\n\n") {
+        &before[..before.len() - 1]
+    } else {
+        before
+    };
+    let after = &existing[start + rules.trim().len()..];
+    let own_trailing = &rules[rules.trim_end().len()..];
+    let after = after.strip_prefix(own_trailing).unwrap_or(after);
+    let kept = format!("{before}{after}");
+    write_or_remove_if_empty(path, &kept)?;
+    Ok(true)
+}
+
+/// Even a file under bdo's own name may hold user rules. Remove only the
+/// unedited rules we appended, then clean up the directory if the file is gone.
+fn remove_named_rules(path: &Path, rules: &str, ctx: InitContext) -> Result<bool> {
+    let removed = remove_appended_rules(path, rules, ctx)?;
+    if removed && !ctx.dry_run && !path.exists() {
+        remove_dir_if_empty(path.parent());
+    }
+    Ok(removed)
+}
+
+/// Leaves no empty directory behind. A directory with anything in it stays, which
+/// is `remove_dir`'s own rule.
+fn remove_dir_if_empty(dir: Option<&Path>) {
+    if let Some(dir) = dir {
+        // nosemgrep: filesystem-deletion -- fails harmlessly unless the directory is empty.
+        let _ = fs::remove_dir(dir);
+    }
+}
+
+/// Agents whose rules live in the current project, and which `-g` does not change.
+pub fn uninstall_project_rules(agent: &str, ctx: InitContext) -> Result<()> {
+    let removed = match agent {
+        "cline" => remove_appended_rules(Path::new(".clinerules"), CLINE_RULES, ctx)?,
+        "windsurf" => remove_appended_rules(Path::new(".windsurfrules"), WINDSURF_RULES, ctx)?,
+        "kilocode" => remove_named_rules(
+            Path::new(".kilocode/rules/bdo-rules.md"),
+            KILOCODE_RULES,
+            ctx,
+        )?,
+        "antigravity" => remove_named_rules(
+            Path::new(".agents/rules/antigravity-bdo-rules.md"),
+            ANTIGRAVITY_RULES,
+            ctx,
+        )?,
+        other => anyhow::bail!("No project rules to remove for {other}"),
+    };
+    match (removed, ctx.dry_run) {
+        (true, false) => println!("Bushido uninstalled ({agent}): rules removed from this project"),
+        (true, true) => print_dry_run_footer(),
+        (false, _) => println!("Bushido {agent} rules are not in this project (nothing to remove)"),
+    }
+    Ok(())
+}
+
+/// Removes only the OpenCode plugin. `bdo init -g --uninstall` removes everything.
+pub fn uninstall_opencode(ctx: InitContext) -> Result<()> {
+    let removed = remove_opencode_plugin(ctx)?;
+    if removed.is_empty() {
+        println!("Bushido OpenCode plugin was not installed (nothing to remove)");
+    } else if ctx.dry_run {
+        print_dry_run_footer();
+    } else {
+        for path in removed {
+            println!("Bushido uninstalled (OpenCode): {}", path.display());
+        }
+    }
+    Ok(())
+}
+
 fn run_cline_mode(ctx: InitContext) -> Result<()> {
     let InitContext { verbose, dry_run } = ctx;
     // Cline reads .clinerules from the project root (workspace-scoped)
     let rules_path = PathBuf::from(".clinerules");
     ensure_project_path_safe(Path::new("."), &rules_path)?;
 
-    let existing = fs::read_to_string(&rules_path).unwrap_or_default();
-    if existing.contains("BDO") || existing.contains("bdo") {
+    let existing = read_if_exists(&rules_path)?;
+    if rules_installed(&existing, CLINE_RULES) {
         if !dry_run {
             println!("\nbdo already configured for Cline in this project.\n");
             println!("  Rules: .clinerules (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            CLINE_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), CLINE_RULES)
-        };
+        let new_content = append_rules(&existing, CLINE_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write .clinerules: {}",
@@ -1516,18 +1678,14 @@ fn run_windsurf_mode(ctx: InitContext) -> Result<()> {
     let rules_path = PathBuf::from(".windsurfrules");
     ensure_project_path_safe(Path::new("."), &rules_path)?;
 
-    let existing = fs::read_to_string(&rules_path).unwrap_or_default();
-    if existing.contains("BDO") || existing.contains("bdo") {
+    let existing = read_if_exists(&rules_path)?;
+    if rules_installed(&existing, WINDSURF_RULES) {
         if !dry_run {
             println!("\nbdo already configured for Windsurf in this project.\n");
             println!("  Rules: .windsurfrules (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            WINDSURF_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), WINDSURF_RULES)
-        };
+        let new_content = append_rules(&existing, WINDSURF_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write .windsurfrules: {}",
@@ -1570,18 +1728,14 @@ fn run_kilocode_mode_at(base_dir: &Path, ctx: InitContext) -> Result<()> {
     let rules_path = target_dir.join("bdo-rules.md");
     ensure_project_path_safe(base_dir, &rules_path)?;
 
-    let existing = fs::read_to_string(&rules_path).unwrap_or_default();
-    if existing.contains("BDO") || existing.contains("bdo") {
+    let existing = read_if_exists(&rules_path)?;
+    if rules_installed(&existing, KILOCODE_RULES) {
         if !dry_run {
             println!("\nbdo already configured for Kilo Code in this project.\n");
             println!("  Rules: .kilocode/rules/bdo-rules.md (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            KILOCODE_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), KILOCODE_RULES)
-        };
+        let new_content = append_rules(&existing, KILOCODE_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write {}: (and create parent dir if missing)",
@@ -1629,18 +1783,14 @@ fn run_antigravity_mode_at(base_dir: &Path, ctx: InitContext) -> Result<()> {
     let rules_path = target_dir.join("antigravity-bdo-rules.md");
     ensure_project_path_safe(base_dir, &rules_path)?;
 
-    let existing = fs::read_to_string(&rules_path).unwrap_or_default();
-    if existing.contains("BDO") || existing.contains("bdo") {
+    let existing = read_if_exists(&rules_path)?;
+    if rules_installed(&existing, ANTIGRAVITY_RULES) {
         if !dry_run {
             println!("\nbdo already configured for Antigravity in this project.\n");
             println!("  Rules: .agents/rules/antigravity-bdo-rules.md (already present)");
         }
     } else {
-        let new_content = if existing.trim().is_empty() {
-            ANTIGRAVITY_RULES.to_string()
-        } else {
-            format!("{}\n\n{}", existing.trim(), ANTIGRAVITY_RULES)
-        };
+        let new_content = append_rules(&existing, ANTIGRAVITY_RULES);
         if dry_run {
             println!(
                 "[dry-run] would write {}: (and create parent dir if missing)",
@@ -2267,14 +2417,9 @@ fn run_codex_mode_with_paths(
 /// Drop legacy `@Bushido.md` reference lines (relative or absolute). Codex CLI
 /// has no `@import`, so these lines were inert text — replaced by an inline block.
 fn strip_codex_at_refs(content: &str) -> String {
-    content
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            !(t.starts_with('@') && t.ends_with("Bushido.md"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    remove_lines_matching(content, |line| {
+        line.starts_with('@') && line.ends_with("Bushido.md")
+    })
 }
 
 // --- upsert_rtk_block: idempotent Bushido block management ---
@@ -2313,12 +2458,15 @@ fn upsert_rtk_block(content: &str, block: &str) -> (String, RtkBlockUpsert) {
             // Replace stale block with desired block
             let before = content[..start].trim_end();
             let after = content[end_pos..].trim_start();
+            let newline = line_ending(&content[..start]);
 
             let result = match (before.is_empty(), after.is_empty()) {
                 (true, true) => desired_block.to_string(),
-                (true, false) => format!("{desired_block}\n\n{after}"),
-                (false, true) => format!("{before}\n\n{desired_block}"),
-                (false, false) => format!("{before}\n\n{desired_block}\n\n{after}"),
+                (true, false) => format!("{desired_block}{newline}{newline}{after}"),
+                (false, true) => format!("{before}{newline}{newline}{desired_block}"),
+                (false, false) => {
+                    format!("{before}{newline}{newline}{desired_block}{newline}{newline}{after}")
+                }
             };
 
             return (result, RtkBlockUpsert::Updated);
@@ -2329,12 +2477,13 @@ fn upsert_rtk_block(content: &str, block: &str) -> (String, RtkBlockUpsert) {
     }
 
     // No existing block — append
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
+    let kept = content.trim_end();
+    if kept.is_empty() {
         (block.to_string(), RtkBlockUpsert::Added)
     } else {
+        let newline = line_ending(content);
         (
-            format!("{trimmed}\n\n{}", block.trim()),
+            format!("{kept}{newline}{newline}{}", block.trim()),
             RtkBlockUpsert::Added,
         )
     }
@@ -2464,7 +2613,12 @@ fn patch_claude_md(path: &Path, ctx: InitContext) -> Result<bool> {
     let new_content = if content.is_empty() {
         "@Bushido.md\n".to_string()
     } else {
-        format!("{}\n\n@Bushido.md\n", content.trim())
+        // In the file's own line endings, so the reference comes out cleanly too.
+        let newline = line_ending(&content);
+        format!(
+            "{}{newline}{newline}@Bushido.md{newline}",
+            content.trim_end()
+        )
     };
 
     if dry_run {
@@ -2505,15 +2659,7 @@ fn remove_rtk_reference_from_agents(path: &Path, refs: &[&str], ctx: InitContext
         return Ok(false);
     }
 
-    let new_content = content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !refs.contains(&trimmed)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let cleaned = clean_double_blanks(&new_content);
+    let cleaned = remove_lines_matching(&content, |line| refs.contains(&line));
 
     if dry_run {
         println!(
@@ -2526,8 +2672,7 @@ fn remove_rtk_reference_from_agents(path: &Path, refs: &[&str], ctx: InitContext
         return Ok(true);
     }
 
-    atomic_write(path, &cleaned)
-        .with_context(|| format!("Failed to write AGENTS.md: {}", path.display()))?;
+    write_or_remove_if_empty(path, &cleaned)?;
 
     if verbose > 0 {
         eprintln!(
@@ -2541,15 +2686,20 @@ fn remove_rtk_reference_from_agents(path: &Path, refs: &[&str], ctx: InitContext
 
 /// Remove old Bushido block from CLAUDE.md (migration helper)
 fn remove_rtk_block(content: &str) -> (String, bool) {
-    if let (Some(start), Some(end)) = (content.find(BDO_BLOCK_START), content.find(BDO_BLOCK_END)) {
-        let end_pos = end + BDO_BLOCK_END.len();
+    let block_end = content.find(BDO_BLOCK_START).and_then(|start| {
+        let end = content[start..].find(BDO_BLOCK_END)?;
+        Some((start, start + end + BDO_BLOCK_END.len()))
+    });
+    if let Some((start, end_pos)) = block_end {
         let before = content[..start].trim_end();
         let after = content[end_pos..].trim_start();
 
-        let result = if after.is_empty() {
-            format!("{}\n", before)
-        } else {
-            format!("{}\n\n{}", before, after)
+        // In the file's own line endings.
+        let newline = line_ending(&content[..start]);
+        let result = match (before.is_empty(), after.is_empty()) {
+            (true, _) => after.to_string(),
+            (false, true) => format!("{before}{newline}"),
+            (false, false) => format!("{before}{newline}{newline}{after}"),
         };
 
         (result, true) // migrated
@@ -2831,6 +2981,7 @@ fn remove_opencode_plugin(ctx: InitContext) -> Result<Vec<PathBuf>> {
         } else {
             fs::remove_file(&path)
                 .with_context(|| format!("Failed to remove OpenCode plugin: {}", path.display()))?;
+            remove_dir_if_empty(path.parent());
             if verbose > 0 {
                 eprintln!("Removed OpenCode plugin: {}", path.display());
             }
@@ -3522,8 +3673,20 @@ pub fn run_gemini(
     // 2. Install GEMINI.md (Bushido awareness for Gemini)
     if !hook_only {
         let gemini_md_path = gemini_dir.join(GEMINI_MD);
-        // Reuse the same slim Bushido awareness content
-        write_if_changed(&gemini_md_path, BDO_SLIM, GEMINI_MD, ctx)?;
+        // A marked block, as the user's own rules may be in this file. A file that
+        // is exactly bdo's text was written whole by an earlier version.
+        let block = gemini_block();
+        if read_if_exists(&gemini_md_path)?.trim() == BDO_SLIM.trim() {
+            write_if_changed(&gemini_md_path, &block, GEMINI_MD, ctx)?;
+        } else {
+            write_rtk_block(
+                &gemini_md_path,
+                &block,
+                GEMINI_MD,
+                "bdo init -g --gemini",
+                ctx,
+            )?;
+        }
     }
 
     // 3. Patch ~/.gemini/settings.json
@@ -3542,6 +3705,13 @@ pub fn run_gemini(
     Ok(())
 }
 
+fn gemini_block() -> String {
+    format!(
+        "{BDO_BLOCK_START} -->\n{}\n{BDO_BLOCK_END}\n",
+        BDO_SLIM.trim()
+    )
+}
+
 /// Patch ~/.gemini/settings.json with the BeforeTool hook
 fn patch_gemini_settings(
     gemini_dir: &Path,
@@ -3557,7 +3727,13 @@ fn patch_gemini_settings(
     let mut settings: serde_json::Value = if settings_path.exists() {
         let content = fs::read_to_string(&settings_path)
             .with_context(|| format!("Failed to read {}", settings_path.display()))?;
-        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+        // Not `{}` on a parse error: writing it back would erase the user's settings.
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse {} as JSON", settings_path.display()))?
+        }
     } else {
         serde_json::json!({})
     };
@@ -3565,11 +3741,13 @@ fn patch_gemini_settings(
     let before_tool_pointer = format!("/hooks/{}", BEFORE_TOOL_KEY);
     if let Some(hooks) = settings.pointer(&before_tool_pointer) {
         if let Some(arr) = hooks.as_array() {
-            if arr.iter().any(|h| {
-                h.pointer("/hooks/0/command")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|c| c.contains("bdo"))
-            }) {
+            let has_our_hook = arr
+                .iter()
+                .filter_map(|entry| entry.get("hooks")?.as_array())
+                .flatten()
+                .filter_map(|hook| hook.get("command")?.as_str())
+                .any(|command| command.contains(GEMINI_HOOK_FILE));
+            if has_our_hook {
                 if verbose > 0 {
                     eprintln!("Gemini settings.json already has Bushido hook");
                 }
@@ -3649,10 +3827,7 @@ fn patch_gemini_settings(
         return Ok(());
     }
 
-    // Write atomically
-    let tmp = NamedTempFile::new_in(gemini_dir)?;
-    fs::write(tmp.path(), &content)?;
-    tmp.persist(&settings_path)
+    atomic_write(&settings_path, &content)
         .with_context(|| format!("Failed to write {}", settings_path.display()))?;
 
     if verbose > 0 {
@@ -3686,16 +3861,31 @@ fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
         removed.push(format!("Gemini hook: {}", hook_path.display()));
     }
 
-    // Remove GEMINI.md
+    // Its integrity baseline, and the directory if that leaves it empty
+    let hash_path = integrity::hash_path_for(&hook_path);
+    if dry_run {
+        if hash_path.exists() {
+            println!("[dry-run] would remove integrity hash sidecar");
+        }
+    } else {
+        integrity::remove_hash(&hook_path)?;
+        remove_dir_if_empty(hook_path.parent());
+    }
+
+    // Take bdo's part out of GEMINI.md. The rest of the file is the user's. A file
+    // that is exactly bdo's text was written whole by an earlier version.
     let gemini_md = gemini_dir.join(GEMINI_MD);
-    if gemini_md.exists() {
+    if read_if_exists(&gemini_md)?.trim() == BDO_SLIM.trim() {
         if dry_run {
             println!("[dry-run] would remove GEMINI.md: {}", gemini_md.display());
         } else {
+            // nosemgrep: filesystem-deletion -- the file holds only bdo's own text.
             fs::remove_file(&gemini_md)
                 .with_context(|| format!("Failed to remove {}", gemini_md.display()))?;
         }
         removed.push(format!("GEMINI.md: {}", gemini_md.display()));
+    } else if remove_block_from_file(&gemini_md, ctx)? {
+        removed.push("GEMINI.md: removed bdo-instructions block".to_string());
     }
 
     // Remove hook from settings.json
@@ -3708,13 +3898,7 @@ fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
                 .pointer_mut(&bt_pointer)
                 .and_then(|v| v.as_array_mut())
             {
-                let before = arr.len();
-                arr.retain(|h| {
-                    !h.pointer("/hooks/0/command")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|c| c.contains("bdo"))
-                });
-                if arr.len() < before {
+                if remove_hook_commands(arr, |command| command.contains(GEMINI_HOOK_FILE)) {
                     if dry_run {
                         println!(
                             "[dry-run] would remove Bushido hook from Gemini settings.json: {}",
@@ -3722,7 +3906,9 @@ fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
                         );
                     } else {
                         let new_content = serde_json::to_string_pretty(&settings)?;
-                        fs::write(&settings_path, new_content)?;
+                        atomic_write(&settings_path, &new_content).with_context(|| {
+                            format!("Failed to write {}", settings_path.display())
+                        })?;
                     }
                     removed.push("Gemini settings.json: removed Bushido hook entry".to_string());
                 }
@@ -3891,33 +4077,17 @@ fn uninstall_copilot_at(base: &Path, ctx: InitContext) -> Result<Vec<String>> {
             // nosemgrep: filesystem-deletion -- Copilot uninstall removes only the Bushido-managed hook config.
             fs::remove_file(&hook_path)
                 .with_context(|| format!("Failed to remove hook: {}", hook_path.display()))?;
+            remove_dir_if_empty(hook_path.parent());
         }
         removed.push(format!("Hook config: {}", hook_path.display()));
     }
 
     let instructions_path = github_dir.join(COPILOT_INSTRUCTIONS_FILE);
-    if instructions_path.exists() {
-        let content = fs::read_to_string(&instructions_path)
-            .with_context(|| format!("Failed to read {}", instructions_path.display()))?;
-        if content.contains(BDO_BLOCK_START) {
-            let (cleaned, did_remove) = remove_rtk_block(&content);
-            if did_remove {
-                if dry_run {
-                    println!(
-                        "[dry-run] would remove bdo-instructions block from {}",
-                        instructions_path.display()
-                    );
-                } else {
-                    atomic_write(&instructions_path, &cleaned).with_context(|| {
-                        format!("Failed to write {}", instructions_path.display())
-                    })?;
-                }
-                removed.push(format!(
-                    "{}: removed bdo-instructions block",
-                    COPILOT_INSTRUCTIONS_FILE
-                ));
-            }
-        }
+    if remove_block_from_file(&instructions_path, ctx)? {
+        removed.push(format!(
+            "{}: removed bdo-instructions block",
+            COPILOT_INSTRUCTIONS_FILE
+        ));
     }
 
     Ok(removed)
@@ -4018,33 +4188,17 @@ fn uninstall_copilot_global_at(copilot_dir: &Path, ctx: InitContext) -> Result<V
             // nosemgrep: filesystem-deletion -- Copilot global uninstall removes only the Bushido-managed hook config.
             fs::remove_file(&hook_path)
                 .with_context(|| format!("Failed to remove hook: {}", hook_path.display()))?;
+            remove_dir_if_empty(hook_path.parent());
         }
         removed.push(format!("Hook config: {}", hook_path.display()));
     }
 
     let instructions_path = copilot_dir.join(COPILOT_INSTRUCTIONS_FILE);
-    if instructions_path.exists() {
-        let content = fs::read_to_string(&instructions_path)
-            .with_context(|| format!("Failed to read {}", instructions_path.display()))?;
-        if content.contains(BDO_BLOCK_START) {
-            let (cleaned, did_remove) = remove_rtk_block(&content);
-            if did_remove {
-                if dry_run {
-                    println!(
-                        "[dry-run] would remove bdo-instructions block from {}",
-                        instructions_path.display()
-                    );
-                } else {
-                    atomic_write(&instructions_path, &cleaned).with_context(|| {
-                        format!("Failed to write {}", instructions_path.display())
-                    })?;
-                }
-                removed.push(format!(
-                    "{}: removed bdo-instructions block",
-                    COPILOT_INSTRUCTIONS_FILE
-                ));
-            }
-        }
+    if remove_block_from_file(&instructions_path, ctx)? {
+        removed.push(format!(
+            "{}: removed bdo-instructions block",
+            COPILOT_INSTRUCTIONS_FILE
+        ));
     }
 
     Ok(removed)
@@ -5386,23 +5540,37 @@ mod tests {
         assert!(serialized.contains("\"model\""));
     }
 
-    // Tests for clean_double_blanks()
     #[test]
-    fn test_clean_double_blanks() {
-        // Input: line1, 2 blank lines, line2, 1 blank line, line3, 3 blank lines, line4
-        // Expected: line1, 2 blank lines (kept), line2, 1 blank line, line3, 2 blank lines (max), line4
-        let input = "line1\n\n\nline2\n\nline3\n\n\n\nline4";
-        // That's: line1 \n \n \n line2 \n \n line3 \n \n \n \n line4
-        // Which is: line1, blank, blank, line2, blank, line3, blank, blank, blank, line4
-        // So 2 blanks after line1 (keep both), 1 blank after line2 (keep), 3 blanks after line3 (keep 2)
-        let expected = "line1\n\n\nline2\n\nline3\n\n\nline4";
-        assert_eq!(clean_double_blanks(input), expected);
+    fn test_remove_lines_matching_keeps_other_lines_exactly() {
+        let is_ref = |line: &str| line == "@Bushido.md";
+        for (input, expected) in [
+            ("# Mine\n\n@Bushido.md\n", "# Mine\n"),
+            (
+                "# Mine\r\n\r\n@Bushido.md\r\n\r\nafter\r\n",
+                "# Mine\r\n\r\nafter\r\n",
+            ),
+            ("# Mine\n\n\n\n@Bushido.md", "# Mine\n\n\n"),
+            ("@Bushido.md\n", ""),
+            ("no reference", "no reference"),
+        ] {
+            assert_eq!(remove_lines_matching(input, is_ref), expected, "{input:?}");
+        }
     }
 
     #[test]
-    fn test_clean_double_blanks_preserves_single() {
-        let input = "line1\n\nline2\n\nline3";
-        assert_eq!(clean_double_blanks(input), input); // No change
+    fn test_remove_rtk_block_needs_the_end_after_the_start() {
+        let content = format!("{BDO_BLOCK_END}\nmine\n{BDO_BLOCK_START} -->\n");
+        let (cleaned, did_remove) = remove_rtk_block(&content);
+        assert!(!did_remove);
+        assert_eq!(cleaned, content);
+    }
+
+    #[test]
+    fn test_remove_rtk_block_with_nothing_else_leaves_nothing() {
+        let block = format!("{BDO_BLOCK_START} -->\nx\n{BDO_BLOCK_END}\n");
+        assert_eq!(remove_rtk_block(&block), (String::new(), true));
+        let (cleaned, _) = remove_rtk_block(&format!("{block}\nmine\n"));
+        assert_eq!(cleaned, "mine\n");
     }
 
     // Tests for remove_hook_from_settings()
@@ -6460,11 +6628,8 @@ mod tests {
 
         assert!(!removed.is_empty());
         assert!(!hook_path.exists(), "hook config must be removed");
-        let instructions = fs::read_to_string(&instructions_path).unwrap();
-        assert!(
-            !instructions.contains(BDO_BLOCK_START),
-            "Bushido block must be removed"
-        );
+        // bdo created the file, and nothing else was in it.
+        assert!(!instructions_path.exists(), "empty file must be removed");
     }
 
     #[test]

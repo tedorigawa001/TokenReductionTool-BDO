@@ -2124,6 +2124,16 @@ fn run_cli() -> Result<i32> {
                 } else {
                     hooks::init::uninstall_copilot(ctx)?;
                 }
+            } else if uninstall && opencode {
+                hooks::init::uninstall_opencode(ctx)?;
+            } else if uninstall && agent == Some(AgentTarget::Windsurf) {
+                hooks::init::uninstall_project_rules("windsurf", ctx)?;
+            } else if uninstall && agent == Some(AgentTarget::Cline) {
+                hooks::init::uninstall_project_rules("cline", ctx)?;
+            } else if uninstall && agent == Some(AgentTarget::Kilocode) {
+                hooks::init::uninstall_project_rules("kilocode", ctx)?;
+            } else if uninstall && agent == Some(AgentTarget::Antigravity) {
+                hooks::init::uninstall_project_rules("antigravity", ctx)?;
             } else if uninstall {
                 uninstall_init_dispatch(
                     agent,
@@ -2167,8 +2177,8 @@ fn run_cli() -> Result<i32> {
                 hooks::init::run_hermes_mode(ctx)?;
             } else {
                 let install_opencode = opencode;
-                let install_claude = !opencode;
                 let install_cursor = agent == Some(AgentTarget::Cursor);
+                let install_claude = !opencode && !install_cursor;
                 let install_windsurf = agent == Some(AgentTarget::Windsurf);
                 let install_cline = agent == Some(AgentTarget::Cline);
 

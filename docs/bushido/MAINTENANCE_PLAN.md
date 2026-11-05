@@ -732,3 +732,31 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
   エラー行以外が要約に入らない。`no errors found` のような行はエラーに数えられる。`docker ps` は
   表示用に docker を 2 回実行する。`bdo docker ps --filter ...` は素通しで圧縮されない。
 
+### 2026-11-05 — hooks/init.rs（全エージェントのインストールとアンインストール）
+
+利用者が手で管理するファイルを書き換える処理なので、機能ごとではなく全エージェント共通の性質
+（新規環境で動く、2 回実行しても変わらない、dry-run は書かない、利用者の行を失わない、アンインストールで
+戻る）を一時 `HOME` で確認した。
+
+- **データ消失**: `--gemini` が `~/.gemini/GEMINI.md` を丸ごと置換し、アンインストールで削除
+  （`--hook-only` でも）。壊れた Gemini の `settings.json` を `{}` 扱いで置換。読めない
+  `.clinerules` などを空扱いで上書き（Shift_JIS など）。
+- **別の設定を消す**: `-g --agent windsurf|cline|kilocode|antigravity --uninstall` と
+  `-g --opencode --uninstall` が Claude の設定を消していた。専用のアンインストールを追加。
+- **利用者のフックを消す**: 同じエントリにある他のフックも一緒に消えた。Gemini は `bdo` を含む
+  コマンドすべてを自分のものと誤認し、`/opt/bdo-audit/check.sh` があるとインストールもしなかった。
+- **新規環境で失敗**: `~/.claude` がないと `bdo init -g` が失敗。`CLAUDE_CONFIG_DIR` も同様。
+- **途中で失敗**: 壊れた `settings.json` でも CLAUDE.md を変更してから失敗し、`hook registered`
+  と出していた。先に検証する。リストの `settings.json` は黙って `{}` に置換していた。
+- **dry-run が書く**: Codex のアンインストール。
+- **残骸**: Gemini の `.bdo-hook.sha256`、bdo だけが書いた空の AGENTS.md や copilot-instructions.md、
+  空のディレクトリ。
+- **行末**: CRLF のファイルが LF に変わり、末尾の改行が消えた。
+- **誤判定**: `abdomen` を含む `.clinerules` を「設定済み」と判定。
+- **テスト**: `tests/init_commands.rs`。全エージェントの性質を表で回す。
+- **`--agent cursor`**: Claude Code も設定していたのをやめ、Cursor だけにした。過去に入った Claude の
+  設定は残し、アンインストール時に案内する。
+- **未対応**: `settings.json` のインデントは 2 スペースに変わる（内容は同じ）。JSONC（コメント付き）は
+  読めず拒否する。ローカルの `bdo init` と `--codex` のアンインストールは未対応で、手順を案内する。
+  ホストの実物（Claude Code、Gemini CLI など）では動かしていない。
+

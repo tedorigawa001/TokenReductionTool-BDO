@@ -66,6 +66,12 @@ bdo init --global --agent cursor
 
 Restart Cursor. The hook uses `preToolUse` with Cursor's `updated_input` format.
 
+This sets up Cursor only. Before 0.50.4 it also set up Claude Code, which stays until you run `bdo init -g --uninstall`. To remove the Cursor hook alone:
+
+```bash
+bdo init --global --agent cursor --uninstall
+```
+
 ### GitHub Copilot (VS Code Chat + CLI)
 
 ```bash

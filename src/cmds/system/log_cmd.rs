@@ -65,7 +65,37 @@ pub fn run_stdin_str(content: &str) -> String {
     analyze_logs(content)
 }
 
+/// Logs this short are shown as they are, unless they repeat themselves.
+const SHOWN_WHOLE_LINES: usize = 20;
+/// The end of a log says what happened last, in words no category can predict:
+/// a stack trace, a shutdown, a server's ordinary output.
+const LAST_LINES: usize = 10;
+const MAX_LINE_CHARS: usize = 200;
+
+fn shorten(line: &str) -> String {
+    if line.chars().count() > MAX_LINE_CHARS {
+        let t: String = line.chars().take(MAX_LINE_CHARS - 3).collect();
+        format!("{}...", t)
+    } else {
+        line.to_string()
+    }
+}
+
 fn analyze_logs(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return "(no log output)".to_string();
+    }
+    if lines.len() <= SHOWN_WHOLE_LINES {
+        let distinct: std::collections::HashSet<String> = lines
+            .iter()
+            .map(|l| normalize_log_line(l, &TIMESTAMP_RE, &UUID_RE, &HEX_RE, &NUM_RE, &PATH_RE))
+            .collect();
+        if distinct.len() == lines.len() {
+            return lines.join("\n");
+        }
+    }
+
     let mut result = Vec::new();
     let mut error_counts: HashMap<String, usize> = HashMap::new();
     let mut warn_counts: HashMap<String, usize> = HashMap::new();
@@ -115,7 +145,7 @@ fn analyze_logs(content: &str) -> String {
     let total_warnings: usize = warn_counts.values().sum();
     let total_info: usize = info_counts.values().sum();
 
-    result.push("Log Summary".to_string());
+    result.push(format!("Log Summary ({} lines)", lines.len()));
     result.push(format!(
         "   [error] {} errors ({} unique)",
         total_errors,
@@ -127,6 +157,10 @@ fn analyze_logs(content: &str) -> String {
         warn_counts.len()
     ));
     result.push(format!("   [info] {} info messages", total_info));
+    let other = lines.len().saturating_sub(total_errors + total_warnings + total_info);
+    if other > 0 {
+        result.push(format!("   [other] {} lines", other));
+    }
     result.push(String::new());
 
     // Errors with counts
@@ -135,7 +169,7 @@ fn analyze_logs(content: &str) -> String {
 
         // Sort by count
         let mut error_list: Vec<_> = error_counts.iter().collect();
-        error_list.sort_by(|a, b| b.1.cmp(a.1));
+        error_list.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
 
         const MAX_LOG_ERRORS: usize = CAP_WARNINGS;
         for (normalized, count) in error_list.iter().take(MAX_LOG_ERRORS) {
@@ -149,12 +183,7 @@ fn analyze_logs(content: &str) -> String {
                 .map(|s| s.as_str())
                 .unwrap_or(normalized);
 
-            let truncated = if original.len() > 100 {
-                let t: String = original.chars().take(97).collect();
-                format!("{}...", t)
-            } else {
-                original.to_string()
-            };
+            let truncated = shorten(original);
 
             if **count > 1 {
                 result.push(format!("   [×{}] {}", count, truncated));
@@ -177,7 +206,7 @@ fn analyze_logs(content: &str) -> String {
         result.push("[WARNINGS]".to_string());
 
         let mut warn_list: Vec<_> = warn_counts.iter().collect();
-        warn_list.sort_by(|a, b| b.1.cmp(a.1));
+        warn_list.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
 
         // warnings are lower severity than errors — show fewer.
         const MAX_LOG_WARNS: usize = reduced(CAP_WARNINGS, 5);
@@ -191,12 +220,7 @@ fn analyze_logs(content: &str) -> String {
                 .map(|s| s.as_str())
                 .unwrap_or(normalized);
 
-            let truncated = if original.len() > 100 {
-                let t: String = original.chars().take(97).collect();
-                format!("{}...", t)
-            } else {
-                original.to_string()
-            };
+            let truncated = shorten(original);
 
             if **count > 1 {
                 result.push(format!("   [×{}] {}", count, truncated));
@@ -211,6 +235,13 @@ fn analyze_logs(content: &str) -> String {
                 warn_list.len() - MAX_LOG_WARNS
             ));
         }
+        result.push(String::new());
+    }
+
+    let shown = LAST_LINES.min(lines.len());
+    result.push(format!("[LAST {} LINES]", shown));
+    for line in &lines[lines.len() - shown..] {
+        result.push(format!("   {}", shorten(line)));
     }
 
     result.join("\n")
@@ -236,6 +267,46 @@ fn normalize_log_line(
 mod tests {
     use super::*;
 
+    /// Pads a log past the length that is shown whole.
+    fn long(logs: &str) -> String {
+        let filler: String = (0..30).map(|i| format!("step {i} done\n")).collect();
+        format!("{filler}{logs}")
+    }
+
+    #[test]
+    fn test_short_log_is_shown_whole() {
+        let logs = "starting\nServer listening on port 3000\n\nTraceback (most recent call last):\n";
+        assert_eq!(
+            analyze_logs(logs),
+            "starting\nServer listening on port 3000\nTraceback (most recent call last):"
+        );
+    }
+
+    #[test]
+    fn test_empty_log_says_so() {
+        assert_eq!(analyze_logs(""), "(no log output)");
+        assert_eq!(analyze_logs("  \n\n"), "(no log output)");
+    }
+
+    #[test]
+    fn test_long_log_counts_and_ends_with_its_last_lines() {
+        let result = analyze_logs(&long("ERROR: failed\nINFO: up\nout of memory\nKilled\n"));
+        assert!(result.starts_with("Log Summary (34 lines)"), "{result}");
+        assert!(result.contains("[error] 1 errors"), "{result}");
+        assert!(result.contains("[info] 1 info"), "{result}");
+        assert!(result.contains("[other] 32 lines"), "{result}");
+        assert!(result.contains("[LAST 10 LINES]"), "{result}");
+        assert!(result.ends_with("out of memory\n   Killed"), "{result}");
+        assert!(!result.contains("step 3 done"), "{result}");
+    }
+
+    #[test]
+    fn test_error_lines_keep_what_identifies_them() {
+        let line = format!("ERROR {} the end of the message", "x".repeat(120));
+        let result = analyze_logs(&long(&format!("{line}\nlast\nlast\n")));
+        assert!(result.contains("the end of the message"), "{result}");
+    }
+
     #[test]
     fn test_analyze_logs() {
         let logs = r#"
@@ -257,7 +328,7 @@ mod tests {
                     2024-01-01 10:00:02 emerg: system shutdown imminent\n\
                     2024-01-01 10:00:03 SEVERE: data corruption detected\n\
                     2024-01-01 10:00:04 notice: config reloaded\n";
-        let result = analyze_logs(logs);
+        let result = analyze_logs(&long(logs));
         assert!(result.contains("ERRORS"), "critical/alert/emerg/severe should count as errors");
         assert!(result.contains("WARNINGS"), "notice should count as warning");
     }
@@ -270,7 +341,7 @@ mod tests {
             "ข้อผิดพลาด".repeat(15),
             "คำเตือน".repeat(15)
         );
-        let result = analyze_logs(&logs);
+        let result = analyze_logs(&long(&logs));
         // Should not panic even with very long multi-byte messages
         assert!(result.contains("ERRORS"));
     }

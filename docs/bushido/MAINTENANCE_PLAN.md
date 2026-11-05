@@ -704,3 +704,31 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
   なる（動作は正しく、圧縮されないだけ）。`-q` で同名ファイルがあると wget が名前を出さないので
   元のファイルを報告する。1 行が巨大なページは短縮しない。
 
+### 2026-11-05 — container.rs（docker / kubectl / compose）とログの要約
+
+実機の docker と、実物の kubectl + 偽 API サーバーで確認した。
+
+- **ログの本文が消える（`docker logs`、`kubectl logs`、`compose logs`、`bdo log`、`bdo pipe`）**:
+  `analyze_logs` はエラー、警告、info に分類できない行を捨てていた。サーバーの通常の出力も
+  スタックトレースもクラッシュ直前の行も消え、1 行だけのログでも要約しか出なかった。20 行以下で
+  重複がなければそのまま出し、長いログは要約に `[other] N lines` と末尾 10 行を添える。
+- **`--tail 100` を黙って適用**: 100 行に達したら読んだ範囲と全部を見る方法を出す。
+- **Pod の異常が見えない**: `CrashLoopBackOff` は phase が `Running`、`ImagePullBackOff` は
+  `Pending` のままなので、phase だけでは正常に見える。コンテナの状態を読み、理由を出す。
+  init コンテナ、`OOMKilled`、not ready、Terminating、Completed も区別し、合計が必ず合う。
+- **`get pods web` が `No pods found`**: 名前を指定すると応答が List でなく単体だった。services も同じ。
+- **`-L`、`--no-headers`、`--sort-by`、`--template`** は表が目的なので素通し。
+- **`docker ps -a`**: paused を stopped に分類していた。
+- **ポート**: IPv4 と IPv6 で同じポートを 2 回数えていた。
+- **`docker images`**: kB を合計に入れておらず、kB だけなら `0MB` だった。docker の単位は 1000 基準。
+- **services**: 名前付き targetPort を隠し、nodePort と外部アドレスも出していなかった。
+- **`compose build`**: `[+] Building` も `=> ` もパイプ経由の出力には出ないので `Steps` が出ず、
+  ステップの出力の `[INFO]` をサービス名と誤認していた。実物の出力で作り直した。
+- **`-o json` の失敗**: bdo が足したフラグのせいで空の List の JSON が出ていた。stderr があれば隠す。
+- **テスト**: `tests/container_commands.rs` は実物の `docker` と `kubectl` を `DOCKER_HOST` /
+  `KUBECONFIG` で偽 API に接続する。compose は実機の出力を記録した代役。実機の daemon には
+  触らない。偽 API の JSON は手書きで、実クラスタの応答ではない。
+- **未対応**: 実クラスタでは未確認（kind などは入れていない）。ログの途中のスタックトレースは
+  エラー行以外が要約に入らない。`no errors found` のような行はエラーに数えられる。`docker ps` は
+  表示用に docker を 2 回実行する。`bdo docker ps --filter ...` は素通しで圧縮されない。
+

@@ -6,9 +6,30 @@ use crate::core::tracking;
 use crate::core::truncate::{CAP_INVENTORY, CAP_LIST, CAP_WARNINGS};
 use crate::core::utils::resolved_command;
 use anyhow::{Context, Result};
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde_json::Value;
 use std::ffi::OsString;
 use std::process::Command;
+
+lazy_static! {
+    // A build step, plain or on a terminal: `#4 [web 1/3] FROM` or `=> [web 1/3] FROM`.
+    // A step's own output comes after a timestamp (`#5 0.172 [INFO] …`), so no match.
+    static ref BUILD_STEP_RE: Regex = Regex::new(r"^\s*(?:#\d+|=>)\s+\[([^\]]+)\]").unwrap();
+    static ref BUILT_RE: Regex =
+        Regex::new(r"^\s*(?:✔\s+)?(?:Service |Image )?(\S+)\s+Built\s*$").unwrap();
+}
+
+/// Lines `logs` commands ask for, which bdo says when it may have cut anything.
+const LOG_TAIL_LINES: usize = 100;
+
+fn log_tail_note(raw: &str, whole_log: &str) -> String {
+    if raw.lines().count() >= LOG_TAIL_LINES {
+        format!("\n[only the last {LOG_TAIL_LINES} lines were read — use `{whole_log}` for all]")
+    } else {
+        String::new()
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum ContainerCmd {
@@ -50,6 +71,7 @@ where
         },
         RunOptions::stdout_only()
             .early_exit_on_failure()
+            .hide_stdout_when_stderr_explains()
             .no_trailing_newline(),
     )
 }
@@ -134,7 +156,7 @@ fn docker_ps_all(_verbose: u8) -> Result<i32> {
     for line in result.stdout.lines().filter(|l| !l.trim().is_empty()) {
         let parts: Vec<&str> = line.split('\t').collect();
         let state = parts.first().copied().unwrap_or("");
-        let is_running = matches!(state, "running" | "restarting");
+        let is_running = matches!(state, "running" | "restarting" | "paused");
         if let Some(entry) = format_container_line_from_parts(&parts[1..], is_running) {
             if is_running {
                 running_lines.push(entry);
@@ -245,31 +267,10 @@ fn docker_images(_verbose: u8) -> Result<i32> {
         return Ok(0);
     }
 
-    let mut total_size_mb: f64 = 0.0;
-    for line in &lines {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if let Some(size_str) = parts.get(1) {
-            if size_str.contains("GB") {
-                if let Ok(n) = size_str.replace("GB", "").trim().parse::<f64>() {
-                    total_size_mb += n * 1024.0;
-                }
-            } else if size_str.contains("MB") {
-                if let Ok(n) = size_str.replace("MB", "").trim().parse::<f64>() {
-                    total_size_mb += n;
-                }
-            }
-        }
-    }
-
-    let total_display = if total_size_mb > 1024.0 {
-        format!("{:.1}GB", total_size_mb / 1024.0)
-    } else {
-        format!("{:.0}MB", total_size_mb)
-    };
     rtk.push_str(&format!(
         "[docker] {} images ({})\n",
         lines.len(),
-        total_display
+        images_total(&lines)
     ));
 
     // a full image list is an inventory query, like pip list.
@@ -304,6 +305,34 @@ fn docker_images(_verbose: u8) -> Result<i32> {
     Ok(0)
 }
 
+/// The sum of the sizes in `image<tab>size` lines.
+fn images_total(lines: &[&str]) -> String {
+    let total_size_mb: f64 = lines
+        .iter()
+        .filter_map(|line| line.split('\t').nth(1))
+        .filter_map(image_size_mb)
+        // Not `sum()`: over nothing, that gives -0.0, which prints as `-0kB`.
+        .fold(0.0, |total, size| total + size);
+
+    if total_size_mb >= 1000.0 {
+        format!("{:.1}GB", total_size_mb / 1000.0)
+    } else if total_size_mb >= 1.0 {
+        format!("{:.0}MB", total_size_mb)
+    } else {
+        format!("{:.0}kB", total_size_mb * 1000.0)
+    }
+}
+
+/// A size as docker prints it, in decimal units: `1.61GB`, `13.3kB`.
+fn image_size_mb(size: &str) -> Option<f64> {
+    [("TB", 1e6), ("GB", 1e3), ("MB", 1.0), ("kB", 1e-3), ("B", 1e-6)]
+        .iter()
+        .find_map(|(unit, mb)| {
+            let number = size.trim().strip_suffix(unit)?;
+            Some(number.trim().parse::<f64>().ok()? * mb)
+        })
+}
+
 fn docker_logs(args: &[String], _verbose: u8) -> Result<i32> {
     let container = args.first().map(|s| s.as_str()).unwrap_or("");
     if container.is_empty() {
@@ -312,7 +341,7 @@ fn docker_logs(args: &[String], _verbose: u8) -> Result<i32> {
     }
 
     let mut cmd = resolved_command("docker");
-    cmd.args(["logs", "--tail", "100", container]);
+    cmd.args(["logs", "--tail", &LOG_TAIL_LINES.to_string(), container]);
 
     let label = format!("logs {}", container);
     runner::run_filtered(
@@ -321,9 +350,10 @@ fn docker_logs(args: &[String], _verbose: u8) -> Result<i32> {
         &label,
         |raw| {
             format!(
-                "[docker] Logs for {}:\n{}",
+                "[docker] Logs for {}:\n{}{}",
                 container,
-                crate::log_cmd::run_stdin_str(raw)
+                crate::log_cmd::run_stdin_str(raw),
+                log_tail_note(raw, &format!("bdo proxy docker logs {container}"))
             )
         },
         RunOptions::default().early_exit_on_failure(),
@@ -339,64 +369,144 @@ fn kubectl_pods(args: &[String], _verbose: u8) -> Result<i32> {
     run_kubectl_json(cmd, "get pods", format_kubectl_pods)
 }
 
-fn format_kubectl_pods(json: &Value) -> String {
-    let Some(pods) = json["items"].as_array().filter(|a| !a.is_empty()) else {
-        return "No pods found\n".to_string();
-    };
-    let (mut running, mut pending, mut failed, mut restarts_total) = (0, 0, 0, 0i64);
-    let mut issues: Vec<String> = Vec::new();
+/// What came back: `get pods` answers with a list, `get pods web` with the pod.
+fn kubectl_items(json: &Value) -> Vec<&Value> {
+    match json["items"].as_array() {
+        Some(items) => items.iter().collect(),
+        None if json["metadata"].is_object() => vec![json],
+        None => Vec::new(),
+    }
+}
 
-    for pod in pods {
+fn pod_container_statuses(pod: &Value) -> impl Iterator<Item = &Value> {
+    let of = |key: &str| {
+        pod["status"][key]
+            .as_array()
+            .map(|a| a.iter())
+            .into_iter()
+            .flatten()
+    };
+    of("initContainerStatuses")
+        .chain(of("containerStatuses"))
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+/// Why a container cannot run. A pod in `CrashLoopBackOff` keeps the phase
+/// `Running`, and one in `ImagePullBackOff` keeps `Pending`, so only the
+/// containers tell.
+fn pod_fault(pod: &Value) -> Option<String> {
+    pod_container_statuses(pod).find_map(|c| {
+        if let Some(reason) = c["state"]["waiting"]["reason"].as_str() {
+            let starting = matches!(reason, "ContainerCreating" | "PodInitializing");
+            return (!starting).then(|| reason.to_string());
+        }
+        let exit_code = c["state"]["terminated"]["exitCode"].as_i64()?;
+        (exit_code != 0).then(|| {
+            c["state"]["terminated"]["reason"]
+                .as_str()
+                .map_or_else(|| format!("exit {exit_code}"), str::to_string)
+        })
+    })
+}
+
+/// Why a pod is still pending, where the status says.
+fn pod_pending_reason(pod: &Value) -> Option<String> {
+    let waiting = pod_container_statuses(pod)
+        .find_map(|c| c["state"]["waiting"]["reason"].as_str().map(str::to_string));
+    waiting.or_else(|| {
+        pod["status"]["conditions"]
+            .as_array()?
+            .iter()
+            .find(|c| c["status"] == "False" && c["reason"].is_string())?["reason"]
+            .as_str()
+            .map(str::to_string)
+    })
+}
+
+fn format_kubectl_pods(json: &Value) -> String {
+    let pods = kubectl_items(json);
+    if pods.is_empty() {
+        return "No pods found\n".to_string();
+    }
+    let (mut running, mut completed, mut pending, mut not_ready, mut terminating, mut failed) =
+        (0, 0, 0, 0, 0, 0);
+    let mut restarts_total = 0i64;
+    // Faults first: they are what a cut-off list must not lose.
+    let mut faults: Vec<String> = Vec::new();
+    let mut others: Vec<String> = Vec::new();
+
+    for pod in &pods {
         let ns = pod["metadata"]["namespace"].as_str().unwrap_or("-");
         let name = pod["metadata"]["name"].as_str().unwrap_or("-");
         let phase = pod["status"]["phase"].as_str().unwrap_or("Unknown");
+        let fault = pod_fault(pod);
 
-        if let Some(containers) = pod["status"]["containerStatuses"].as_array() {
-            for c in containers {
-                restarts_total += c["restartCount"].as_i64().unwrap_or(0);
-            }
+        restarts_total += pod_container_statuses(pod)
+            .map(|c| c["restartCount"].as_i64().unwrap_or(0))
+            .sum::<i64>();
+
+        if pod["metadata"]["deletionTimestamp"].is_string() {
+            terminating += 1;
+            others.push(format!("{}/{} Terminating", ns, name));
+            continue;
         }
-
-        match phase {
-            "Running" => running += 1,
-            "Pending" => {
-                pending += 1;
-                issues.push(format!("{}/{} Pending", ns, name));
-            }
-            "Failed" | "Error" => {
+        match (phase, fault) {
+            ("Succeeded", _) => completed += 1,
+            ("Failed", fault) => {
                 failed += 1;
-                issues.push(format!("{}/{} {}", ns, name, phase));
+                let reason = pod["status"]["reason"].as_str().map(str::to_string);
+                let reason = reason.or(fault).unwrap_or_else(|| phase.to_string());
+                faults.push(format!("{}/{} {}", ns, name, reason));
             }
-            _ => {
-                if let Some(containers) = pod["status"]["containerStatuses"].as_array() {
-                    for c in containers {
-                        if let Some(w) = c["state"]["waiting"]["reason"].as_str() {
-                            if w.contains("CrashLoop") || w.contains("Error") {
-                                failed += 1;
-                                issues.push(format!("{}/{} {}", ns, name, w));
-                            }
-                        }
-                    }
+            (_, Some(fault)) => {
+                failed += 1;
+                faults.push(format!("{}/{} {}", ns, name, fault));
+            }
+            ("Running", None) => {
+                let all_ready = pod_container_statuses(pod)
+                    .all(|c| c["ready"].as_bool().unwrap_or(true) || c["state"]["terminated"].is_object());
+                if all_ready {
+                    running += 1;
+                } else {
+                    not_ready += 1;
+                    others.push(format!("{}/{} not ready", ns, name));
                 }
+            }
+            ("Pending", None) => {
+                pending += 1;
+                others.push(match pod_pending_reason(pod) {
+                    Some(reason) => format!("{}/{} Pending ({})", ns, name, reason),
+                    None => format!("{}/{} Pending", ns, name),
+                });
+            }
+            (phase, None) => {
+                failed += 1;
+                faults.push(format!("{}/{} {}", ns, name, phase));
             }
         }
     }
 
     let mut parts = Vec::new();
-    if running > 0 {
-        parts.push(format!("{}", running));
-    }
-    if pending > 0 {
-        parts.push(format!("{} pending", pending));
-    }
-    if failed > 0 {
-        parts.push(format!("{} [x]", failed));
+    for (count, label) in [
+        (running, "running"),
+        (completed, "completed"),
+        (pending, "pending"),
+        (not_ready, "not ready"),
+        (terminating, "terminating"),
+        (failed, "[x]"),
+    ] {
+        if count > 0 {
+            parts.push(format!("{} {}", count, label));
+        }
     }
     if restarts_total > 0 {
         parts.push(format!("{} restarts", restarts_total));
     }
 
     let mut out = format!("{} pods: {}\n", pods.len(), parts.join(", "));
+    faults.extend(others);
+    let issues = faults;
     if !issues.is_empty() {
         const MAX_PODS_ISSUES: usize = CAP_WARNINGS;
         out.push_str("[warn] Issues:\n");
@@ -425,10 +535,43 @@ fn kubectl_services(args: &[String], _verbose: u8) -> Result<i32> {
     run_kubectl_json(cmd, "get services", format_kubectl_services)
 }
 
-fn format_kubectl_services(json: &Value) -> String {
-    let Some(services) = json["items"].as_array().filter(|a| !a.is_empty()) else {
-        return "No services found\n".to_string();
+fn format_service_port(port: &Value) -> String {
+    let number = port["port"].as_i64().unwrap_or(0);
+    let exposed = match port["nodePort"].as_i64() {
+        Some(node_port) => format!("{}:{}", number, node_port),
+        None => number.to_string(),
     };
+    // A target is a number or the name of a container's port.
+    let target = port["targetPort"]
+        .as_i64()
+        .map(|n| n.to_string())
+        .or_else(|| port["targetPort"].as_str().map(str::to_string));
+    match target {
+        Some(target) if target != number.to_string() => format!("{}→{}", exposed, target),
+        _ => exposed,
+    }
+}
+
+/// Where a service is reachable from outside the cluster.
+fn service_external_addresses(svc: &Value) -> Vec<String> {
+    let ingress = svc["status"]["loadBalancer"]["ingress"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i["ip"].as_str().or_else(|| i["hostname"].as_str()));
+    let external_ips = svc["spec"]["externalIPs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str);
+    ingress.chain(external_ips).map(str::to_string).collect()
+}
+
+fn format_kubectl_services(json: &Value) -> String {
+    let services = kubectl_items(json);
+    if services.is_empty() {
+        return "No services found\n".to_string();
+    }
     let mut out = format!("{} services:\n", services.len());
 
     let all_lines: Vec<String> = services
@@ -439,24 +582,15 @@ fn format_kubectl_services(json: &Value) -> String {
             let svc_type = svc["spec"]["type"].as_str().unwrap_or("-");
             let ports: Vec<String> = svc["spec"]["ports"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .map(|p| {
-                            let port = p["port"].as_i64().unwrap_or(0);
-                            let target = p["targetPort"]
-                                .as_i64()
-                                .or_else(|| p["targetPort"].as_str().and_then(|s| s.parse().ok()))
-                                .unwrap_or(port);
-                            if port == target {
-                                format!("{}", port)
-                            } else {
-                                format!("{}→{}", port, target)
-                            }
-                        })
-                        .collect()
-                })
+                .map(|arr| arr.iter().map(format_service_port).collect())
                 .unwrap_or_default();
-            format!("  {}/{} {} [{}]", ns, name, svc_type, ports.join(","))
+            let external = service_external_addresses(svc);
+            let external = if external.is_empty() {
+                String::new()
+            } else {
+                format!(" external {}", external.join(","))
+            };
+            format!("  {}/{} {} [{}]{}", ns, name, svc_type, ports.join(","), external)
         })
         .collect();
 
@@ -485,7 +619,7 @@ fn kubectl_logs(args: &[String], _verbose: u8) -> Result<i32> {
     }
 
     let mut cmd = resolved_command("kubectl");
-    cmd.args(["logs", "--tail", "100", pod]);
+    cmd.args(["logs", "--tail", &LOG_TAIL_LINES.to_string(), pod]);
     for arg in args.iter().skip(1) {
         cmd.arg(arg);
     }
@@ -497,9 +631,10 @@ fn kubectl_logs(args: &[String], _verbose: u8) -> Result<i32> {
         &label,
         |stdout| {
             format!(
-                "Logs for {}:\n{}",
+                "Logs for {}:\n{}{}",
                 pod,
-                crate::log_cmd::run_stdin_str(stdout)
+                crate::log_cmd::run_stdin_str(stdout),
+                log_tail_note(stdout, &format!("bdo proxy kubectl logs {pod}"))
             )
         },
         RunOptions::stdout_only().early_exit_on_failure(),
@@ -581,50 +716,43 @@ pub fn format_compose_build(raw: &str) -> String {
 
     let mut result = String::new();
 
-    // Extract the summary line: "[+] Building 12.3s (8/8) FINISHED"
-    for line in raw.lines() {
-        if line.contains("Building") && line.contains("FINISHED") {
-            result.push_str(&format!("[compose] {}\n", line.trim()));
-            break;
-        }
+    // On a terminal: "[+] Building 12.3s (8/8) FINISHED". Captured output, which
+    // is what bdo reads, has no such line.
+    let building = || raw.lines().filter(|l| l.trim_start().starts_with("[+] Building"));
+    match building().find(|l| l.contains("FINISHED")).or_else(|| building().next()) {
+        Some(line) => result.push_str(&format!("[compose] {}\n", line.trim())),
+        None => result.push_str("[compose] Build:\n"),
     }
 
-    if result.is_empty() {
-        // No FINISHED line found — might still be building or errored
-        if let Some(line) = raw.lines().find(|l| l.contains("Building")) {
-            result.push_str(&format!("[compose] {}\n", line.trim()));
-        } else {
-            result.push_str("[compose] Build:\n");
-        }
-    }
-
-    // Collect unique service names from build steps like "[web 1/4]"
+    // The service leads a step: "[web 1/4]", "[web internal]".
     let mut services: Vec<String> = Vec::new();
-    // find('[') returns byte offset — use byte slicing throughout
-    // '[' and ']' are single-byte ASCII, so byte arithmetic is safe
+    let mut steps: Vec<&str> = Vec::new();
     for line in raw.lines() {
-        if let Some(start) = line.find('[') {
-            if let Some(end) = line[start + 1..].find(']') {
-                let bracket = &line[start + 1..start + 1 + end];
-                let svc = bracket.split_whitespace().next().unwrap_or("");
-                if !svc.is_empty() && svc != "+" && !services.contains(&svc.to_string()) {
-                    services.push(svc.to_string());
-                }
+        let service = if let Some(found) = BUILD_STEP_RE.captures(line) {
+            let bracket = found.get(1).map_or("", |m| m.as_str());
+            let mut words = bracket.split_whitespace();
+            let first = words.next().unwrap_or("");
+            // Numbered steps are the Dockerfile's own, and repeat as they progress.
+            if words.next().is_some_and(|w| w.contains('/')) && !steps.contains(&bracket) {
+                steps.push(bracket);
             }
+            first
+        } else if let Some(found) = BUILT_RE.captures(line) {
+            found.get(1).map_or("", |m| m.as_str())
+        } else {
+            continue;
+        };
+        let names_a_service = !matches!(service, "" | "internal" | "auth");
+        if names_a_service && !services.iter().any(|s| s == service) {
+            services.push(service.to_string());
         }
     }
 
     if !services.is_empty() {
         result.push_str(&format!("  Services: {}\n", services.join(", ")));
     }
-
-    // Count build steps (lines starting with " => ")
-    let step_count = raw
-        .lines()
-        .filter(|l| l.trim_start().starts_with("=> "))
-        .count();
-    if step_count > 0 {
-        result.push_str(&format!("  Steps: {}", step_count));
+    if !steps.is_empty() {
+        result.push_str(&format!("  Steps: {}", steps.len()));
     }
 
     result.trim_end().to_string()
@@ -636,10 +764,17 @@ fn compact_ports(ports: &str) -> String {
     }
 
     // Extract just the port numbers
-    let port_nums: Vec<&str> = ports
+    let mut port_nums: Vec<&str> = Vec::new();
+    for port in ports
         .split(',')
         .filter_map(|p| p.split("->").next().and_then(|s| s.split(':').next_back()))
-        .collect();
+        .map(str::trim)
+    {
+        // A published port appears once for IPv4 and once for IPv6.
+        if !port_nums.contains(&port) {
+            port_nums.push(port);
+        }
+    }
 
     if port_nums.len() <= 3 {
         port_nums.join(", ")
@@ -716,7 +851,13 @@ pub fn run_compose_logs(service: Option<&str>, tail: u32, verbose: u8) -> Result
             if verbose > 0 {
                 eprintln!("raw docker compose logs:\n{}", raw);
             }
-            format_compose_logs(raw)
+            let mut logs = format_compose_logs(raw);
+            if raw.lines().count() >= tail as usize && tail > 0 {
+                logs.push_str(&format!(
+                    "\n[only the last {tail} lines of each service were read — use --tail N for more]"
+                ));
+            }
+            logs
         },
         RunOptions::default().early_exit_on_failure(),
     )
@@ -776,9 +917,22 @@ fn kubectl_get_requests_raw_output(args: &[String]) -> bool {
     args.iter().any(|arg| {
         matches!(
             arg.as_str(),
-            "-o" | "--output" | "-w" | "--watch" | "--show-labels" | "--show-kind"
+            "-o" | "--output"
+                | "-w"
+                | "--watch"
+                | "--show-labels"
+                | "--show-kind"
+                | "--no-headers"
+                | "--sort-by"
+                | "--label-columns"
+                | "--template"
         ) || arg.starts_with("-o")
+            || arg.starts_with("-L")
             || arg.starts_with("--output=")
+            || arg.starts_with("--no-headers=")
+            || arg.starts_with("--sort-by=")
+            || arg.starts_with("--label-columns=")
+            || arg.starts_with("--template=")
     })
 }
 
@@ -898,7 +1052,8 @@ api-1  | Connected to database";
  => => naming to docker.io/library/myapp-web                       0.0s";
         let out = format_compose_build(raw);
         assert!(out.contains("12.3s"), "should show total build time");
-        assert!(out.contains("web"), "should show service name");
+        assert!(out.contains("Services: web\n"), "should name the service once: {out}");
+        assert!(out.contains("Steps: 4"), "should count the Dockerfile's steps: {out}");
         assert!(out.len() < raw.len(), "should be shorter than raw");
     }
 
@@ -922,6 +1077,72 @@ api-1  | Connected to database";
     fn test_compact_ports_single() {
         let result = compact_ports("0.0.0.0:8080->80/tcp");
         assert!(result.contains("8080"));
+    }
+
+    #[test]
+    fn test_compact_ports_counts_a_port_once_across_address_families() {
+        assert_eq!(
+            compact_ports("0.0.0.0:80->80/tcp, [::]:80->80/tcp, :::443->443/tcp, 0.0.0.0:443->443/tcp"),
+            "80, 443"
+        );
+    }
+
+    #[test]
+    fn test_images_total_picks_the_unit_that_fits() {
+        assert_eq!(images_total(&["hello:1\t13.3kB"]), "13kB");
+        assert_eq!(images_total(&["a:1\t187MB", "b:1\t13.3kB"]), "187MB");
+        assert_eq!(images_total(&["a:1\t1.61GB", "b:1\t187MB"]), "1.8GB");
+        assert_eq!(images_total(&["a:1\tN/A"]), "0kB");
+    }
+
+    #[test]
+    fn test_image_size_mb_reads_docker_units() {
+        for (size, mb) in [
+            ("1.61GB", 1610.0),
+            ("187MB", 187.0),
+            ("13.3kB", 0.0133),
+            ("512B", 0.000512),
+            ("1.2TB", 1_200_000.0),
+        ] {
+            let found = image_size_mb(size).unwrap();
+            assert!((found - mb).abs() < 1e-6, "{size}: {found}");
+        }
+        assert_eq!(image_size_mb("N/A"), None);
+    }
+
+    #[test]
+    fn test_format_compose_build_reads_captured_output() {
+        let raw = r#"#0 building with "desktop-linux" instance using docker driver
+
+#1 [web internal] load build definition from Dockerfile
+#1 DONE 0.0s
+
+#4 [web 1/3] FROM docker.io/library/node:22-bookworm@sha256:82693da
+#4 resolve docker.io/library/node:22-bookworm 1.3s done
+#4 DONE 1.3s
+
+#5 [web 2/3] RUN echo "[INFO] building"
+#5 0.172 [INFO] building
+#5 0.180 Building the docs
+#5 DONE 0.2s
+
+#6 [web 3/3] WORKDIR /app
+#6 DONE 0.0s
+
+#7 exporting to image
+ web  Built"#;
+        assert_eq!(
+            format_compose_build(raw),
+            "[compose] Build:\n  Services: web\n  Steps: 3"
+        );
+    }
+
+    #[test]
+    fn test_format_compose_build_names_cached_services() {
+        assert_eq!(
+            format_compose_build(" web  Built\n ✔ api  Built\n"),
+            "[compose] Build:\n  Services: web, api"
+        );
     }
 
     #[test]
@@ -965,7 +1186,18 @@ api-1  | Connected to database";
 
     #[test]
     fn test_kubectl_get_target_respects_output_flags() {
-        for output_flag in ["-o", "-owide", "--output", "--output=json"] {
+        for output_flag in [
+            "-o",
+            "-owide",
+            "--output",
+            "--output=json",
+            "-L",
+            "-Lapp",
+            "--label-columns=app",
+            "--no-headers",
+            "--sort-by=.metadata.name",
+            "--template={{.}}",
+        ] {
             let args = vec![
                 "pods".to_string(),
                 output_flag.to_string(),

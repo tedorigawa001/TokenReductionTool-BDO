@@ -725,16 +725,70 @@ fn rules_files_are_read_with_care() {
 }
 
 #[test]
+fn uninstalling_named_rules_keeps_existing_user_content() {
+    for (agent, path) in [
+        ("kilocode", "proj/.kilocode/rules/bdo-rules.md"),
+        ("antigravity", "proj/.agents/rules/antigravity-bdo-rules.md"),
+    ] {
+        let env = Env::new();
+        let user = "# User policy\nKeep this project-specific instruction.\n";
+        env.write(path, user);
+        assert_ok(&env.bdo(&["init", "--agent", agent]));
+        assert_ok(&env.bdo(&["init", "--agent", agent, "--uninstall"]));
+        assert_eq!(env.read(path), user, "{agent}");
+    }
+}
+
+#[test]
+fn uninstalling_named_rules_keeps_later_user_content_exactly() {
+    for (agent, path) in [
+        ("kilocode", "proj/.kilocode/rules/bdo-rules.md"),
+        ("antigravity", "proj/.agents/rules/antigravity-bdo-rules.md"),
+    ] {
+        let env = Env::new();
+        assert_ok(&env.bdo(&["init", "--agent", agent]));
+        let user = "    Keep this indented instruction.\r\n\r\n";
+        env.write(path, &(env.read(path) + user));
+        let before = env.snapshot();
+        assert_ok(&env.bdo(&["init", "--agent", agent, "--uninstall", "--dry-run"]));
+        assert_eq!(env.snapshot(), before, "{agent}");
+        assert_ok(&env.bdo(&["init", "--agent", agent, "--uninstall"]));
+        assert_eq!(env.read(path), user, "{agent}");
+    }
+}
+
+#[test]
 fn an_edited_copy_of_the_rules_is_left_for_the_user() {
-    let env = Env::new();
-    assert_ok(&env.bdo(&["init", "--agent", "cline"]));
-    let edited = env.read("proj/.clinerules") + "\nmy addition inside\n";
-    let edited = edited.replace("Token-optimized", "Edited");
-    env.write("proj/.clinerules", &edited);
-    let out = env.bdo(&["init", "--agent", "cline", "--uninstall"]);
-    assert_ok(&out);
-    assert!(text(&out).contains("by hand"), "{}", text(&out));
-    assert_eq!(env.read("proj/.clinerules"), edited);
+    for (agent, path) in [
+        ("cline", "proj/.clinerules"),
+        ("kilocode", "proj/.kilocode/rules/bdo-rules.md"),
+        ("antigravity", "proj/.agents/rules/antigravity-bdo-rules.md"),
+    ] {
+        let env = Env::new();
+        assert_ok(&env.bdo(&["init", "--agent", agent]));
+        let edited = env.read(path) + "\nmy addition inside\n";
+        let edited = edited.replace("Token-optimized", "Edited");
+        env.write(path, &edited);
+        let out = env.bdo(&["init", "--agent", agent, "--uninstall"]);
+        assert_ok(&out);
+        assert!(text(&out).contains("by hand"), "{}", text(&out));
+        assert_eq!(env.read(path), edited, "{agent}");
+    }
+}
+
+#[test]
+fn uninstalling_named_rules_leaves_unrelated_files_alone() {
+    for (agent, path) in [
+        ("kilocode", "proj/.kilocode/rules/bdo-rules.md"),
+        ("antigravity", "proj/.agents/rules/antigravity-bdo-rules.md"),
+    ] {
+        let env = Env::new();
+        let user = "# User policy\nNo bdo rules were installed here.\n";
+        env.write(path, user);
+        let before = env.snapshot();
+        assert_ok(&env.bdo(&["init", "--agent", agent, "--uninstall"]));
+        assert_eq!(env.snapshot(), before, "{agent}");
+    }
 }
 
 #[test]

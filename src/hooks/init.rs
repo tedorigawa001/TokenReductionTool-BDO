@@ -1532,30 +1532,30 @@ fn remove_appended_rules(path: &Path, rules: &str, ctx: InitContext) -> Result<b
         println!("[dry-run] would remove bdo rules from {}", path.display());
         return Ok(true);
     }
-    let before = existing[..start].trim_end();
-    let after = existing[start + rules.trim().len()..].trim_start();
-    let kept = match (before.is_empty(), after.is_empty()) {
-        (true, _) => after.to_string(),
-        (false, true) => format!("{before}\n"),
-        (false, false) => format!("{before}\n\n{after}"),
+    let before = &existing[..start];
+    // Installation adds a blank separator after the user's last line. Remove
+    // just that separator, not the user's indentation or other whitespace.
+    let before = if before.ends_with("\n\n") {
+        &before[..before.len() - 1]
+    } else {
+        before
     };
+    let after = &existing[start + rules.trim().len()..];
+    let own_trailing = &rules[rules.trim_end().len()..];
+    let after = after.strip_prefix(own_trailing).unwrap_or(after);
+    let kept = format!("{before}{after}");
     write_or_remove_if_empty(path, &kept)?;
     Ok(true)
 }
 
-/// Removes a rules file bdo owns, and its directory if that leaves it empty.
-fn remove_owned_rules(path: &Path, ctx: InitContext) -> Result<bool> {
-    if !path.exists() {
-        return Ok(false);
+/// Even a file under bdo's own name may hold user rules. Remove only the
+/// unedited rules we appended, then clean up the directory if the file is gone.
+fn remove_named_rules(path: &Path, rules: &str, ctx: InitContext) -> Result<bool> {
+    let removed = remove_appended_rules(path, rules, ctx)?;
+    if removed && !ctx.dry_run && !path.exists() {
+        remove_dir_if_empty(path.parent());
     }
-    if ctx.dry_run {
-        println!("[dry-run] would remove {}", path.display());
-        return Ok(true);
-    }
-    // nosemgrep: filesystem-deletion -- bdo created this file under its own name.
-    fs::remove_file(path).with_context(|| format!("Failed to remove {}", path.display()))?;
-    remove_dir_if_empty(path.parent());
-    Ok(true)
+    Ok(removed)
 }
 
 /// Leaves no empty directory behind. A directory with anything in it stays, which
@@ -1572,10 +1572,16 @@ pub fn uninstall_project_rules(agent: &str, ctx: InitContext) -> Result<()> {
     let removed = match agent {
         "cline" => remove_appended_rules(Path::new(".clinerules"), CLINE_RULES, ctx)?,
         "windsurf" => remove_appended_rules(Path::new(".windsurfrules"), WINDSURF_RULES, ctx)?,
-        "kilocode" => remove_owned_rules(Path::new(".kilocode/rules/bdo-rules.md"), ctx)?,
-        "antigravity" => {
-            remove_owned_rules(Path::new(".agents/rules/antigravity-bdo-rules.md"), ctx)?
-        }
+        "kilocode" => remove_named_rules(
+            Path::new(".kilocode/rules/bdo-rules.md"),
+            KILOCODE_RULES,
+            ctx,
+        )?,
+        "antigravity" => remove_named_rules(
+            Path::new(".agents/rules/antigravity-bdo-rules.md"),
+            ANTIGRAVITY_RULES,
+            ctx,
+        )?,
         other => anyhow::bail!("No project rules to remove for {other}"),
     };
     match (removed, ctx.dry_run) {

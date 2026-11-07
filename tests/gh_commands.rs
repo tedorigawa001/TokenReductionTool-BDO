@@ -335,6 +335,78 @@ fn explicit_json_written_with_equals_is_left_alone() {
     }
 }
 
+/// bdo used to move the first positional to the front, so a value of a flag it
+/// didn't know became the number: `run view -j 111 222` opened run 111.
+#[test]
+fn view_keeps_the_arguments_in_the_order_given() {
+    for args in [
+        &["run", "view", "-j", "111", "222"][..],
+        &["run", "view", "-a", "2", "222"],
+        &["pr", "checks", "-i", "5", "42"],
+        &["pr", "view", "-R", "o/r", "42"],
+        &["issue", "view", "-R", "o/r", "7"],
+    ] {
+        let env = Env::new();
+        env.answer("{}\n");
+        env.ok(args);
+        let got = env.received();
+        let given: Vec<&str> = got
+            .iter()
+            .map(String::as_str)
+            .filter(|a| args.contains(a))
+            .collect();
+        assert_eq!(given, args, "{got:?}");
+    }
+}
+
+/// bdo's `--json` goes before the arguments: after a `--` it would be a positional.
+#[test]
+fn bdo_own_json_comes_before_a_double_dash() {
+    for args in [["pr", "view", "--", "42"], ["issue", "view", "--", "7"]] {
+        let env = Env::new();
+        env.answer("{}\n");
+        env.ok(&args);
+        let got = env.received();
+        assert_eq!(&got[..2], &args[..2], "{got:?}");
+        assert_eq!(got[2], "--json", "{got:?}");
+        assert_eq!(&got[4..], &args[2..], "{got:?}");
+    }
+}
+
+#[test]
+fn run_view_names_only_the_run_it_was_given() {
+    let env = Env::new();
+    env.answer("✓ main CI · 222\n");
+    let s = env.ok(&["run", "view", "-j", "111", "222"]);
+    assert!(s.starts_with("Workflow Run #222\n"), "{s}");
+
+    let env = Env::new();
+    env.answer("✓ main CI · 9\n");
+    let s = env.ok(&["run", "view", "-j", "111"]);
+    assert!(s.starts_with("Workflow Run\n"), "a job is not a run: {s}");
+}
+
+/// The short forms and the `=` forms ask for gh's own output too.
+#[test]
+fn view_opt_outs_in_any_form_are_gh_own_output() {
+    let raw = "gh's own output\n";
+    for args in [
+        &["pr", "view", "42", "-w"][..],
+        &["pr", "view", "42", "-c"],
+        &["issue", "view", "7", "-w"],
+        &["issue", "view", "7", "-c"],
+        &["pr", "view", "42", "-q", ".title"],
+        &["pr", "view", "42", "-t", "{{.title}}"],
+        &["pr", "view", "42", "--jq=.title"],
+        &["issue", "view", "7", "--template={{.title}}"],
+    ] {
+        let env = Env::new();
+        env.answer(raw);
+        assert_eq!(env.ok(args), raw, "{args:?}");
+        assert_eq!(env.received(), args, "{args:?}");
+    }
+}
+
 #[test]
 fn unknown_subcommands_pass_through() {
     let env = Env::new();

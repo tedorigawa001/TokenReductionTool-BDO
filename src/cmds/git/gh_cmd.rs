@@ -113,63 +113,86 @@ fn has_json_flag(args: &[String]) -> bool {
     args.iter().any(|a| a == "--json" || a.starts_with("--json="))
 }
 
-/// Extract a positional identifier (PR/issue number) from args, returning it
-/// separately from the remaining extra flags (like -R, --repo, etc.).
-/// Handles both `view 123 -R owner/repo` and `view -R owner/repo 123`.
-fn extract_identifier_and_extra_args(args: &[String]) -> Option<(String, Vec<String>)> {
-    if args.is_empty() {
-        return None;
+/// Flags of `gh pr view`, `pr checks`, `issue view` and `run view` that take a
+/// value, and those that take none (`gh <command> --help`, gh 2.103).
+const VIEW_VALUE_FLAGS: &[&str] = &[
+    "-R",
+    "--repo",
+    "-q",
+    "--jq",
+    "-t",
+    "--template",
+    "--json",
+    "-j",
+    "--job",
+    "-a",
+    "--attempt",
+    "-i",
+    "--interval",
+];
+const VIEW_BOOL_FLAGS: &[&str] = &[
+    "-c",
+    "--comments",
+    "-w",
+    "--web",
+    "-v",
+    "--verbose",
+    "--exit-status",
+    "--log",
+    "--log-failed",
+    "--fail-fast",
+    "--required",
+    "--watch",
+    "-h",
+    "--help",
+];
+
+/// The PR, issue or run the arguments name, for labels only. Values of the flags
+/// above are skipped; with any other flag, or more than one positional, it doesn't
+/// guess. The arguments go to gh as given either way.
+fn named_identifier(args: &[String]) -> Option<String> {
+    let mut args = args.iter();
+    let mut positional_only = false;
+    let mut found = None;
+    while let Some(arg) = args.next() {
+        if !positional_only && arg.starts_with('-') {
+            if arg == "--" {
+                positional_only = true;
+                continue;
+            }
+            if VIEW_VALUE_FLAGS.contains(&arg.as_str()) {
+                args.next()?;
+                continue;
+            }
+            let attached = (arg.starts_with("--") && arg.contains('='))
+                || VIEW_VALUE_FLAGS
+                    .iter()
+                    .any(|flag| flag.len() == 2 && arg.starts_with(flag) && arg.len() > 2);
+            if attached || VIEW_BOOL_FLAGS.contains(&arg.as_str()) {
+                continue;
+            }
+            return None;
+        }
+        if found.replace(arg.clone()).is_some() {
+            return None;
+        }
     }
-
-    // Known gh flags that take a value — skip these and their values
-    let flags_with_value = [
-        "-R",
-        "--repo",
-        "-q",
-        "--jq",
-        "-t",
-        "--template",
-        "--job",
-        "--attempt",
-    ];
-    let mut identifier = None;
-    let mut extra = Vec::new();
-    let mut skip_next = false;
-
-    for arg in args {
-        if skip_next {
-            extra.push(arg.clone());
-            skip_next = false;
-            continue;
-        }
-        if flags_with_value.contains(&arg.as_str()) {
-            extra.push(arg.clone());
-            skip_next = true;
-            continue;
-        }
-        if arg.starts_with('-') {
-            extra.push(arg.clone());
-            continue;
-        }
-        // First non-flag arg is the identifier (number/URL)
-        if identifier.is_none() {
-            identifier = Some(arg.clone());
-        } else {
-            extra.push(arg.clone());
-        }
-    }
-
-    identifier.map(|id| (id, extra))
+    found
 }
 
-/// Like `extract_identifier_and_extra_args` but yields `(None, args.to_vec())` when no
-/// positional identifier is present, so callers can defer the "id required" decision
-/// to `gh` itself (e.g. `gh pr view` defaults to the current branch's PR).
-fn parse_optional_identifier(args: &[String]) -> (Option<String>, Vec<String>) {
-    match extract_identifier_and_extra_args(args) {
-        Some((id, extra)) => (Some(id), extra),
-        None => (None, args.to_vec()),
-    }
+/// `--web`, `--comments`, `--jq` and `--template`, in any form, ask for gh's own
+/// output rather than bdo's summary.
+fn view_wants_gh_output(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        matches!(
+            a.as_str(),
+            "-w" | "--web" | "-c" | "--comments" | "--json" | "--jq" | "--template"
+        ) || a.starts_with("-q")
+            || a.starts_with("-t")
+            || a.starts_with("--json=")
+            || a.starts_with("--jq=")
+            || a.starts_with("--template=")
+    })
 }
 
 fn run_gh_json<F>(cmd: Command, label: &str, filter_fn: F) -> Result<i32>
@@ -303,16 +326,12 @@ fn state_icon(state: &str, ultra_compact: bool) -> &'static str {
     }
 }
 
-fn should_passthrough_pr_view(extra_args: &[String]) -> bool {
-    extra_args
-        .iter()
-        .any(|a| a == "--json" || a == "--jq" || a == "--web" || a == "--comments")
+fn should_passthrough_pr_view(args: &[String]) -> bool {
+    view_wants_gh_output(args)
 }
 
-fn should_passthrough_issue_view(extra_args: &[String]) -> bool {
-    extra_args
-        .iter()
-        .any(|a| a == "--json" || a == "--jq" || a == "--web" || a == "--comments")
+fn should_passthrough_issue_view(args: &[String]) -> bool {
+    view_wants_gh_output(args)
 }
 
 fn should_passthrough_pr_status(args: &[String]) -> bool {
@@ -366,26 +385,19 @@ impl CheckCounts {
 
 fn view_pr(args: &[String], _verbose: u8, ultra_compact: bool) -> Result<i32> {
     // `gh pr view` without an identifier defaults to the PR for the current branch.
-    let (pr_number_opt, extra_args) = parse_optional_identifier(args);
-    if should_passthrough_pr_view(&extra_args) {
-        let mut base: Vec<&str> = vec!["pr", "view"];
-        if let Some(id) = pr_number_opt.as_deref() {
-            base.push(id);
-        }
-        return run_passthrough_with_extra("gh", &base, &extra_args);
+    if should_passthrough_pr_view(args) {
+        return run_passthrough_with_extra("gh", &["pr", "view"], args);
     }
+    let pr_number_opt = named_identifier(args);
+    // bdo's own flag goes first, so a `--` among the arguments can't swallow it.
     let mut cmd = resolved_command("gh");
-    cmd.args(["pr", "view"]);
-    if let Some(id) = pr_number_opt.as_deref() {
-        cmd.arg(id);
-    }
     cmd.args([
+        "pr",
+        "view",
         "--json",
         "number,title,state,author,body,url,mergeable,reviews,statusCheckRollup",
     ]);
-    for arg in &extra_args {
-        cmd.arg(arg);
-    }
+    cmd.args(args);
     let label = match pr_number_opt.as_deref() {
         Some(id) => format!("pr view {}", id),
         None => "pr view".to_string(),
@@ -480,15 +492,9 @@ fn format_pr_view(json: &Value, ultra_compact: bool) -> String {
 
 fn pr_checks(args: &[String], _verbose: u8, _ultra_compact: bool) -> Result<i32> {
     // `gh pr checks` without an identifier defaults to the PR for the current branch.
-    let (pr_number_opt, extra_args) = parse_optional_identifier(args);
+    let pr_number_opt = named_identifier(args);
     let mut cmd = resolved_command("gh");
-    cmd.args(["pr", "checks"]);
-    if let Some(id) = pr_number_opt.as_deref() {
-        cmd.arg(id);
-    }
-    for arg in &extra_args {
-        cmd.arg(arg);
-    }
+    cmd.args(["pr", "checks"]).args(args);
     let label = match pr_number_opt.as_deref() {
         Some(id) => format!("pr checks {}", id),
         None => "pr checks".to_string(),
@@ -684,23 +690,13 @@ fn format_issue_list(json: &Value, ultra_compact: bool) -> String {
 
 fn view_issue(args: &[String], _verbose: u8) -> Result<i32> {
     // Let gh emit its own error message when the identifier is missing rather than pre-rejecting.
-    let (issue_number_opt, extra_args) = parse_optional_identifier(args);
-    if should_passthrough_issue_view(&extra_args) {
-        let mut base: Vec<&str> = vec!["issue", "view"];
-        if let Some(id) = issue_number_opt.as_deref() {
-            base.push(id);
-        }
-        return run_passthrough_with_extra("gh", &base, &extra_args);
+    if should_passthrough_issue_view(args) {
+        return run_passthrough_with_extra("gh", &["issue", "view"], args);
     }
+    let issue_number_opt = named_identifier(args);
     let mut cmd = resolved_command("gh");
-    cmd.args(["issue", "view"]);
-    if let Some(id) = issue_number_opt.as_deref() {
-        cmd.arg(id);
-    }
-    cmd.args(["--json", "number,title,state,author,body,url"]);
-    for arg in &extra_args {
-        cmd.arg(arg);
-    }
+    cmd.args(["issue", "view", "--json", "number,title,state,author,body,url"]);
+    cmd.args(args);
     let label = match issue_number_opt.as_deref() {
         Some(id) => format!("issue view {}", id),
         None => "issue view".to_string(),
@@ -810,30 +806,20 @@ fn format_run_list(json: &Value, ultra_compact: bool) -> String {
 /// Check if run view args should bypass filtering and pass through directly.
 /// Flags like --log-failed, --log, and --json produce output that the filter
 /// would incorrectly strip.
-fn should_passthrough_run_view(extra_args: &[String]) -> bool {
-    extra_args
+fn should_passthrough_run_view(args: &[String]) -> bool {
+    args
         .iter()
         .any(|a| a == "--log-failed" || a == "--log" || a == "--json")
 }
 
 fn view_run(args: &[String], _verbose: u8) -> Result<i32> {
     // `gh run view` without an identifier opens an interactive picker — defer to gh.
-    let (run_id_opt, extra_args) = parse_optional_identifier(args);
-    if should_passthrough_run_view(&extra_args) {
-        let mut base: Vec<&str> = vec!["run", "view"];
-        if let Some(id) = run_id_opt.as_deref() {
-            base.push(id);
-        }
-        return run_passthrough_with_extra("gh", &base, &extra_args);
+    if should_passthrough_run_view(args) {
+        return run_passthrough_with_extra("gh", &["run", "view"], args);
     }
+    let run_id_opt = named_identifier(args);
     let mut cmd = resolved_command("gh");
-    cmd.args(["run", "view"]);
-    if let Some(id) = run_id_opt.as_deref() {
-        cmd.arg(id);
-    }
-    for arg in &extra_args {
-        cmd.arg(arg);
-    }
+    cmd.args(["run", "view"]).args(args);
     let label = match run_id_opt.as_deref() {
         Some(id) => format!("run view {}", id),
         None => "run view".to_string(),
@@ -1172,87 +1158,47 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_identifier_simple() {
-        let args: Vec<String> = vec!["123".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "123");
-        assert!(extra.is_empty());
+    fn test_named_identifier() {
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&[], None),
+            (&["123"], Some("123")),
+            (&["185", "-R", "o/r"], Some("185")),
+            (&["-R", "o/r", "185"], Some("185")),
+            (&["--repo", "o/r", "42"], Some("42")),
+            (&["--repo=o/r", "42"], Some("42")),
+            (&["-Ro/r", "42"], Some("42")),
+            (&["-R", "o/r"], None),
+            (&["-R"], None),
+            (&["123", "--web"], Some("123")),
+            (&["--job", "67890", "12345"], Some("12345")),
+            (&["-j", "67890", "12345"], Some("12345")),
+            (&["-a", "2", "12345"], Some("12345")),
+            (&["-i", "5", "42", "--watch"], Some("42")),
+            (&["--log-failed", "--job", "67890", "12345"], Some("12345")),
+            (&["-j", "67890"], None),
+            (&["--", "42"], Some("42")),
+            (&["feature-branch"], Some("feature-branch")),
+            (&["--future-option", "5", "42"], None),
+            (&["42", "43"], None),
+        ];
+        for (args, want) in cases {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            assert_eq!(named_identifier(&args).as_deref(), *want, "{args:?}");
+        }
     }
 
     #[test]
-    fn test_extract_identifier_with_repo_flag_after() {
-        // gh issue view 185 -R tedorigawa001/TokenReductionTool
-        let args: Vec<String> = vec!["185".into(), "-R".into(), "tedorigawa001/TokenReductionTool".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "185");
-        assert_eq!(extra, vec!["-R", "tedorigawa001/TokenReductionTool"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_with_repo_flag_before() {
-        // gh issue view -R tedorigawa001/TokenReductionTool 185
-        let args: Vec<String> = vec!["-R".into(), "tedorigawa001/TokenReductionTool".into(), "185".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "185");
-        assert_eq!(extra, vec!["-R", "tedorigawa001/TokenReductionTool"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_with_long_repo_flag() {
-        let args: Vec<String> = vec!["42".into(), "--repo".into(), "owner/repo".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "42");
-        assert_eq!(extra, vec!["--repo", "owner/repo"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_empty() {
-        let args: Vec<String> = vec![];
-        assert!(extract_identifier_and_extra_args(&args).is_none());
-    }
-
-    #[test]
-    fn test_extract_identifier_only_flags() {
-        // No positional identifier, only flags
-        let args: Vec<String> = vec!["-R".into(), "tedorigawa001/TokenReductionTool".into()];
-        assert!(extract_identifier_and_extra_args(&args).is_none());
-    }
-
-    // --- parse_optional_identifier tests ---
-
-    #[test]
-    fn test_parse_optional_identifier_empty_yields_no_id() {
-        // `gh pr view` (no args) must surface as (None, []) so the caller
-        // hands the request to gh, which resolves the current branch's PR.
-        let (id, extra) = parse_optional_identifier(&[]);
-        assert!(id.is_none());
-        assert!(extra.is_empty());
-    }
-
-    #[test]
-    fn test_parse_optional_identifier_only_flags_preserves_flags() {
-        // Regression: `gh pr view -R tedorigawa001/TokenReductionTool` previously triggered
-        // "PR number required". Now flags must round-trip into `extra`.
-        let args: Vec<String> = vec!["-R".into(), "tedorigawa001/TokenReductionTool".into()];
-        let (id, extra) = parse_optional_identifier(&args);
-        assert!(id.is_none());
-        assert_eq!(extra, vec!["-R", "tedorigawa001/TokenReductionTool"]);
-    }
-
-    #[test]
-    fn test_parse_optional_identifier_with_id_matches_extract() {
-        let args: Vec<String> = vec!["-R".into(), "tedorigawa001/TokenReductionTool".into(), "42".into()];
-        let (id, extra) = parse_optional_identifier(&args);
-        assert_eq!(id.as_deref(), Some("42"));
-        assert_eq!(extra, vec!["-R", "tedorigawa001/TokenReductionTool"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_with_web_flag() {
-        let args: Vec<String> = vec!["123".into(), "--web".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "123");
-        assert_eq!(extra, vec!["--web"]);
+    fn test_view_wants_gh_output() {
+        for flag in [
+            "-w", "--web", "-c", "--comments", "--json", "--json=n", "--jq", "--jq=.n", "-q",
+            "-q.n", "--template", "--template=x", "-t", "-tx",
+        ] {
+            assert!(view_wants_gh_output(&[flag.to_string()]), "{flag}");
+        }
+        for args in [&["42"][..], &["-R", "o/r", "42"]] {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            assert!(!view_wants_gh_output(&args), "{args:?}");
+        }
     }
 
     #[test]
@@ -1296,47 +1242,6 @@ mod tests {
     #[test]
     fn test_run_view_no_passthrough_other_flags() {
         assert!(!should_passthrough_run_view(&["--web".into()]));
-    }
-
-    #[test]
-    fn test_extract_identifier_with_job_flag_after() {
-        // gh run view 12345 --job 67890
-        let args: Vec<String> = vec!["12345".into(), "--job".into(), "67890".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "12345");
-        assert_eq!(extra, vec!["--job", "67890"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_with_job_flag_before() {
-        // gh run view --job 67890 12345
-        let args: Vec<String> = vec!["--job".into(), "67890".into(), "12345".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "12345");
-        assert_eq!(extra, vec!["--job", "67890"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_with_job_and_log_failed() {
-        // gh run view --log-failed --job 67890 12345
-        let args: Vec<String> = vec![
-            "--log-failed".into(),
-            "--job".into(),
-            "67890".into(),
-            "12345".into(),
-        ];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "12345");
-        assert_eq!(extra, vec!["--log-failed", "--job", "67890"]);
-    }
-
-    #[test]
-    fn test_extract_identifier_with_attempt_flag() {
-        // gh run view 12345 --attempt 3
-        let args: Vec<String> = vec!["12345".into(), "--attempt".into(), "3".into()];
-        let (id, extra) = extract_identifier_and_extra_args(&args).unwrap();
-        assert_eq!(id, "12345");
-        assert_eq!(extra, vec!["--attempt", "3"]);
     }
 
     // --- should_passthrough_pr_view tests ---

@@ -423,7 +423,8 @@ fn mr_view(args: &[String], _verbose: u8, ultra_compact: bool) -> Result<i32> {
     }
 
     let mut cmd = resolved_command("glab");
-    cmd.args(["mr", "view"]).args(args).args(["-F", "json"]);
+    // bdo's own flag goes first, so a `--` among the arguments can't swallow it.
+    cmd.args(["mr", "view", "-F", "json"]).args(args);
     let label = match named_number(args) {
         Some(id) => format!("mr view {}", id),
         None => "mr view".to_string(),
@@ -610,7 +611,7 @@ fn issue_view(args: &[String], _verbose: u8) -> Result<i32> {
     }
 
     let mut cmd = resolved_command("glab");
-    cmd.args(["issue", "view"]).args(args).args(["-F", "json"]);
+    cmd.args(["issue", "view", "-F", "json"]).args(args);
     let label = match named_number(args) {
         Some(id) => format!("issue view {}", id),
         None => "issue view".to_string(),

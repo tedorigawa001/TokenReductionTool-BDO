@@ -146,7 +146,7 @@ fn mr_view_keeps_what_a_reviewer_needs() {
         assert!(out.contains(want), "{want}:\n{out}");
     }
     assert!(!out.contains("hidden note"), "{out}");
-    assert_eq!(env.received(), ["mr", "view", "42", "-F", "json"]);
+    assert_eq!(env.received(), ["mr", "view", "-F", "json", "42"]);
 }
 
 #[test]
@@ -176,17 +176,22 @@ fn issue_view_keeps_its_description() {
 /// about. Moving the number in front of them hands the value to glab as the number.
 #[test]
 fn view_keeps_the_arguments_in_the_order_given() {
-    for (args, number) in [
-        (["mr", "view", "-P", "5", "42"], "42"),
-        (["issue", "view", "--per-page", "5", "7"], "7"),
+    for args in [
+        &["mr", "view", "-P", "5", "42"][..],
+        &["issue", "view", "--per-page", "5", "7"],
+        &["mr", "view", "--", "42"],
     ] {
         let env = Env::new();
         env.answer(&mr().to_string());
-        env.ok(&args);
+        env.ok(args);
         let got = env.received();
-        assert_eq!(&got[..5], &args[..], "{got:?}");
-        assert_eq!(got[4], number, "{got:?}");
-        assert_eq!(&got[5..], ["-F", "json"], "{got:?}");
+        assert_eq!(&got[..2], &args[..2], "{got:?}");
+        assert_eq!(
+            &got[2..4],
+            ["-F", "json"],
+            "bdo's flag before a `--`: {got:?}"
+        );
+        assert_eq!(&got[4..], &args[2..], "{got:?}");
     }
 }
 

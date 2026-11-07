@@ -1043,6 +1043,150 @@ fn gemini_keeps_hooks_that_merely_mention_bdo() {
     assert_eq!(env.json("home/.gemini/settings.json"), settings);
 }
 
+const GEMINI_SETTINGS: &str = "home/.gemini/settings.json";
+const GEMINI_SCRIPT: &str = "home/.gemini/hooks/bdo-hook-gemini.sh";
+const GEMINI_SCRIPT_HASH: &str = "home/.gemini/hooks/.bdo-hook.sha256";
+
+fn gemini_settings_running(key: &str, command: &str) -> Value {
+    json!({"hooks": {key: [{"matcher": "x", "hooks": [{"type": "command", "command": command}]}]}})
+}
+
+/// Only bdo's own script is bdo's. These merely have a similar name, or take it as an
+/// argument.
+#[test]
+fn gemini_keeps_hooks_with_similar_names() {
+    for command in [
+        "/opt/tools/not-bdo-hook-gemini.sh",
+        "/opt/tools/bdo-hook-gemini.sh.disabled",
+        "audit.sh --after /opt/tools/bdo-hook-gemini.sh",
+        "bash -c '/opt/tools/bdo-hook-gemini.sh'",
+        "/opt/tools/bdo-hook-gemini.sh && audit.sh",
+    ] {
+        let env = Env::new();
+        let settings = gemini_settings_running("BeforeTool", command);
+        env.write(GEMINI_SETTINGS, &settings.to_string());
+
+        assert_ok(&env.bdo(&["init", "--gemini", "-g", "--auto-patch"]));
+        let installed = env.read(GEMINI_SETTINGS);
+        assert!(
+            installed.contains("/.gemini/hooks/bdo-hook-gemini.sh"),
+            "{command}: not installed: {installed}"
+        );
+        assert!(installed.contains(command), "{command}: {installed}");
+    }
+}
+
+/// What bdo itself wrote is bdo's, even where the path has a space in it, and so are
+/// the plain ways of running the script by hand.
+#[test]
+fn gemini_recognises_its_own_hook() {
+    for command in [
+        "~/.gemini/hooks/bdo-hook-gemini.sh",
+        "bash ~/.gemini/hooks/bdo-hook-gemini.sh",
+        "'/Users/my name/.gemini/hooks/bdo-hook-gemini.sh'",
+    ] {
+        let env = Env::new();
+        let settings = gemini_settings_running("BeforeTool", command);
+        env.write(GEMINI_SETTINGS, &settings.to_string());
+        assert_ok(&env.bdo(&["init", "--gemini", "-g", "--auto-patch"]));
+        assert_eq!(
+            env.json(GEMINI_SETTINGS),
+            settings,
+            "{command}: counted as not set up"
+        );
+        assert_ok(&env.bdo(&["init", "--gemini", "-g", "--uninstall"]));
+        assert!(
+            !env.read(GEMINI_SETTINGS).contains("bdo-hook-gemini.sh"),
+            "{command}"
+        );
+    }
+
+    let env = Env::new();
+    let home = env.root.join("my home");
+    fs::create_dir_all(&home).unwrap();
+    let run = |args: &[&str]| {
+        let mut command = env.command(args);
+        command.env("HOME", &home);
+        command.output().unwrap()
+    };
+    let settings = home.join(".gemini/settings.json");
+    assert_ok(&run(&["init", "--gemini", "-g", "--auto-patch"]));
+    let first = fs::read_to_string(&settings).unwrap();
+    assert_eq!(first.matches("bdo-hook-gemini.sh").count(), 1, "{first}");
+    assert_ok(&run(&["init", "--gemini", "-g", "--auto-patch"]));
+    assert_eq!(fs::read_to_string(&settings).unwrap(), first);
+    assert_ok(&run(&["init", "--gemini", "-g", "--uninstall"]));
+    assert!(!fs::read_to_string(&settings)
+        .unwrap()
+        .contains("bdo-hook-gemini.sh"));
+}
+
+/// The script stays, with its hash, while anything left in the file uses it.
+#[test]
+fn gemini_uninstall_keeps_the_script_while_a_remaining_hook_uses_it() {
+    for settings in [
+        gemini_settings_running("BeforeTool", "bash -e ~/.gemini/hooks/bdo-hook-gemini.sh"),
+        gemini_settings_running("AfterTool", "~/.gemini/hooks/bdo-hook-gemini.sh"),
+    ] {
+        let env = Env::new();
+        assert_ok(&env.bdo(&["init", "--gemini", "-g", "--auto-patch"]));
+        env.write(GEMINI_SETTINGS, &settings.to_string());
+
+        let out = env.bdo(&["init", "--gemini", "-g", "--uninstall"]);
+        assert_ok(&out);
+        assert!(env.exists(GEMINI_SCRIPT), "{settings}");
+        assert!(env.exists(GEMINI_SCRIPT_HASH), "{settings}");
+        assert_eq!(env.json(GEMINI_SETTINGS), settings);
+        assert!(text(&out).contains("by hand"), "{}", text(&out));
+    }
+}
+
+#[test]
+fn gemini_uninstall_removes_the_script_and_its_entry() {
+    let env = Env::new();
+    assert_ok(&env.bdo(&["init", "--gemini", "-g", "--auto-patch"]));
+    let out = env.bdo(&["init", "--gemini", "-g", "--uninstall"]);
+    assert_ok(&out);
+    assert!(!env.exists(GEMINI_SCRIPT));
+    assert!(!env.exists(GEMINI_SCRIPT_HASH));
+    assert!(!env.read(GEMINI_SETTINGS).contains("bdo-hook-gemini.sh"));
+    assert!(!text(&out).contains("by hand"), "{}", text(&out));
+}
+
+/// Broken settings can't be read for bdo's entry, so nothing else goes either, and it
+/// says so instead of leaving a hook that points at nothing.
+#[test]
+fn gemini_uninstall_changes_nothing_when_settings_are_broken() {
+    let env = Env::new();
+    assert_ok(&env.bdo(&["init", "--gemini", "-g", "--auto-patch"]));
+    env.write(GEMINI_SETTINGS, "{ not json");
+    let before = env.snapshot();
+
+    let out = env.bdo(&["init", "--gemini", "-g", "--uninstall"]);
+    assert_eq!(before, env.snapshot());
+    assert!(text(&out).contains("not changed"), "{}", text(&out));
+}
+
+/// Setup stops before writing anything when it couldn't finish.
+#[test]
+fn gemini_setup_changes_nothing_when_settings_are_broken() {
+    for broken in [
+        "{ not json",
+        "[\"a list, not settings\"]",
+        "{\"hooks\": \"text\"}",
+        "{\"hooks\": {\"BeforeTool\": \"text\"}}",
+    ] {
+        let env = Env::new();
+        env.write(GEMINI_SETTINGS, broken);
+        env.write("home/.gemini/GEMINI.md", "# Mine\n");
+        let before = env.snapshot();
+
+        let out = env.bdo(&["init", "--gemini", "-g", "--auto-patch"]);
+        assert!(!out.status.success(), "{broken}: {}", text(&out));
+        assert_eq!(before, env.snapshot(), "{broken}");
+    }
+}
+
 /// The other half of an entry is the user's.
 #[test]
 fn a_hook_sharing_an_entry_with_bdo_stays() {

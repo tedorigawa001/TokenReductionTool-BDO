@@ -533,9 +533,14 @@ fn remove_lines_matching(content: &str, matches: impl Fn(&str) -> bool) -> Strin
     kept.concat()
 }
 
-/// Whether a hook command runs bdo's old script, by file name, so that
-/// `not-bdo-rewrite.sh` or `audit.sh --after bdo-rewrite.sh` stay the user's own.
+/// Whether a hook command runs bdo's old script.
 fn runs_rewrite_script(command: &str) -> bool {
+    runs_hook_script(command, REWRITE_HOOK_FILE)
+}
+
+/// Whether a hook command runs a script of bdo's, by file name, so that
+/// `not-bdo-rewrite.sh` or `audit.sh --after bdo-rewrite.sh` stay the user's own.
+fn runs_hook_script(command: &str, script_name: &str) -> bool {
     use crate::discover::lexer::{shell_split, tokenize, TokenKind};
 
     // Only remove a simple invocation we can identify. In particular, a path
@@ -555,18 +560,19 @@ fn runs_rewrite_script(command: &str) -> bool {
         }
         _ => return false,
     };
-    script.rsplit('/').next() == Some(REWRITE_HOOK_FILE)
+    script.rsplit('/').next() == Some(script_name)
 }
 
-/// Whether a host's config still uses the old script once bdo's own entries are out
-/// of it. Anything else mentioning the script may depend on it, in any event.
-fn still_uses_rewrite_script(
+/// Whether a host's config still uses a script once bdo's own entries are out of it.
+/// Anything else mentioning the script may depend on it, in any event.
+fn still_uses_script(
     root: &serde_json::Value,
+    script_name: &str,
     remove_ours: impl Fn(&mut serde_json::Value) -> bool,
 ) -> bool {
     let mut left = root.clone();
     remove_ours(&mut left);
-    left.to_string().contains(REWRITE_HOOK_FILE)
+    left.to_string().contains(script_name)
 }
 
 /// Removes hook commands bdo owns from a host's list of hook entries. An entry
@@ -724,7 +730,11 @@ fn claude_settings_use_rewrite_script(claude_dir: &Path) -> Result<bool> {
     }
     let root = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse {}", path.display()))?;
-    Ok(still_uses_rewrite_script(&root, remove_hook_from_json))
+    Ok(still_uses_script(
+        &root,
+        REWRITE_HOOK_FILE,
+        remove_hook_from_json,
+    ))
 }
 
 /// Remove Bushido hook from settings.json file
@@ -3072,7 +3082,11 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
         } else {
             serde_json::from_str(&content).context("Failed to re-read Cursor hooks.json")?
         };
-        if still_uses_rewrite_script(&root, remove_legacy_cursor_hook_entries_from_json) {
+        if still_uses_script(
+            &root,
+            REWRITE_HOOK_FILE,
+            remove_legacy_cursor_hook_entries_from_json,
+        ) {
             eprintln!(
                 "[warn] Keeping old Cursor hook script: a hook may still refer to it. \
                  Review the command and migrate it by hand."
@@ -3268,9 +3282,9 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
 
     // 1. Remove hook script
     let hook_path = cursor_dir.join(HOOKS_SUBDIR).join(REWRITE_HOOK_FILE);
-    let script_in_use = parsed
-        .as_ref()
-        .is_some_and(|root| still_uses_rewrite_script(root, remove_cursor_hook_from_json));
+    let script_in_use = parsed.as_ref().is_some_and(|root| {
+        still_uses_script(root, REWRITE_HOOK_FILE, remove_cursor_hook_from_json)
+    });
     if hook_path.exists() && script_in_use {
         eprintln!(
             "[warn] Keeping old Cursor hook script: a hook may still refer to it. \
@@ -3676,6 +3690,8 @@ pub fn run_gemini(
     }
 
     let gemini_dir = resolve_gemini_dir()?;
+    // Checked first, so that a failure here leaves everything as it was.
+    ensure_gemini_settings_usable(&gemini_dir)?;
     if !dry_run {
         fs::create_dir_all(&gemini_dir).with_context(|| {
             format!(
@@ -3761,37 +3777,12 @@ fn patch_gemini_settings(
     let settings_path = gemini_dir.join(SETTINGS_JSON);
     let hook_cmd = hook_path.to_string_lossy().to_string();
 
-    // Read or create settings.json
-    let mut settings: serde_json::Value = if settings_path.exists() {
-        let content = fs::read_to_string(&settings_path)
-            .with_context(|| format!("Failed to read {}", settings_path.display()))?;
-        // Not `{}` on a parse error: writing it back would erase the user's settings.
-        if content.trim().is_empty() {
-            serde_json::json!({})
-        } else {
-            serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse {} as JSON", settings_path.display()))?
+    let mut settings = read_gemini_settings(&settings_path)?;
+    if gemini_hook_present(&settings, &hook_cmd) {
+        if verbose > 0 {
+            eprintln!("Gemini settings.json already has Bushido hook");
         }
-    } else {
-        serde_json::json!({})
-    };
-
-    let before_tool_pointer = format!("/hooks/{}", BEFORE_TOOL_KEY);
-    if let Some(hooks) = settings.pointer(&before_tool_pointer) {
-        if let Some(arr) = hooks.as_array() {
-            let has_our_hook = arr
-                .iter()
-                .filter_map(|entry| entry.get("hooks")?.as_array())
-                .flatten()
-                .filter_map(|hook| hook.get("command")?.as_str())
-                .any(|command| command.contains(GEMINI_HOOK_FILE));
-            if has_our_hook {
-                if verbose > 0 {
-                    eprintln!("Gemini settings.json already has Bushido hook");
-                }
-                return Ok(());
-            }
-        }
+        return Ok(());
     }
 
     // Ask user before patching
@@ -3825,32 +3816,7 @@ fn patch_gemini_settings(
         }
     }
 
-    // Build hook entry matching Gemini CLI format
-    let hook_entry = serde_json::json!({
-        "matcher": "run_shell_command",
-        "hooks": [{
-            "type": "command",
-            "command": hook_cmd
-        }]
-    });
-
-    // Insert into settings
-    let hooks = settings
-        .as_object_mut()
-        .context("settings.json is not an object")?
-        .entry("hooks")
-        .or_insert(serde_json::json!({}));
-
-    let before_tool = hooks
-        .as_object_mut()
-        .context("hooks is not an object")?
-        .entry(BEFORE_TOOL_KEY)
-        .or_insert(serde_json::json!([]));
-
-    before_tool
-        .as_array_mut()
-        .context("BeforeTool is not an array")?
-        .push(hook_entry);
+    insert_gemini_hook_entry(&mut settings, &hook_cmd)?;
 
     let content = serde_json::to_string_pretty(&settings)?;
 
@@ -3875,6 +3841,77 @@ fn patch_gemini_settings(
     Ok(())
 }
 
+/// Gemini's settings, or nothing yet. Not `{}` on a parse error: writing that back
+/// would erase the user's settings.
+fn read_gemini_settings(settings_path: &Path) -> Result<serde_json::Value> {
+    let content = read_if_exists(settings_path)?;
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse {} as JSON", settings_path.display()))
+}
+
+/// Refuses settings the hook could not be added to, before anything has been written.
+fn ensure_gemini_settings_usable(gemini_dir: &Path) -> Result<()> {
+    let settings_path = gemini_dir.join(SETTINGS_JSON);
+    let mut settings = read_gemini_settings(&settings_path)?;
+    insert_gemini_hook_entry(&mut settings, "")
+        .with_context(|| format!("Cannot add the hook to {}", settings_path.display()))
+}
+
+/// Whether a hook command is bdo's: the path bdo itself wrote, which isn't quoted even
+/// if it has a space in it, or the script run in some other plain way.
+fn is_gemini_hook(command: &str, hook_cmd: &str) -> bool {
+    command == hook_cmd || runs_hook_script(command, GEMINI_HOOK_FILE)
+}
+
+fn gemini_hook_present(settings: &serde_json::Value, hook_cmd: &str) -> bool {
+    settings
+        .pointer(&format!("/hooks/{BEFORE_TOOL_KEY}"))
+        .and_then(|hooks| hooks.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("hooks")?.as_array())
+        .flatten()
+        .filter_map(|hook| hook.get("command")?.as_str())
+        .any(|command| is_gemini_hook(command, hook_cmd))
+}
+
+/// Adds a hook entry in Gemini CLI's format.
+fn insert_gemini_hook_entry(settings: &mut serde_json::Value, hook_cmd: &str) -> Result<()> {
+    let hooks = settings
+        .as_object_mut()
+        .context("settings.json is not an object")?
+        .entry("hooks")
+        .or_insert(serde_json::json!({}));
+
+    hooks
+        .as_object_mut()
+        .context("hooks is not an object")?
+        .entry(BEFORE_TOOL_KEY)
+        .or_insert(serde_json::json!([]))
+        .as_array_mut()
+        .context("BeforeTool is not an array")?
+        .push(serde_json::json!({
+            "matcher": "run_shell_command",
+            "hooks": [{
+                "type": "command",
+                "command": hook_cmd
+            }]
+        }));
+    Ok(())
+}
+
+fn remove_gemini_hook_from_json(settings: &mut serde_json::Value, hook_cmd: &str) -> bool {
+    settings
+        .pointer_mut(&format!("/hooks/{BEFORE_TOOL_KEY}"))
+        .and_then(|hooks| hooks.as_array_mut())
+        .is_some_and(|entries| {
+            remove_hook_commands(entries, |command| is_gemini_hook(command, hook_cmd))
+        })
+}
+
 /// Remove Gemini artifacts during uninstall
 fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
     let InitContext { verbose, dry_run } = ctx;
@@ -3884,30 +3921,54 @@ fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
         Err(_) => return Ok(removed),
     };
 
-    // Remove hook
     let hook_path = gemini_dir.join(HOOKS_SUBDIR).join(GEMINI_HOOK_FILE);
-    if hook_path.exists() {
-        if dry_run {
-            println!(
-                "[dry-run] would remove Gemini hook: {}",
-                hook_path.display()
-            );
-        } else {
-            fs::remove_file(&hook_path)
-                .with_context(|| format!("Failed to remove {}", hook_path.display()))?;
-        }
-        removed.push(format!("Gemini hook: {}", hook_path.display()));
-    }
+    let hook_cmd = hook_path.to_string_lossy().to_string();
 
-    // Its integrity baseline, and the directory if that leaves it empty
-    let hash_path = integrity::hash_path_for(&hook_path);
-    if dry_run {
-        if hash_path.exists() {
-            println!("[dry-run] would remove integrity hash sidecar");
+    let settings_path = gemini_dir.join(SETTINGS_JSON);
+    let mut settings = match read_gemini_settings(&settings_path) {
+        Ok(settings) => settings,
+        Err(e) => {
+            eprintln!(
+                "Warning: {e:#}, so Gemini's setup was not changed. \
+                 Fix the file and run this again, or remove bdo's entry by hand."
+            );
+            return Ok(removed);
         }
+    };
+
+    // Remove hook, unless something left in the settings uses it
+    let gemini_script_in_use = still_uses_script(&settings, GEMINI_HOOK_FILE, |root| {
+        remove_gemini_hook_from_json(root, &hook_cmd)
+    });
+    if hook_path.exists() && gemini_script_in_use {
+        eprintln!(
+            "[warn] Keeping Gemini hook script: a hook may still refer to it. \
+             Review the command and migrate it by hand."
+        );
     } else {
-        integrity::remove_hash(&hook_path)?;
-        remove_dir_if_empty(hook_path.parent());
+        if hook_path.exists() {
+            if dry_run {
+                println!(
+                    "[dry-run] would remove Gemini hook: {}",
+                    hook_path.display()
+                );
+            } else {
+                fs::remove_file(&hook_path)
+                    .with_context(|| format!("Failed to remove {}", hook_path.display()))?;
+            }
+            removed.push(format!("Gemini hook: {}", hook_path.display()));
+        }
+
+        // Its integrity baseline, and the directory if that leaves it empty
+        let hash_path = integrity::hash_path_for(&hook_path);
+        if dry_run {
+            if hash_path.exists() {
+                println!("[dry-run] would remove integrity hash sidecar");
+            }
+        } else {
+            integrity::remove_hash(&hook_path)?;
+            remove_dir_if_empty(hook_path.parent());
+        }
     }
 
     // Take bdo's part out of GEMINI.md. The rest of the file is the user's. A file
@@ -3927,31 +3988,18 @@ fn uninstall_gemini(ctx: InitContext) -> Result<Vec<String>> {
     }
 
     // Remove hook from settings.json
-    let settings_path = gemini_dir.join(SETTINGS_JSON);
-    if settings_path.exists() {
-        let content = fs::read_to_string(&settings_path)?;
-        if let Ok(mut settings) = serde_json::from_str::<serde_json::Value>(&content) {
-            let bt_pointer = format!("/hooks/{}", BEFORE_TOOL_KEY);
-            if let Some(arr) = settings
-                .pointer_mut(&bt_pointer)
-                .and_then(|v| v.as_array_mut())
-            {
-                if remove_hook_commands(arr, |command| command.contains(GEMINI_HOOK_FILE)) {
-                    if dry_run {
-                        println!(
-                            "[dry-run] would remove Bushido hook from Gemini settings.json: {}",
-                            settings_path.display()
-                        );
-                    } else {
-                        let new_content = serde_json::to_string_pretty(&settings)?;
-                        atomic_write(&settings_path, &new_content).with_context(|| {
-                            format!("Failed to write {}", settings_path.display())
-                        })?;
-                    }
-                    removed.push("Gemini settings.json: removed Bushido hook entry".to_string());
-                }
-            }
+    if remove_gemini_hook_from_json(&mut settings, &hook_cmd) {
+        if dry_run {
+            println!(
+                "[dry-run] would remove Bushido hook from Gemini settings.json: {}",
+                settings_path.display()
+            );
+        } else {
+            let new_content = serde_json::to_string_pretty(&settings)?;
+            atomic_write(&settings_path, &new_content)
+                .with_context(|| format!("Failed to write {}", settings_path.display()))?;
         }
+        removed.push("Gemini settings.json: removed Bushido hook entry".to_string());
     }
 
     if verbose > 0 && !removed.is_empty() {

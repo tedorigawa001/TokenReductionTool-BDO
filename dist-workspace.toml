@@ -44,3 +44,7 @@ install-updater = false
 # Attach GitHub build provenance to each platform's archives
 # (`gh attestation verify`). release.yml carries it by hand under allow-dirty.
 github-attestations = true
+
+# dist still picks macos-14 for this target, and GitHub has retired that image.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"

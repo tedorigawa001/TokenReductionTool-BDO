@@ -4,7 +4,6 @@
 //! dual-metric economic impact reporting with blended and active cost-per-token.
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -231,7 +230,7 @@ fn merge_daily(cc: Option<Vec<CcusagePeriod>>, rtk: Vec<DayStats>) -> Vec<Period
 fn merge_weekly(cc: Option<Vec<CcusagePeriod>>, rtk: Vec<WeekStats>) -> Vec<PeriodEconomics> {
     let mut map: HashMap<String, PeriodEconomics> = HashMap::new();
 
-    // Insert ccusage data (key = ISO Monday "2026-01-20")
+    // Insert ccusage data, keyed by the Monday its week starts on (it is asked for that)
     if let Some(cc_data) = cc {
         for entry in cc_data {
             let super::ccusage::CcusagePeriod { key, metrics } = entry;
@@ -241,18 +240,9 @@ fn merge_weekly(cc: Option<Vec<CcusagePeriod>>, rtk: Vec<WeekStats>) -> Vec<Peri
         }
     }
 
-    // Merge rtk data (week_start = legacy Saturday "2026-01-18")
-    // Convert Saturday to Monday for alignment
+    // Merge rtk data: the tracking database already starts its weeks on Monday
     for entry in rtk {
-        let monday_key = match convert_saturday_to_monday(&entry.week_start) {
-            Some(m) => m,
-            None => {
-                eprintln!("[warn] Invalid week_start format: {}", entry.week_start);
-                continue;
-            }
-        };
-
-        map.entry(monday_key)
+        map.entry(entry.week_start.clone())
             .or_insert_with_key(|key| PeriodEconomics::new(key))
             .set_rtk_from_week(&entry);
     }
@@ -296,18 +286,6 @@ fn merge_monthly(cc: Option<Vec<CcusagePeriod>>, rtk: Vec<MonthStats>) -> Vec<Pe
 }
 
 // ── Helpers ──
-
-/// Convert Saturday week_start (legacy rtk) to ISO Monday
-/// Example: "2026-01-18" (Sat) -> "2026-01-20" (Mon)
-fn convert_saturday_to_monday(saturday: &str) -> Option<String> {
-    let sat_date = NaiveDate::parse_from_str(saturday, "%Y-%m-%d").ok()?;
-
-    // rtk uses Saturday as week start, ISO uses Monday
-    // Saturday + 2 days = Monday
-    let monday = sat_date + chrono::TimeDelta::try_days(2)?;
-
-    Some(monday.format("%Y-%m-%d").to_string())
-}
 
 fn compute_totals(periods: &[PeriodEconomics]) -> Totals {
     let mut totals = Totals {
@@ -466,10 +444,7 @@ fn display_summary(tracker: &Tracker, verbose: u8) -> Result<()> {
     );
     println!();
 
-    println!(
-        "  Bushido commands:                 {}",
-        totals.rtk_commands
-    );
+    println!("  Bushido commands:             {}", totals.rtk_commands);
     println!(
         "  Tokens saved:                 {}",
         format_tokens(totals.rtk_saved_tokens)
@@ -830,18 +805,6 @@ fn print_csv_row(p: &PeriodEconomics) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_convert_saturday_to_monday() {
-        // Saturday Jan 18 -> Monday Jan 20
-        assert_eq!(
-            convert_saturday_to_monday("2026-01-18"),
-            Some("2026-01-20".to_string())
-        );
-
-        // Invalid format
-        assert_eq!(convert_saturday_to_monday("invalid"), None);
-    }
 
     #[test]
     fn test_period_economics_new() {

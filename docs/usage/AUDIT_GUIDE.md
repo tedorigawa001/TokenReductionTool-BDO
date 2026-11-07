@@ -42,7 +42,7 @@ bdo gain --reset --yes    # skip prompt (CI/scripts)
 | Flag | Description | Output |
 |------|-------------|--------|
 | `--daily` | Day-by-day breakdown | All days with full metrics |
-| `--weekly` | Week-by-week breakdown | Aggregated by Sunday-Saturday weeks |
+| `--weekly` | Week-by-week breakdown | Aggregated by Monday-Sunday weeks |
 | `--monthly` | Month-by-month breakdown | Aggregated by calendar month |
 | `--all` | All time breakdowns | Daily + Weekly + Monthly combined |
 
@@ -107,7 +107,7 @@ Week                      Cmds      Input     Output      Saved   Save%
 TOTAL                      196       1.3M      59.2K       1.2M   95.6%
 ```
 
-**Week definition**: Sunday to Saturday (ISO week starting Sunday at 00:00)
+**Week definition**: Monday to Sunday, starting Monday at 00:00 UTC
 
 ### Monthly Breakdown
 

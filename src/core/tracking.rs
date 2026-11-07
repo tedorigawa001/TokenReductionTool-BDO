@@ -224,7 +224,7 @@ pub struct DayStats {
 /// Weekly statistics for token savings and execution metrics.
 ///
 /// Serializable to JSON for export via `rtk gain --weekly --format json`.
-/// Weeks start on Sunday (SQLite default).
+/// Weeks run Monday to Sunday, in UTC.
 #[derive(Debug, Serialize)]
 pub struct WeekStats {
     /// Week start date (YYYY-MM-DD)
@@ -891,7 +891,7 @@ impl Tracker {
     /// Get weekly statistics grouped by week.
     ///
     /// Returns one [`WeekStats`] per week with aggregated metrics.
-    /// Weeks start on Sunday (SQLite default). Results ordered chronologically.
+    /// Weeks run Monday to Sunday, in UTC. Results ordered chronologically.
     ///
     /// # Examples
     ///

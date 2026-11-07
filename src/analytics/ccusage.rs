@@ -32,7 +32,7 @@ pub struct CcusageMetrics {
 /// Period data with key (date/month/week) and metrics
 #[derive(Debug)]
 pub struct CcusagePeriod {
-    pub key: String, // "2026-01-30" (daily), "2026-01" (monthly), "2026-01-20" (weekly ISO monday)
+    pub key: String, // "2026-01-30" (daily), "2026-01" (monthly), "2026-01-26" (weekly, a Monday)
     pub metrics: CcusageMetrics,
 }
 
@@ -65,7 +65,7 @@ struct WeeklyResponse {
 
 #[derive(Debug, Deserialize)]
 struct WeeklyEntry {
-    week: String, // ISO week start (Monday)
+    week: String, // The Monday the week starts on, as fetch asks for
     #[serde(flatten)]
     metrics: CcusageMetrics,
 }
@@ -124,6 +124,12 @@ pub fn fetch(granularity: Granularity) -> Result<Option<Vec<CcusagePeriod>>> {
         .arg("--json")
         .arg("--since")
         .arg("20250101"); // 90 days back approx
+
+    // ccusage starts its weeks on Sunday by default; bdo's tracking starts them on
+    // Monday, and the economics report joins the two on that day.
+    if matches!(granularity, Granularity::Weekly) {
+        cmd.arg("--start-of-week").arg("monday");
+    }
 
     let result = match exec_capture(&mut cmd) {
         Err(e) => {

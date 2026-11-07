@@ -520,9 +520,11 @@ fn cursor_setup_moves_from_the_old_script() {
 fn cursor_setup_replaces_an_entry_whose_script_is_gone() {
     for command in [
         "./hooks/bdo-rewrite.sh",
-        "/Users/my name/.cursor/hooks/bdo-rewrite.sh",
+        "/Users/my\\ name/.cursor/hooks/bdo-rewrite.sh",
         "bash ~/.cursor/hooks/bdo-rewrite.sh",
         "\"/Users/my name/.cursor/hooks/bdo-rewrite.sh\"",
+        "'/Users/my name/.cursor/hooks/bdo-rewrite.sh'",
+        "/bin/bash '/Users/my name/.cursor/hooks/bdo-rewrite.sh'",
     ] {
         let env = Env::new();
         env.write(
@@ -600,6 +602,26 @@ fn cursor_dry_run_of_the_move_writes_nothing() {
     );
 }
 
+#[test]
+fn cursor_keeps_the_old_script_when_a_hook_cannot_be_safely_migrated() {
+    for command in [
+        "bash -e ~/.cursor/hooks/bdo-rewrite.sh",
+        "./hooks/bdo-rewrite.sh && audit.sh",
+    ] {
+        let env = Env::new();
+        env.write(
+            CURSOR_HOOKS,
+            &json!({"version": 1, "hooks": {"preToolUse": [{"command": command}]}}).to_string(),
+        );
+        env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+        let out = env.bdo(&["init", "-g", "--agent", "cursor"]);
+        assert_ok(&out);
+        assert_eq!(cursor_commands(&env), [command, "bdo hook cursor"]);
+        assert!(env.exists(CURSOR_SCRIPT), "{command}");
+        assert!(text(&out).contains("by hand"), "{}", text(&out));
+    }
+}
+
 /// Only bdo's own script is bdo's. These merely have a similar name.
 #[test]
 fn cursor_keeps_hooks_with_similar_names() {
@@ -607,6 +629,14 @@ fn cursor_keeps_hooks_with_similar_names() {
         "/opt/tools/not-bdo-rewrite.sh",
         "/opt/tools/bdo-rewrite.sh.disabled",
         "audit.sh --after bdo-rewrite.sh",
+        "audit.sh --after /opt/tools/bdo-rewrite.sh",
+        "bash audit.sh --after /opt/tools/bdo-rewrite.sh",
+        "audit.sh --after '/opt/my tools/bdo-rewrite.sh'",
+        "/opt/tools/audit.sh --after /opt/tools/bdo-rewrite.sh",
+        "bash -c '/opt/tools/bdo-rewrite.sh'",
+        "/opt/tools/bdo-rewrite.sh && audit.sh",
+        "bash /opt/tools/bdo-rewrite.sh; audit.sh",
+        "/Users/my name/.cursor/hooks/bdo-rewrite.sh",
     ];
     let env = Env::new();
     let entries: Vec<Value> = mine.iter().map(|c| json!({"command": c})).collect();
@@ -618,7 +648,10 @@ fn cursor_keeps_hooks_with_similar_names() {
     assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
     assert_eq!(
         cursor_commands(&env),
-        [mine[0], mine[1], mine[2], "bdo hook cursor"]
+        mine.iter()
+            .copied()
+            .chain(["bdo hook cursor"])
+            .collect::<Vec<_>>()
     );
 
     assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor", "--uninstall"]));
@@ -645,6 +678,40 @@ fn claude_keeps_hooks_with_similar_names() {
     let removed = env.read("home/.claude/settings.json");
     assert!(removed.contains(mine), "{removed}");
     assert!(!removed.contains("bdo hook claude"), "{removed}");
+}
+
+#[test]
+fn claude_keeps_rewrite_script_paths_used_as_arguments() {
+    for command in [
+        "audit.sh --after /opt/tools/bdo-rewrite.sh",
+        "bash audit.sh --after /opt/tools/bdo-rewrite.sh",
+        "audit.sh --after '/opt/my tools/bdo-rewrite.sh'",
+        "/opt/tools/audit.sh --after /opt/tools/bdo-rewrite.sh",
+    ] {
+        let env = Env::new();
+        let settings = "home/.claude/settings.json";
+        let user_hook = json!({"type": "command", "command": command});
+        env.write(
+            settings,
+            &json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [user_hook]}]}})
+                .to_string(),
+        );
+        assert_ok(&env.bdo(&["init", "-g", "--auto-patch"]));
+        let installed = env.json(settings);
+        assert!(
+            installed.to_string().contains("bdo hook claude"),
+            "{command}"
+        );
+        assert_eq!(installed["hooks"]["PreToolUse"][0]["hooks"][0], user_hook);
+
+        assert_ok(&env.bdo(&["init", "-g", "--uninstall"]));
+        let removed = env.json(settings);
+        assert_eq!(removed["hooks"]["PreToolUse"][0]["hooks"][0], user_hook);
+        assert!(
+            !removed.to_string().contains("bdo hook claude"),
+            "{command}"
+        );
+    }
 }
 
 /// Uninstalling can't tell what is in a broken file, so it says so instead of nothing,

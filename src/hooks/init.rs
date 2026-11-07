@@ -536,8 +536,26 @@ fn remove_lines_matching(content: &str, matches: impl Fn(&str) -> bool) -> Strin
 /// Whether a hook command runs bdo's old script, by file name, so that
 /// `not-bdo-rewrite.sh` or `audit.sh --after bdo-rewrite.sh` stay the user's own.
 fn runs_rewrite_script(command: &str) -> bool {
-    let command = command.trim().trim_matches(['"', '\'']);
-    command.rsplit('/').next() == Some(REWRITE_HOOK_FILE)
+    use crate::discover::lexer::{shell_split, tokenize, TokenKind};
+
+    // Only remove a simple invocation we can identify. In particular, a path
+    // passed to an unrelated command (or a shell's `-c`) is not its executable.
+    if command.contains(['\n', '\r'])
+        || tokenize(command)
+            .iter()
+            .any(|token| token.kind != TokenKind::Arg)
+    {
+        return false;
+    }
+    let words = shell_split(command);
+    let script = match words.as_slice() {
+        [script] => script,
+        [shell, script] if matches!(shell.rsplit('/').next(), Some("sh" | "bash" | "zsh")) => {
+            script
+        }
+        _ => return false,
+    };
+    script.rsplit('/').next() == Some(REWRITE_HOOK_FILE)
 }
 
 /// Removes hook commands bdo owns from a host's list of hook entries. An entry
@@ -3015,7 +3033,25 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
     // The old script goes only now: until the file has changed, it may point there.
     let old_hook = cursor_dir.join(HOOKS_SUBDIR).join(REWRITE_HOOK_FILE);
     if old_hook.exists() {
-        if dry_run {
+        let content = read_if_exists(&hooks_json_path)?;
+        let root: serde_json::Value = if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&content).context("Failed to re-read Cursor hooks.json")?
+        };
+        let needs_manual_migration = root
+            .pointer("/hooks/preToolUse")
+            .and_then(|hooks| hooks.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.get("command")?.as_str())
+            .any(|command| command.contains(REWRITE_HOOK_FILE) && !runs_rewrite_script(command));
+        if needs_manual_migration {
+            eprintln!(
+                "[warn] Keeping old Cursor hook script: a hook may still refer to it. \
+                 Review the command and migrate it by hand."
+            );
+        } else if dry_run {
             println!(
                 "[dry-run] would remove old Cursor hook script: {}",
                 old_hook.display()

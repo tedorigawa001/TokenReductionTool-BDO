@@ -533,6 +533,13 @@ fn remove_lines_matching(content: &str, matches: impl Fn(&str) -> bool) -> Strin
     kept.concat()
 }
 
+/// Whether a hook command runs bdo's old script, by file name, so that
+/// `not-bdo-rewrite.sh` or `audit.sh --after bdo-rewrite.sh` stay the user's own.
+fn runs_rewrite_script(command: &str) -> bool {
+    let command = command.trim().trim_matches(['"', '\'']);
+    command.rsplit('/').next() == Some(REWRITE_HOOK_FILE)
+}
+
 /// Removes hook commands bdo owns from a host's list of hook entries. An entry
 /// can hold the user's own hooks too, and those stay.
 fn remove_hook_commands(entries: &mut Vec<serde_json::Value>, ours: impl Fn(&str) -> bool) -> bool {
@@ -675,7 +682,7 @@ fn remove_hook_from_json(root: &mut serde_json::Value) -> bool {
 
     // Match both legacy script path and new binary command
     remove_hook_commands(pre_tool_use_array, |command| {
-        command.contains(REWRITE_HOOK_FILE) || command == CLAUDE_HOOK_COMMAND
+        runs_rewrite_script(command) || command == CLAUDE_HOOK_COMMAND
     })
 }
 
@@ -1202,9 +1209,7 @@ fn hook_already_present(root: &serde_json::Value, hook_command: &str) -> bool {
         .filter_map(|entry| entry.get("hooks")?.as_array())
         .flatten()
         .filter_map(|hook| hook.get("command")?.as_str())
-        .any(|cmd| {
-            cmd == hook_command || cmd == CLAUDE_HOOK_COMMAND || cmd.contains(REWRITE_HOOK_FILE)
-        })
+        .any(|cmd| cmd == hook_command || cmd == CLAUDE_HOOK_COMMAND || runs_rewrite_script(cmd))
 }
 
 /// Default mode: hook + slim Bushido.md + @Bushido.md reference
@@ -3003,35 +3008,30 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
     let InitContext { verbose, dry_run } = ctx;
     let cursor_dir = resolve_cursor_dir()?;
 
-    // Migrate old hook script if present
-    let old_hook = cursor_dir.join("hooks").join(REWRITE_HOOK_FILE);
+    // Create or patch hooks.json with binary command
+    let hooks_json_path = cursor_dir.join(HOOKS_JSON);
+    let patched = patch_cursor_hooks_json(&hooks_json_path, ctx)?;
+
+    // The old script goes only now: until the file has changed, it may point there.
+    let old_hook = cursor_dir.join(HOOKS_SUBDIR).join(REWRITE_HOOK_FILE);
     if old_hook.exists() {
         if dry_run {
             println!(
                 "[dry-run] would remove old Cursor hook script: {}",
                 old_hook.display()
             );
-        } else {
-            let _ = fs::remove_file(&old_hook);
-            if verbose > 0 {
-                eprintln!(
-                    "  [ok] Removed old Cursor hook script: {}",
-                    old_hook.display()
-                );
-            }
-        }
-        // Clean stale hooks.json entry pointing to the deleted script
-        let hooks_json_path = cursor_dir.join(HOOKS_JSON);
-        if let Err(e) = remove_legacy_cursor_hooks_json_entries(&hooks_json_path, ctx) {
-            if verbose > 0 {
-                eprintln!("  [warn] Failed to clean legacy Cursor hooks.json entry: {e}");
-            }
+        } else if let Err(e) = fs::remove_file(&old_hook) {
+            eprintln!(
+                "  [warn] Could not remove old Cursor hook script {}: {e}",
+                old_hook.display()
+            );
+        } else if verbose > 0 {
+            eprintln!(
+                "  [ok] Removed old Cursor hook script: {}",
+                old_hook.display()
+            );
         }
     }
-
-    // Create or patch hooks.json with binary command
-    let hooks_json_path = cursor_dir.join(HOOKS_JSON);
-    let patched = patch_cursor_hooks_json(&hooks_json_path, ctx)?;
 
     // Report (skip in dry-run)
     if !dry_run {
@@ -3051,8 +3051,8 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
     Ok(())
 }
 
-/// Patch ~/.cursor/hooks.json to add Bushido preToolUse hook.
-/// Returns true if the file was modified.
+/// Patch ~/.cursor/hooks.json to add Bushido preToolUse hook, replacing any entry
+/// for the old script. Returns true if the file was modified.
 fn patch_cursor_hooks_json(path: &Path, ctx: InitContext) -> Result<bool> {
     let InitContext { verbose, dry_run } = ctx;
     let mut root = if path.exists() {
@@ -3068,15 +3068,19 @@ fn patch_cursor_hooks_json(path: &Path, ctx: InitContext) -> Result<bool> {
         serde_json::json!({ "version": 1 })
     };
 
+    let removed_old_entry = remove_legacy_cursor_hook_entries_from_json(&mut root);
+
     // Check idempotency
     if cursor_hook_already_present(&root) {
-        if verbose > 0 {
-            eprintln!("Cursor hooks.json: Bushido hook already present");
+        if !removed_old_entry {
+            if verbose > 0 {
+                eprintln!("Cursor hooks.json: Bushido hook already present");
+            }
+            return Ok(false);
         }
-        return Ok(false);
+    } else {
+        insert_cursor_hook_entry(&mut root)?;
     }
-
-    insert_cursor_hook_entry(&mut root)?;
 
     let serialized =
         serde_json::to_string_pretty(&root).context("Failed to serialize hooks.json")?;
@@ -3124,19 +3128,15 @@ fn cursor_hook_already_present(root: &serde_json::Value) -> bool {
         entry
             .get("command")
             .and_then(|c| c.as_str())
-            .is_some_and(|cmd| cmd.contains(REWRITE_HOOK_FILE) || cmd == CURSOR_HOOK_COMMAND)
+            .is_some_and(|cmd| runs_rewrite_script(cmd) || cmd == CURSOR_HOOK_COMMAND)
     })
 }
 
 /// Insert Bushido preToolUse entry into Cursor hooks.json
 fn insert_cursor_hook_entry(root: &mut serde_json::Value) -> Result<()> {
-    let root_obj = match root.as_object_mut() {
-        Some(obj) => obj,
-        None => {
-            *root = serde_json::json!({ "version": 1 });
-            root.as_object_mut().expect("just-created json object")
-        }
-    };
+    let root_obj = root
+        .as_object_mut()
+        .context("hooks.json is not a JSON object")?;
 
     root_obj.entry("version").or_insert(serde_json::json!(1));
 
@@ -3159,45 +3159,6 @@ fn insert_cursor_hook_entry(root: &mut serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-/// Remove only legacy `bdo-rewrite.sh` entries from Cursor hooks.json.
-/// Preserves any existing `bdo hook cursor` entries (new format).
-fn remove_legacy_cursor_hooks_json_entries(path: &Path, ctx: InitContext) -> Result<()> {
-    let InitContext { verbose, dry_run } = ctx;
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let content =
-        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
-    if content.trim().is_empty() {
-        return Ok(());
-    }
-
-    let mut root: serde_json::Value = serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse {}", path.display()))?;
-
-    if !remove_legacy_cursor_hook_entries_from_json(&mut root) {
-        return Ok(());
-    }
-
-    if dry_run {
-        println!(
-            "[dry-run] would remove legacy bdo-rewrite.sh entry from Cursor hooks.json: {}",
-            path.display()
-        );
-        return Ok(());
-    }
-
-    let serialized =
-        serde_json::to_string_pretty(&root).context("Failed to serialize hooks.json")?;
-    atomic_write(path, &serialized)?;
-
-    if verbose > 0 {
-        eprintln!("  [ok] Removed legacy bdo-rewrite.sh entry from Cursor hooks.json");
-    }
-    Ok(())
-}
-
 /// Remove only legacy `bdo-rewrite.sh` entries from parsed Cursor hooks.json.
 /// Returns true if any entries were removed.
 /// Does NOT remove `bdo hook cursor` entries — those are the new format.
@@ -3216,7 +3177,7 @@ fn remove_legacy_cursor_hook_entries_from_json(root: &mut serde_json::Value) -> 
         !entry
             .get("command")
             .and_then(|c| c.as_str())
-            .is_some_and(|cmd| cmd.contains(REWRITE_HOOK_FILE))
+            .is_some_and(runs_rewrite_script)
     });
 
     pre_tool_use.len() < original_len
@@ -3227,6 +3188,21 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
     let InitContext { verbose, dry_run } = ctx;
     let cursor_dir = resolve_cursor_dir()?;
     let mut removed = Vec::new();
+
+    let hooks_json_path = cursor_dir.join(HOOKS_JSON);
+    let content = read_if_exists(&hooks_json_path)?;
+    let parsed = match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(root) => Some(root),
+        Err(_) if content.trim().is_empty() => None,
+        Err(e) => {
+            eprintln!(
+                "Warning: {} is not valid JSON ({e}), so Cursor's setup was not changed. \
+                 Fix the file and run this again, or remove bdo's entry by hand.",
+                hooks_json_path.display()
+            );
+            return Ok(removed);
+        }
+    };
 
     // 1. Remove hook script
     let hook_path = cursor_dir.join(HOOKS_SUBDIR).join(REWRITE_HOOK_FILE);
@@ -3246,34 +3222,26 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
     }
 
     // 2. Remove Bushido entry from hooks.json
-    let hooks_json_path = cursor_dir.join(HOOKS_JSON);
-    if hooks_json_path.exists() {
-        let content = fs::read_to_string(&hooks_json_path)
-            .with_context(|| format!("Failed to read {}", hooks_json_path.display()))?;
+    if let Some(mut root) = parsed {
+        if remove_cursor_hook_from_json(&mut root) {
+            if dry_run {
+                println!(
+                    "[dry-run] would remove Bushido entry from Cursor hooks.json: {}",
+                    hooks_json_path.display()
+                );
+            } else {
+                let backup_path = hooks_json_path.with_extension("json.bak");
+                fs::copy(&hooks_json_path, &backup_path).ok();
 
-        if !content.trim().is_empty() {
-            if let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&content) {
-                if remove_cursor_hook_from_json(&mut root) {
-                    if dry_run {
-                        println!(
-                            "[dry-run] would remove Bushido entry from Cursor hooks.json: {}",
-                            hooks_json_path.display()
-                        );
-                    } else {
-                        let backup_path = hooks_json_path.with_extension("json.bak");
-                        fs::copy(&hooks_json_path, &backup_path).ok();
+                let serialized = serde_json::to_string_pretty(&root)
+                    .context("Failed to serialize hooks.json")?;
+                atomic_write(&hooks_json_path, &serialized)?;
 
-                        let serialized = serde_json::to_string_pretty(&root)
-                            .context("Failed to serialize hooks.json")?;
-                        atomic_write(&hooks_json_path, &serialized)?;
-
-                        if verbose > 0 {
-                            eprintln!("Removed Bushido hook from Cursor hooks.json");
-                        }
-                    }
-                    removed.push("Cursor hooks.json: removed Bushido entry".to_string());
+                if verbose > 0 {
+                    eprintln!("Removed Bushido hook from Cursor hooks.json");
                 }
             }
+            removed.push("Cursor hooks.json: removed Bushido entry".to_string());
         }
     }
 
@@ -3298,7 +3266,7 @@ fn remove_cursor_hook_from_json(root: &mut serde_json::Value) -> bool {
         !entry
             .get("command")
             .and_then(|c| c.as_str())
-            .is_some_and(|cmd| cmd.contains(REWRITE_HOOK_FILE) || cmd == CURSOR_HOOK_COMMAND)
+            .is_some_and(|cmd| runs_rewrite_script(cmd) || cmd == CURSOR_HOOK_COMMAND)
     });
 
     pre_tool_use.len() < original_len

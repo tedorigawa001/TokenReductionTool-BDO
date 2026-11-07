@@ -481,6 +481,187 @@ fn cursor_setup_touches_only_cursor() {
     assert!(!env.exists("home/.claude/Bushido.md"));
 }
 
+const CURSOR_HOOKS: &str = "home/.cursor/hooks.json";
+const CURSOR_SCRIPT: &str = "home/.cursor/hooks/bdo-rewrite.sh";
+
+fn cursor_commands(env: &Env) -> Vec<String> {
+    env.json(CURSOR_HOOKS)["hooks"]["preToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["command"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Older versions registered a script. Setting up again moves to the command, keeps
+/// everything else, and the backup holds the file as it was.
+#[test]
+fn cursor_setup_moves_from_the_old_script() {
+    let original = "{\n  \"version\": 1,\n  \"theme\": \"x\",\n  \"hooks\": {\n    \"preToolUse\": [\n      {\"command\": \"./hooks/bdo-rewrite.sh\", \"matcher\": \"Shell\"},\n      {\"command\": \"mine.sh\", \"matcher\": \"Shell\"}\n    ],\n    \"stop\": [{\"command\": \"bye.sh\"}]\n  }\n}\n";
+    let env = Env::new();
+    env.write(CURSOR_HOOKS, original);
+    env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
+    assert!(!env.exists(CURSOR_SCRIPT));
+    assert_eq!(cursor_commands(&env), ["mine.sh", "bdo hook cursor"]);
+    let migrated = env.json(CURSOR_HOOKS);
+    assert_eq!(migrated["theme"], "x");
+    assert_eq!(migrated["hooks"]["stop"][0]["command"], "bye.sh");
+    assert_eq!(env.read("home/.cursor/hooks.json.bak"), original);
+
+    let before = env.snapshot();
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
+    assert_eq!(before, env.snapshot(), "a second run changed something");
+}
+
+/// With the script already gone, the old entry runs nothing. It must not count as set up.
+#[test]
+fn cursor_setup_replaces_an_entry_whose_script_is_gone() {
+    for command in [
+        "./hooks/bdo-rewrite.sh",
+        "/Users/my name/.cursor/hooks/bdo-rewrite.sh",
+        "bash ~/.cursor/hooks/bdo-rewrite.sh",
+        "\"/Users/my name/.cursor/hooks/bdo-rewrite.sh\"",
+    ] {
+        let env = Env::new();
+        env.write(
+            CURSOR_HOOKS,
+            &json!({"version": 1, "hooks": {"preToolUse": [{"command": command, "matcher": "Shell"}]}})
+                .to_string(),
+        );
+        assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
+        assert_eq!(cursor_commands(&env), ["bdo hook cursor"], "{command}");
+    }
+}
+
+/// Having both is what a half-finished move leaves.
+#[test]
+fn cursor_setup_with_both_entries_keeps_only_the_command() {
+    let env = Env::new();
+    env.write(
+        CURSOR_HOOKS,
+        &json!({"version": 1, "hooks": {"preToolUse": [
+            {"command": "./hooks/bdo-rewrite.sh", "matcher": "Shell"},
+            {"command": "bdo hook cursor", "matcher": "Shell"},
+        ]}})
+        .to_string(),
+    );
+    env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
+    assert_eq!(cursor_commands(&env), ["bdo hook cursor"]);
+    assert!(!env.exists(CURSOR_SCRIPT));
+}
+
+/// A file bdo can't change stays as it is, and so does the script it still points at.
+#[test]
+fn cursor_setup_changes_nothing_when_it_cannot_read_the_file() {
+    for broken in [
+        "{ not json",
+        "[\"a list, not settings\"]",
+        "{\"hooks\": \"text\"}",
+        "{\"hooks\": {\"preToolUse\": \"text\"}}",
+    ] {
+        let env = Env::new();
+        env.write(CURSOR_HOOKS, broken);
+        env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+        let before = env.snapshot();
+
+        let out = env.bdo(&["init", "-g", "--agent", "cursor"]);
+        assert!(!out.status.success(), "{broken}: {}", text(&out));
+        assert_eq!(before, env.snapshot(), "{broken}");
+    }
+}
+
+/// A dry run says what the real run would do, and does none of it.
+#[test]
+fn cursor_dry_run_of_the_move_writes_nothing() {
+    let env = Env::new();
+    env.write(
+        CURSOR_HOOKS,
+        &json!({"version": 1, "hooks": {"preToolUse": [{"command": "./hooks/bdo-rewrite.sh"}]}})
+            .to_string(),
+    );
+    env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+    let before = env.snapshot();
+
+    let out = env.bdo(&["init", "-g", "--agent", "cursor", "--dry-run"]);
+    assert_ok(&out);
+    assert_eq!(before, env.snapshot());
+    assert!(
+        text(&out).contains("would remove old Cursor hook script"),
+        "{}",
+        text(&out)
+    );
+    assert!(
+        text(&out).contains("would patch Cursor hooks.json"),
+        "{}",
+        text(&out)
+    );
+}
+
+/// Only bdo's own script is bdo's. These merely have a similar name.
+#[test]
+fn cursor_keeps_hooks_with_similar_names() {
+    let mine = [
+        "/opt/tools/not-bdo-rewrite.sh",
+        "/opt/tools/bdo-rewrite.sh.disabled",
+        "audit.sh --after bdo-rewrite.sh",
+    ];
+    let env = Env::new();
+    let entries: Vec<Value> = mine.iter().map(|c| json!({"command": c})).collect();
+    env.write(
+        CURSOR_HOOKS,
+        &json!({"version": 1, "hooks": {"preToolUse": entries}}).to_string(),
+    );
+
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor"]));
+    assert_eq!(
+        cursor_commands(&env),
+        [mine[0], mine[1], mine[2], "bdo hook cursor"]
+    );
+
+    assert_ok(&env.bdo(&["init", "-g", "--agent", "cursor", "--uninstall"]));
+    assert_eq!(cursor_commands(&env), mine);
+}
+
+/// The same for Claude Code, which reads the same script name.
+#[test]
+fn claude_keeps_hooks_with_similar_names() {
+    let mine = "/opt/tools/not-bdo-rewrite.sh";
+    let env = Env::new();
+    env.write(
+        "home/.claude/settings.json",
+        &json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": mine}]}]}})
+            .to_string(),
+    );
+
+    assert_ok(&env.bdo(&["init", "-g", "--auto-patch"]));
+    let installed = env.read("home/.claude/settings.json");
+    assert!(installed.contains("bdo hook claude"), "{installed}");
+    assert!(installed.contains(mine), "{installed}");
+
+    assert_ok(&env.bdo(&["init", "-g", "--uninstall"]));
+    let removed = env.read("home/.claude/settings.json");
+    assert!(removed.contains(mine), "{removed}");
+    assert!(!removed.contains("bdo hook claude"), "{removed}");
+}
+
+/// Uninstalling can't tell what is in a broken file, so it says so instead of nothing,
+/// and leaves the script the file may point at.
+#[test]
+fn cursor_uninstall_reports_a_file_it_cannot_read() {
+    let env = Env::new();
+    env.write(CURSOR_HOOKS, "{ not json");
+    env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+    let before = env.snapshot();
+
+    let out = env.bdo(&["init", "-g", "--agent", "cursor", "--uninstall"]);
+    assert_eq!(before, env.snapshot());
+    assert!(text(&out).contains("hooks.json"), "{}", text(&out));
+    assert!(text(&out).contains("not changed"), "{}", text(&out));
+}
+
 /// Earlier versions set up Claude Code too. That is not undone by removing Cursor,
 /// and the message says how to.
 #[test]

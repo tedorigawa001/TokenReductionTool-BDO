@@ -5,6 +5,35 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.5] (2026-11-07)
+
+Found by measuring test coverage correctly, then running the setup paths it showed had
+never run.
+
+### Changed
+
+- **A `hooks.json` that is a list is refused** rather than replaced.
+- **Uninstalling with a broken `hooks.json` or Gemini `settings.json` warns and changes
+  nothing.** Uninstalling Claude Code with broken settings still fails, and now changes
+  nothing first.
+
+### Fixed
+
+- **Your own hooks were taken for bdo's**, on Claude Code, Cursor and Gemini. A name such
+  as `not-bdo-rewrite.sh`, or a command that only mentions the script as an argument, was
+  removed on uninstall and stopped bdo from installing.
+- **Uninstalling deleted a script that a remaining hook still used**, on all three. The
+  script now stays, with a warning.
+- **Moving Cursor off the old script could break its hooks.** With a broken `hooks.json`,
+  setup deleted the script and then failed. An entry whose script was already gone was
+  reported as set up, though it ran nothing, and the same move on another event deleted
+  a script still in use.
+- **The Cursor `.bak` didn't hold the original** when moving off the old script.
+- **The Cursor dry run left out the change to `hooks.json`.**
+- **Broken settings still changed things.** Gemini setup changed `GEMINI.md` before
+  failing. Uninstalling Gemini removed the script and the `GEMINI.md` block, and
+  uninstalling Claude Code removed `Bushido.md` and its reference from `CLAUDE.md`.
+
 ## [0.50.4] (2026-11-05)
 
 Found by running `bdo init` for every agent against a temporary `HOME`.

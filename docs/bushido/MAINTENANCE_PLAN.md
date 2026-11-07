@@ -774,9 +774,14 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
 - **`.bak` に元のファイルがない**: 移行で書き換えた後のものを保存していた。書き込みを 1 回にまとめた。
 - **dry-run の表示不足**: 実際には行う `hooks.json` の変更を表示しなかった。
 - **リストの `hooks.json`**: 黙って置き換えていた。拒否する。
-- **似た名前のフック**: `not-bdo-rewrite.sh` などを自分のものと誤認し、Cursor と Claude Code で
-  アンインストール時に消し、インストールもしなかった。ファイル名の一致で判定する。
+- **似た名前のフック**: `not-bdo-rewrite.sh` や `audit.sh --after /opt/bdo-rewrite.sh` を自分のものと
+  誤認し、Cursor と Claude Code でアンインストール時に消し、インストールもしなかった。スクリプトを
+  直接実行する単純なコマンドだけを自分のものとする。
+- **使用中のスクリプトを削除**: 残るフックが参照していても消していた（`bash -e …` や `preToolUse`
+  以外のイベント。Cursor のインストールと、Cursor・Claude Code のアンインストール）。残して警告する。
 - **アンインストール**: 壊れた `hooks.json` でも何も言わずスクリプトだけ消していた。何も変えずに警告する。
+  Claude Code は壊れた `settings.json` で `Bushido.md` などを消してから失敗していた。先に検証する。
 - **未対応**: Cursor の実物では動かしていない。`/opt/x/bdo-rewrite.sh` のように同じファイル名の
-  利用者のスクリプトは区別できない。Gemini の `bdo-hook-gemini.sh` は部分一致のまま。
+  利用者のスクリプトは区別できない。`not-bdo-rewrite.sh` だけが残っていても、念のためスクリプトを残して
+  警告する。Gemini の `bdo-hook-gemini.sh` は部分一致のまま。
 

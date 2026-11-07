@@ -558,6 +558,17 @@ fn runs_rewrite_script(command: &str) -> bool {
     script.rsplit('/').next() == Some(REWRITE_HOOK_FILE)
 }
 
+/// Whether a host's config still uses the old script once bdo's own entries are out
+/// of it. Anything else mentioning the script may depend on it, in any event.
+fn still_uses_rewrite_script(
+    root: &serde_json::Value,
+    remove_ours: impl Fn(&mut serde_json::Value) -> bool,
+) -> bool {
+    let mut left = root.clone();
+    remove_ours(&mut left);
+    left.to_string().contains(REWRITE_HOOK_FILE)
+}
+
 /// Removes hook commands bdo owns from a host's list of hook entries. An entry
 /// can hold the user's own hooks too, and those stay.
 fn remove_hook_commands(entries: &mut Vec<serde_json::Value>, ours: impl Fn(&str) -> bool) -> bool {
@@ -704,6 +715,18 @@ fn remove_hook_from_json(root: &mut serde_json::Value) -> bool {
     })
 }
 
+/// Whether Claude Code's settings still use the old script after bdo's own entries go.
+fn claude_settings_use_rewrite_script(claude_dir: &Path) -> Result<bool> {
+    let path = claude_dir.join(SETTINGS_JSON);
+    let content = read_if_exists(&path)?;
+    if content.trim().is_empty() {
+        return Ok(false);
+    }
+    let root = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
+    Ok(still_uses_rewrite_script(&root, remove_hook_from_json))
+}
+
 /// Remove Bushido hook from settings.json file
 /// Backs up before modification, returns true if hook was found and removed
 fn remove_hook_from_settings(ctx: InitContext) -> Result<bool> {
@@ -848,30 +871,40 @@ pub fn uninstall(
         return Ok(());
     }
 
+    // Checked first, so that a failure here leaves everything as it was.
+    ensure_claude_settings_usable()?;
+
     // 1. Remove legacy hook file (if exists from old installation)
     let hook_path = claude_dir.join(HOOKS_SUBDIR).join(REWRITE_HOOK_FILE);
-    if hook_path.exists() {
-        if dry_run {
-            println!(
-                "[dry-run] would remove hook script: {}",
-                hook_path.display()
-            );
-        } else {
-            fs::remove_file(&hook_path)
-                .with_context(|| format!("Failed to remove hook: {}", hook_path.display()))?;
+    if hook_path.exists() && claude_settings_use_rewrite_script(&claude_dir)? {
+        eprintln!(
+            "[warn] Keeping old hook script: a hook may still refer to it. \
+             Review the command and migrate it by hand."
+        );
+    } else {
+        if hook_path.exists() {
+            if dry_run {
+                println!(
+                    "[dry-run] would remove hook script: {}",
+                    hook_path.display()
+                );
+            } else {
+                fs::remove_file(&hook_path)
+                    .with_context(|| format!("Failed to remove hook: {}", hook_path.display()))?;
+            }
+            removed.push(format!("Hook script: {}", hook_path.display()));
         }
-        removed.push(format!("Hook script: {}", hook_path.display()));
-    }
 
-    // 1b. Remove integrity hash file
-    if dry_run {
-        // integrity::remove_hash would delete the sidecar file; just report intent.
-        if integrity::hash_path_for(&hook_path).exists() {
-            println!("[dry-run] would remove integrity hash sidecar");
+        // 1b. Remove integrity hash file
+        if dry_run {
+            // integrity::remove_hash would delete the sidecar file; just report intent.
+            if integrity::hash_path_for(&hook_path).exists() {
+                println!("[dry-run] would remove integrity hash sidecar");
+                removed.push("Integrity hash: removed".to_string());
+            }
+        } else if integrity::remove_hash(&hook_path)? {
             removed.push("Integrity hash: removed".to_string());
         }
-    } else if integrity::remove_hash(&hook_path)? {
-        removed.push("Integrity hash: removed".to_string());
     }
 
     // 2. Remove Bushido.md
@@ -3039,14 +3072,7 @@ fn install_cursor_hooks(ctx: InitContext) -> Result<()> {
         } else {
             serde_json::from_str(&content).context("Failed to re-read Cursor hooks.json")?
         };
-        let needs_manual_migration = root
-            .pointer("/hooks/preToolUse")
-            .and_then(|hooks| hooks.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry.get("command")?.as_str())
-            .any(|command| command.contains(REWRITE_HOOK_FILE) && !runs_rewrite_script(command));
-        if needs_manual_migration {
+        if still_uses_rewrite_script(&root, remove_legacy_cursor_hook_entries_from_json) {
             eprintln!(
                 "[warn] Keeping old Cursor hook script: a hook may still refer to it. \
                  Review the command and migrate it by hand."
@@ -3242,7 +3268,15 @@ fn remove_cursor_hooks(ctx: InitContext) -> Result<Vec<String>> {
 
     // 1. Remove hook script
     let hook_path = cursor_dir.join(HOOKS_SUBDIR).join(REWRITE_HOOK_FILE);
-    if hook_path.exists() {
+    let script_in_use = parsed
+        .as_ref()
+        .is_some_and(|root| still_uses_rewrite_script(root, remove_cursor_hook_from_json));
+    if hook_path.exists() && script_in_use {
+        eprintln!(
+            "[warn] Keeping old Cursor hook script: a hook may still refer to it. \
+             Review the command and migrate it by hand."
+        );
+    } else if hook_path.exists() {
         if dry_run {
             println!(
                 "[dry-run] would remove Cursor hook: {}",

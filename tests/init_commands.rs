@@ -622,6 +622,135 @@ fn cursor_keeps_the_old_script_when_a_hook_cannot_be_safely_migrated() {
     }
 }
 
+/// The script stays while anything left in the file uses it, on the way out as well
+/// as on the way in, and for any event.
+#[test]
+fn cursor_keeps_the_old_script_while_a_remaining_hook_uses_it() {
+    let wrapper = json!({"version": 1, "hooks": {"preToolUse": [
+        {"command": "bash -e ~/.cursor/hooks/bdo-rewrite.sh"},
+    ]}});
+    let other_event = json!({"version": 1, "hooks": {"beforeShellExecution": [
+        {"command": "./hooks/bdo-rewrite.sh"},
+    ]}});
+    for (name, config, args) in [
+        (
+            "uninstall, wrapper",
+            &wrapper,
+            &["init", "-g", "--agent", "cursor", "--uninstall"][..],
+        ),
+        (
+            "install, other event",
+            &other_event,
+            &["init", "-g", "--agent", "cursor"][..],
+        ),
+        (
+            "uninstall, other event",
+            &other_event,
+            &["init", "-g", "--agent", "cursor", "--uninstall"][..],
+        ),
+    ] {
+        let env = Env::new();
+        env.write(CURSOR_HOOKS, &config.to_string());
+        env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+
+        let out = env.bdo(args);
+        assert_ok(&out);
+        assert!(env.exists(CURSOR_SCRIPT), "{name}");
+        assert!(env.read(CURSOR_HOOKS).contains("bdo-rewrite.sh"), "{name}");
+        assert!(text(&out).contains("by hand"), "{name}: {}", text(&out));
+    }
+}
+
+/// With bdo's own entry the only one using it, the script does go.
+#[test]
+fn cursor_uninstall_removes_the_old_script_and_its_entry() {
+    let env = Env::new();
+    env.write(
+        CURSOR_HOOKS,
+        &json!({"version": 1, "hooks": {"preToolUse": [
+            {"command": "./hooks/bdo-rewrite.sh"},
+            {"command": "mine.sh"},
+        ]}})
+        .to_string(),
+    );
+    env.write(CURSOR_SCRIPT, "#!/bin/sh\n");
+
+    let out = env.bdo(&["init", "-g", "--agent", "cursor", "--uninstall"]);
+    assert_ok(&out);
+    assert!(!env.exists(CURSOR_SCRIPT));
+    assert_eq!(cursor_commands(&env), ["mine.sh"]);
+    assert!(!text(&out).contains("by hand"), "{}", text(&out));
+}
+
+const CLAUDE_SETTINGS: &str = "home/.claude/settings.json";
+const CLAUDE_SCRIPT: &str = "home/.claude/hooks/bdo-rewrite.sh";
+const CLAUDE_SCRIPT_HASH: &str = "home/.claude/hooks/.bdo-hook.sha256";
+
+fn claude_settings_running(command: &str) -> String {
+    json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}]}})
+        .to_string()
+}
+
+/// The same for Claude Code, along with the hash that goes with the script.
+#[test]
+fn claude_uninstall_keeps_the_script_while_a_remaining_hook_uses_it() {
+    for settings in [
+        claude_settings_running("bash -e ~/.claude/hooks/bdo-rewrite.sh"),
+        json!({"hooks": {"PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "~/.claude/hooks/bdo-rewrite.sh"}]}]}})
+            .to_string(),
+    ] {
+        let env = Env::new();
+        env.write(CLAUDE_SETTINGS, &settings);
+        env.write(CLAUDE_SCRIPT, "#!/bin/sh\n");
+        env.write(CLAUDE_SCRIPT_HASH, "hash\n");
+
+        let out = env.bdo(&["init", "-g", "--uninstall"]);
+        assert_ok(&out);
+        assert!(env.exists(CLAUDE_SCRIPT), "{settings}");
+        assert!(env.exists(CLAUDE_SCRIPT_HASH), "{settings}");
+        assert_eq!(env.read(CLAUDE_SETTINGS), settings);
+        assert!(text(&out).contains("by hand"), "{}", text(&out));
+    }
+}
+
+#[test]
+fn claude_uninstall_removes_the_script_and_its_entry() {
+    let env = Env::new();
+    env.write(
+        CLAUDE_SETTINGS,
+        &claude_settings_running("~/.claude/hooks/bdo-rewrite.sh"),
+    );
+    env.write(CLAUDE_SCRIPT, "#!/bin/sh\n");
+    env.write(CLAUDE_SCRIPT_HASH, "hash\n");
+
+    let out = env.bdo(&["init", "-g", "--uninstall"]);
+    assert_ok(&out);
+    assert!(!env.exists(CLAUDE_SCRIPT));
+    assert!(!env.exists(CLAUDE_SCRIPT_HASH));
+    assert!(!env.read(CLAUDE_SETTINGS).contains("bdo-rewrite.sh"));
+    assert!(!text(&out).contains("by hand"), "{}", text(&out));
+}
+
+/// With settings it can't read, it stops before changing anything.
+#[test]
+fn claude_uninstall_changes_nothing_when_settings_are_broken() {
+    for has_script in [true, false] {
+        let env = Env::new();
+        env.write(CLAUDE_SETTINGS, "{ not json");
+        env.write("home/.claude/Bushido.md", "bushido\n");
+        env.write("home/.claude/CLAUDE.md", "mine\n@Bushido.md\n");
+        if has_script {
+            env.write(CLAUDE_SCRIPT, "#!/bin/sh\n");
+            env.write(CLAUDE_SCRIPT_HASH, "hash\n");
+        }
+        let before = env.snapshot();
+
+        let out = env.bdo(&["init", "-g", "--uninstall"]);
+        assert!(!out.status.success(), "{}", text(&out));
+        assert_eq!(before, env.snapshot(), "has_script: {has_script}");
+    }
+}
+
 /// Only bdo's own script is bdo's. These merely have a similar name.
 #[test]
 fn cursor_keeps_hooks_with_similar_names() {

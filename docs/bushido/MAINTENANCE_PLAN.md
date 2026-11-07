@@ -225,6 +225,23 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 - （将来）`cat f | shasum` などパイプ時の raw passthrough（選択肢C）: エージェントは常にパイプ実行のためフィルタが広範に無効化される副作用があり、要設計判断。
 - （任意）`b9e516c` を反映する release バイナリ再ビルド。
 
+### 2026-11-07 — リリースのランナー
+
+- **`macos-14` の廃止**: `dist` が Apple Silicon 向けに選ぶ `macos-14` を GitHub が廃止し、v0.50.5 の
+  ワークフローが公開前に `cancelled` になった。`dist-workspace.toml` で `macos-15` を指定し、タグを
+  付け直した。対応する最小の macOS は 11.0 のまま。
+
+### 2026-11-07 — `cc-economics` の週の集計
+
+- **週が合わない**: bdo の記録は月曜日始まりの週なのに、土曜日始まりとみなして2日ずらしていたので、
+  週のラベルが水曜日になった。ccusage は既定で日曜日始まり。両者が合わず、同じ週が2行に分かれ、
+  節約額が出なかった。ずらすのをやめ、ccusage に `--start-of-week monday` を渡す。
+- **サマリーの桁**: 「Bushido commands:」の値だけ4桁右にずれていた。
+- **ドキュメント**: 週を日曜日始まりと書いていた箇所を直した（`tracking.rs`、`gain.md`、`AUDIT_GUIDE.md`）。
+- **未対応**: ccusage の実物では動かしていない（偽の `ccusage` で確認）。ccusage の週別 JSON の `week` が
+  `YYYY-MM-DD` ではなく `YYYY-Wxx` 形式なら、週は合わないまま。`--format csv --all` は日・週・月の行を
+  区別する列を持たない。サマリーの枠線は数値の幅によってずれる。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

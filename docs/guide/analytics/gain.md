@@ -63,7 +63,7 @@ bdo gain --weekly
 bdo gain --monthly
 ```
 
-Same columns as daily, aggregated by Sunday-Saturday week or calendar month.
+Same columns as daily, aggregated by Monday-Sunday week or calendar month.
 
 ## Export formats
 

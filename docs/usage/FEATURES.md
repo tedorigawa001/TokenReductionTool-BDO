@@ -1154,6 +1154,8 @@ bdo learn --format json               # Export JSON
 
 **Objectif :** Compare les depenses Claude Code (via ccusage) avec les economies Bushido.
 
+Les periodes sont calculees en UTC pour les deux sources, independamment du fuseau configure dans ccusage. Les semaines vont du lundi au dimanche.
+
 ```bash
 bdo cc-economics                      # Resume
 bdo cc-economics --daily              # Ventilation quotidienne

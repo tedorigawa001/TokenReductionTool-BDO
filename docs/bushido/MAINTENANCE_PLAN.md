@@ -242,6 +242,21 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   `YYYY-MM-DD` ではなく `YYYY-Wxx` 形式なら、週は合わないまま。`--format csv --all` は日・週・月の行を
   区別する列を持たない。サマリーの枠線は数値の幅によってずれる。
 
+### 2026-11-07 — `glab` の引数と出力
+
+- **`view` の引数の入れ替え**: `mr view -P 5 42` を `mr view 5 -F json -P 42` にして、別の MR（!5）を
+  開いていた。`issue view` も同じ。値を取るフラグを一覧で判断していたため。渡された順のまま渡す。
+- **出力形式の指定**: `--output=json` と `-Fjson` を見落とし、自分の `-F json` を足して要約していた。
+  `gh` も `--json=number` で同じだった。どちらも認識する。`view` の `-w` と `-c` も見落としていた。
+- **確認メッセージ**: `mr update --title "New title" 42` が `ok updated !New title` になった。数字、`!N`、
+  MR の URL のときだけ番号を出す。
+- **`mr merge`**: glab の出力を捨てて `ok merged` とだけ表示していた。自動マージの予約だけでも
+  マージしたように見える。`gh pr merge` と同じく glab の出力をそのまま見せる。
+- **CI のログ**: `Running on ` や `Cleaning up` で始まるジョブ自身の出力も消していた。Runner の行の
+  形のときだけ捨てる。
+- **未対応**: glab の実物では動かしていない（偽の `glab` で確認）。`mr merge` の実際の出力は未確認。
+  `mr note -m 42 7` のように数字だけのメッセージが先にあると、確認メッセージの番号を取り違える。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

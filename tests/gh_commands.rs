@@ -321,6 +321,21 @@ fn explicit_json_is_the_bytes_gh_printed() {
 }
 
 #[test]
+fn explicit_json_written_with_equals_is_left_alone() {
+    let raw = "[ {\"number\":   7} ]\n";
+    for args in [
+        &["pr", "list", "--json=number"][..],
+        &["pr", "view", "42", "--json=number"],
+        &["issue", "view", "7", "--json=title", "--jq=.title"],
+    ] {
+        let env = Env::new();
+        env.answer(raw);
+        assert_eq!(env.ok(args), raw, "{args:?}");
+        assert_eq!(env.received(), args, "{args:?}");
+    }
+}
+
+#[test]
 fn unknown_subcommands_pass_through() {
     let env = Env::new();
     env.answer("gh version 9\n");

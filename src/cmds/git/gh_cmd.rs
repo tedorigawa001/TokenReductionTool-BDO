@@ -110,7 +110,7 @@ fn filter_markdown_segment(text: &str) -> String {
 
 /// Check if args contain --json flag (user wants specific JSON fields, not Bushido filtering)
 fn has_json_flag(args: &[String]) -> bool {
-    args.iter().any(|a| a == "--json")
+    args.iter().any(|a| a == "--json" || a.starts_with("--json="))
 }
 
 /// Extract a positional identifier (PR/issue number) from args, returning it

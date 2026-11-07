@@ -23,6 +23,13 @@ const CCUSAGE: &str = r#"#!/bin/sh
 echo "$*" >> "$ROOT/ccusage.log"
 [ -n "$CC_FAIL" ] && { echo "$CC_FAIL" >&2; exit 1; }
 m='"inputTokens":1000,"outputTokens":100,"cacheCreationTokens":0,"cacheReadTokens":0,"totalTokens":1100,"totalCost":1.5'
+# Simulate a configured non-UTC timezone unless the CLI explicitly overrides it.
+if [ -n "$CC_LOCAL_DAY" ]; then
+  case " $* " in
+    *" --timezone UTC "*) ;;
+    *) CC_DAY=$CC_LOCAL_DAY; CC_MONDAY=$CC_LOCAL_MONDAY; CC_MONTH=$CC_LOCAL_MONTH ;;
+  esac
+fi
 case "$1" in
   daily) echo "{\"daily\":[{\"date\":\"$CC_DAY\",$m}]}" ;;
   weekly)
@@ -101,6 +108,7 @@ impl Econ {
             .env("CC_MONDAY", self.day(0))
             .env("CC_SUNDAY", self.day(-1))
             .env("CC_MONTH", &self.day(2)[..7])
+            .env_remove("CC_LOCAL_DAY")
             .env_remove("CC_FAIL");
         cmd
     }
@@ -164,6 +172,51 @@ fn weekly_joins_spending_and_savings_on_the_same_week() {
         "{}",
         env.ccusage_calls()
     );
+}
+
+#[test]
+fn all_periods_use_utc_even_when_ccusage_is_configured_for_tokyo() {
+    // The first crosses a week boundary, the second a month boundary in Tokyo.
+    for timestamp in ["2026-11-01T15:30:00+00:00", "2026-10-31T15:30:00+00:00"] {
+        let env = Econ::new().with_ccusage();
+        let db = rusqlite::Connection::open(env.path("history.db")).unwrap();
+        db.execute("DELETE FROM commands", []).unwrap();
+        db.execute(
+            "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens,
+             output_tokens, saved_tokens, savings_pct) VALUES (?1, 'git status',
+             'bdo git status', 1250, 0, 1000, 80.0)",
+            [timestamp],
+        )
+        .unwrap();
+
+        let instant = chrono::DateTime::parse_from_rfc3339(timestamp).unwrap();
+        let utc_day = instant.date_naive();
+        let tokyo_day = (instant + Duration::hours(9)).date_naive();
+        let monday =
+            |day: NaiveDate| day - Duration::days(i64::from(day.weekday().num_days_from_monday()));
+        let out = env
+            .command(&["cc-economics", "--all", "--format", "json"])
+            .env("TZ", "Asia/Tokyo")
+            .env("CC_DAY", utc_day.to_string())
+            .env("CC_MONDAY", monday(utc_day).to_string())
+            .env("CC_MONTH", utc_day.format("%Y-%m").to_string())
+            .env("CC_LOCAL_DAY", tokyo_day.to_string())
+            .env("CC_LOCAL_MONDAY", monday(tokyo_day).to_string())
+            .env("CC_LOCAL_MONTH", tokyo_day.format("%Y-%m").to_string())
+            .output()
+            .unwrap();
+        assert_ok(&out);
+        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        for (view, label) in [
+            ("daily", utc_day.to_string()),
+            ("weekly", monday(utc_day).to_string()),
+            ("monthly", utc_day.format("%Y-%m").to_string()),
+        ] {
+            let row = joined(&report, view);
+            assert_eq!(row["label"], label, "{timestamp}: {view}");
+            assert!(row["savings_weighted"].as_f64().unwrap() > 0.0);
+        }
+    }
 }
 
 #[test]

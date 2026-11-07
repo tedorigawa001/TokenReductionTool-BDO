@@ -131,6 +131,10 @@ pub fn fetch(granularity: Granularity) -> Result<Option<Vec<CcusagePeriod>>> {
         cmd.arg("--start-of-week").arg("monday");
     }
 
+    // SQLite groups the tracking history in UTC. Override ccusage's local or
+    // configured timezone for every granularity, including day/month boundaries.
+    cmd.arg("--timezone").arg("UTC");
+
     let result = match exec_capture(&mut cmd) {
         Err(e) => {
             eprintln!("[warn] ccusage execution failed: {}", e);

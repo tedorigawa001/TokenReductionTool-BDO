@@ -164,18 +164,52 @@ fn extract_mr_number(text: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// The MR or issue number the arguments name, for labels only. glab takes flags
-/// anywhere and bdo doesn't know which of them take a value, so only a number, `!N`
-/// or a merge request URL counts; the arguments themselves go to glab as given.
+/// The single positional number or MR URL, for labels only. Skip values of known
+/// options; with an unknown option or ambiguous positionals, don't guess. This
+/// never changes the arguments passed to glab.
 fn named_number(args: &[String]) -> Option<String> {
-    args.iter().find_map(|arg| {
-        let digits = arg.strip_prefix('!').unwrap_or(arg);
-        if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
-            Some(digits.to_string())
-        } else {
-            extract_mr_number(arg)
+    const VALUE_FLAGS: &[&str] = &[
+        "-R", "--repo", "-g", "--group", "-F", "--output", "-m", "--message", "-t",
+        "--title", "-l", "--label",
+    ];
+    let mut args = args.iter();
+    let mut positional_only = false;
+    let mut number = None;
+    while let Some(arg) = args.next() {
+        if !positional_only {
+            if arg == "--" {
+                positional_only = true;
+                continue;
+            }
+            if VALUE_FLAGS.contains(&arg.as_str()) {
+                args.next()?;
+                continue;
+            }
+            if arg.starts_with("--") && arg.contains('=') {
+                continue;
+            }
+            if VALUE_FLAGS.iter().any(|flag| {
+                flag.len() == 2 && arg.starts_with(flag) && arg.len() > flag.len()
+            }) {
+                continue;
+            }
+            if arg.starts_with('-') {
+                return None;
+            }
         }
-    })
+        let digits = arg.strip_prefix('!').unwrap_or(arg);
+        let candidate = if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+            digits.to_string()
+        } else if arg.starts_with("https://") || arg.starts_with("http://") {
+            extract_mr_number(arg)?
+        } else {
+            return None;
+        };
+        if number.replace(candidate).is_some() {
+            return None;
+        }
+    }
+    number
 }
 
 /// `-F json`, `-Fjson`, `--output json`, `--output=json` and `--json` all choose
@@ -1160,6 +1194,14 @@ mod tests {
             (&["!42"], Some("42")),
             (&["-R", "group/project", "42"], Some("42")),
             (&["--title", "New title", "42"], Some("42")),
+            (&["--title", "2026", "42"], Some("42")),
+            (&["--title=2026", "!42"], Some("42")),
+            (&["-m2026", "42"], Some("42")),
+            (&["--", "42"], Some("42")),
+            (&["--title", "2026"], None),
+            (&["--title"], None),
+            (&["--future-option", "2026", "42"], None),
+            (&["42", "43"], None),
             (&["https://gitlab.com/g/p/-/merge_requests/9"], Some("9")),
             (&["feature-branch"], None),
             (&["!"], None),

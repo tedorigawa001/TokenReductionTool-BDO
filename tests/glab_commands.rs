@@ -314,6 +314,52 @@ fn mr_diff_is_compacted_and_an_empty_one_says_so() {
 // ---------------------------------------------------------- write commands
 
 #[test]
+fn numeric_option_values_are_not_reported_as_the_merge_request() {
+    for (args, said) in [
+        (
+            &["mr", "update", "--title", "2026", "42"][..],
+            "ok updated !42",
+        ),
+        (&["mr", "note", "-m", "2026", "42"], "ok noted !42"),
+        (&["mr", "note", "-m2026", "42"], "ok noted !42"),
+        (&["mr", "update", "--title=2026", "42"], "ok updated !42"),
+        (&["mr", "update", "42", "--title", "2026"], "ok updated !42"),
+        (&["mr", "update", "-R", "2026", "42"], "ok updated !42"),
+        (&["mr", "update", "--title", "2026"], "ok updated"),
+        (
+            &[
+                "mr",
+                "update",
+                "--title",
+                "https://gitlab.example.com/g/p/-/merge_requests/9",
+                "42",
+            ],
+            "ok updated !42",
+        ),
+    ] {
+        let env = Env::new();
+        env.answer("updated\n");
+        assert_eq!(env.ok(args).trim(), said, "{args:?}");
+        assert_eq!(env.received(), args, "{args:?}");
+    }
+}
+
+#[test]
+fn ambiguous_arguments_do_not_claim_a_merge_request_number() {
+    for args in [
+        &["mr", "update", "--future-option", "2026", "42"][..],
+        &["mr", "update", "42", "--future-option", "2026"],
+        &["mr", "update", "42", "43"],
+        &["mr", "update", "feature", "--title", "2026"],
+    ] {
+        let env = Env::new();
+        env.answer("updated\n");
+        assert_eq!(env.ok(args).trim(), "ok updated", "{args:?}");
+        assert_eq!(env.received(), args, "{args:?}");
+    }
+}
+
+#[test]
 fn write_commands_reach_glab_exactly_and_name_the_mr() {
     for (args, said) in [
         (&["mr", "approve", "42"][..], "ok approved !42"),

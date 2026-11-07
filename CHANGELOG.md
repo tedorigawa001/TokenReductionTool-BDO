@@ -5,6 +5,19 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.6] (2026-11-07)
+
+Found by running `bdo cc-economics` against a stand-in `ccusage`.
+
+### Fixed
+
+- **`cc-economics --weekly` never matched spending with savings.** bdo's weeks were
+  labelled by a Wednesday, and ccusage's started on Sunday, so every week came out as
+  two half-empty rows with no savings. Weeks now start on Monday on both sides, which
+  also affects `--all` and the JSON and CSV exports.
+- **The summary printed the command count out of line** with the other figures.
+- **The docs said weeks start on Sunday.** They start on Monday, in UTC.
+
 ## [0.50.5] (2026-11-07)
 
 Found by measuring test coverage correctly, then running the setup paths it showed had

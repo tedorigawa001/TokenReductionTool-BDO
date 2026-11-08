@@ -5,6 +5,30 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.7] (2026-11-08)
+
+Found by running `bdo glab` and `bdo gh` against stand-ins that record their arguments.
+
+### Fixed
+
+- **`glab` and `gh` opened a different merge request, issue, run or PR than the one
+  named.** bdo moved the number to the front, so a value of a flag it didn't know became
+  the number: `glab mr view -P 5 42` opened !5, `gh run view -j 111 222` opened run 111,
+  and `gh pr checks -i 5 42` showed PR 5. The arguments now reach glab and gh in the
+  order given.
+- **Output you chose was summarised anyway.** `glab` with `--output=json`, `-Fjson`, or
+  `view -w` / `-c`, and `gh` with `--json=…`, or `pr view` / `issue view` with `-w`, `-c`,
+  `-q`, `-t`, `--jq=` or `--template=`, now show glab's or gh's own output.
+- **A `--` among the arguments turned bdo's own `--json` or `-F json` into an argument.**
+- **`glab mr update --title "New title" 42` confirmed `ok updated !New title`.** Only a
+  number, `!N` or a merge request URL is taken as the merge request.
+- **`glab mr merge` printed `ok merged` even when glab only scheduled the merge.** glab's
+  own output is shown, as for `gh pr merge`.
+- **`glab ci trace` dropped the job's own lines** starting with `Running on` or
+  `Cleaning up`. Only the runner's lines are dropped.
+- **`cc-economics` could put spending and savings in different periods** when ccusage
+  used a time zone other than UTC. bdo now asks ccusage for UTC, as its own tracking uses.
+
 ## [0.50.6] (2026-11-07)
 
 Found by running `bdo cc-economics` against a stand-in `ccusage`.

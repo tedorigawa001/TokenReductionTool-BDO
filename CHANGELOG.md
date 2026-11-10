@@ -5,6 +5,29 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.8] (2026-11-10)
+
+A security update for the bundled SQLite, and fixes for commands that ran a different
+program than the one asked for.
+
+### Security
+
+- **The bundled SQLite is updated for RUSTSEC-2026-0459 (CVE-2026-119375).**
+  `rusqlite` 0.41 brings `libsqlite3-sys` 0.39.1. Existing tracking databases keep
+  working.
+
+### Fixed
+
+- **`eslint sh` ran `sh`.** It was rewritten to `bdo lint sh`, which took the file name
+  as the linter, and `bdo npx eslint src` tried to run `src`. ESLint is kept, and only
+  the supported linter names choose a linter.
+- **`npm run lint` ran ESLint instead of the project's `lint` script.** `npm run X`,
+  `pnpm run X` and `pnpm X` run the script named X, which may run another tool or the
+  same tool with its own arguments, but were rewritten to run X directly. This affected
+  tsc, eslint, biome, lint, prettier, next build, jest, vitest, playwright and prisma.
+  `npm run X` and `pnpm run X` now run the script through `bdo npm` and `bdo pnpm`.
+  `pnpm X` and a bare `lint` are no longer rewritten.
+
 ## [0.50.7] (2026-11-08)
 
 Found by running `bdo glab` and `bdo gh` against stand-ins that record their arguments.

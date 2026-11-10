@@ -118,17 +118,9 @@ fn rewritten_eslint_keeps_its_tool_and_file_operands() {
         "eslint",
         "npx eslint",
         "npm exec eslint",
-        "npm run eslint",
-        "npm run-script eslint",
-        "npm rum eslint",
-        "npm urn eslint",
         "npm x eslint",
-        "npm eslint",
-        "pnpm eslint",
         "pnpm exec eslint",
         "pnpm dlx eslint",
-        "pnpm run eslint",
-        "pnpm run-script eslint",
         "pnpx eslint",
     ] {
         for operand in ["sh", "ruff"] {
@@ -148,6 +140,37 @@ fn rewritten_eslint_keeps_its_tool_and_file_operands() {
             assert_eq!(output.status.code(), Some(37), "{command}: {output:?}");
             assert_eq!(fixture.argv(), ["eslint", "-f", "json", operand, "payload"]);
         }
+    }
+}
+
+/// These run the project's script named `eslint`, which may be any command, so the
+/// script runs rather than ESLint itself.
+#[test]
+fn script_runs_named_eslint_are_left_to_the_package_manager() {
+    let fixture = Fixture::new();
+    for (command, expected) in [
+        ("npm run eslint sh payload", "bdo npm run eslint sh payload"),
+        (
+            "npm run-script eslint sh payload",
+            "bdo npm run-script eslint sh payload",
+        ),
+        ("npm rum eslint sh payload", "bdo npm rum eslint sh payload"),
+        ("npm urn eslint sh payload", "bdo npm urn eslint sh payload"),
+        (
+            "pnpm run eslint sh payload",
+            "bdo pnpm run eslint sh payload",
+        ),
+        (
+            "pnpm run-script eslint sh payload",
+            "bdo pnpm run-script eslint sh payload",
+        ),
+        // pnpm runs a script of that name first; npm has no such command.
+        ("pnpm eslint sh payload", ""),
+        ("npm eslint sh payload", ""),
+    ] {
+        let output = fixture.bdo(&["rewrite", command]);
+        let rewritten = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(rewritten.trim_end(), expected, "{command}: {output:?}");
     }
 }
 

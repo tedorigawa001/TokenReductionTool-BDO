@@ -269,6 +269,20 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 - **未対応**: 一覧にないフラグがあると、番号を表示しない（推測しない）。gh の実物では動かしていない
   （偽の `gh` で確認、フラグは gh 2.103.3 の `--help` で確認）。
 
+### 2026-11-10 — スクリプトの実行とツールの実行
+
+- **`lint` の実行ファイル**（ユーザーのコミット `0de3d86`）: `eslint sh` が `bdo lint sh` になり `sh` を
+  実行していた。`npx eslint src` も `src` を実行しようとした。ESLint を明示して渡し、対応するリンター名
+  だけを実行ファイルとみなす。
+- **`npm run lint` がスクリプトを実行しない**: `npm run X`、`npm run-script X`、`npm rum X`、
+  `npm urn X`、`pnpm run X`、`pnpm X` を、X というツールの直接実行に書き換えていた。tsc、eslint、biome、
+  lint、prettier、next build、jest、vitest、playwright、prisma の 10 ルール。package.json の `lint` が
+  `biome check .` でも `eslint -f json .` が動いた。`run` 系は `bdo npm run …` と `bdo pnpm run …`
+  に回し、`pnpm X` と `npm X` は書き換えない。`lint` のルールは、`lint` が ESLint そのものではないので
+  削除した。
+- **未対応**: pnpm がスクリプトを先に探すことは pnpm の実物では確かめていない（この環境にない）。
+  `bdo pnpm typecheck` は、スクリプトではなく tsc を直接実行する（書き換えでは作られない）。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

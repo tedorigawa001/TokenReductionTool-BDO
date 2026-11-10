@@ -2791,17 +2791,17 @@ mod tests {
             "lint",
         ];
         for command in commands {
-            assert!(
-                matches!(
-                    classify_command(command),
-                    Classification::Supported {
-                        rtk_equivalent: "bdo lint",
-                        ..
-                    }
-                ),
-                "Failed for command: {}",
-                command
-            );
+            let expected = match command.split_whitespace().last().unwrap() {
+                "eslint" => "bdo lint eslint",
+                "biome" => "bdo lint biome",
+                _ => "bdo lint",
+            };
+            match classify_command(command) {
+                Classification::Supported { rtk_equivalent, .. } => {
+                    assert_eq!(rtk_equivalent, expected, "{command}");
+                }
+                other => panic!("Failed for command: {command}: {other:?}"),
+            }
         }
     }
 
@@ -2851,11 +2851,37 @@ mod tests {
             "lint",
         ];
         for command in commands {
+            let expected = match command.split_whitespace().last().unwrap() {
+                "eslint" => "bdo lint eslint",
+                "biome" => "bdo lint biome",
+                _ => "bdo lint",
+            };
             assert_eq!(
                 rewrite_command_no_prefixes(command, &[]),
-                Some("bdo lint".into()),
+                Some(expected.into()),
                 "Failed for command: {}",
                 command
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_eslint_keeps_quoted_operands_and_environment_prefixes() {
+        for (command, expected) in [
+            (
+                "eslint 'sh' \"payload with spaces\"",
+                "bdo lint eslint 'sh' \"payload with spaces\"",
+            ),
+            ("FOO=1 eslint ruff", "FOO=1 bdo lint eslint ruff"),
+            (
+                "eslint sh && eslint ruff",
+                "bdo lint eslint sh && bdo lint eslint ruff",
+            ),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(command, &[]),
+                Some(expected.into()),
+                "{command}"
             );
         }
     }

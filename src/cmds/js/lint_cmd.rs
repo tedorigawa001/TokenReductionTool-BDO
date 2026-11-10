@@ -118,18 +118,14 @@ fn strip_pm_prefix(args: &[String]) -> usize {
     skip
 }
 
-/// Detect the linter name from args (after stripping PM prefixes).
-/// Returns the linter name and whether it was explicitly specified.
+/// Only supported linter names select an executable. Other leading words,
+/// including dotless filenames such as `src` or `sh`, are ESLint operands.
 fn detect_linter(args: &[String]) -> (&str, bool) {
-    let is_path_or_flag = args.is_empty()
-        || args[0].starts_with('-')
-        || args[0].contains('/')
-        || args[0].contains('.');
-
-    if is_path_or_flag {
-        ("eslint", false)
-    } else {
-        (&args[0], true)
+    match args.first().map(String::as_str) {
+        Some(tool @ ("eslint" | "biome" | "ruff" | "pylint" | "mypy" | "flake8")) => {
+            (tool, true)
+        }
+        _ => ("eslint", false),
     }
 }
 

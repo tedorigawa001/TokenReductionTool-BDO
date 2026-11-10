@@ -1533,18 +1533,10 @@ mod tests {
     fn test_rewrite_tsc() {
         let commands = vec![
             "npm exec tsc",
-            "npm rum tsc",
-            "npm run tsc",
-            "npm run-script tsc",
-            "npm urn tsc",
             "npm x tsc",
             "pnpm dlx tsc",
             "pnpm exec tsc",
-            "pnpm run tsc",
-            "pnpm run-script tsc",
-            "npm tsc",
             "npx tsc",
-            "pnpm tsc",
             "pnpx tsc",
             "tsc",
         ];
@@ -1601,18 +1593,10 @@ mod tests {
     fn test_rewrite_playwright() {
         let commands = vec![
             "npm exec playwright",
-            "npm rum playwright",
-            "npm run playwright",
-            "npm run-script playwright",
-            "npm urn playwright",
             "npm x playwright",
             "pnpm dlx playwright",
             "pnpm exec playwright",
-            "pnpm run playwright",
-            "pnpm run-script playwright",
-            "npm playwright",
             "npx playwright",
-            "pnpm playwright",
             "pnpx playwright",
             "playwright",
         ];
@@ -1630,18 +1614,10 @@ mod tests {
     fn test_rewrite_next_build() {
         let commands = vec![
             "npm exec next build",
-            "npm rum next build",
-            "npm run next build",
-            "npm run-script next build",
-            "npm urn next build",
             "npm x next build",
             "pnpm dlx next build",
             "pnpm exec next build",
-            "pnpm run next build",
-            "pnpm run-script next build",
-            "npm next build",
             "npx next build",
-            "pnpm next build",
             "pnpx next build",
             "next build",
         ];
@@ -2750,58 +2726,31 @@ mod tests {
         let commands = vec![
             "npm exec biome",
             "npm exec eslint",
-            "npm rum biome",
-            "npm rum eslint",
-            "npm rum lint",
-            "npm run biome",
-            "npm run eslint",
-            "npm run lint",
-            "npm run-script biome",
-            "npm run-script eslint",
-            "npm run-script lint",
-            "npm urn biome",
-            "npm urn eslint",
-            "npm urn lint",
             "npm x biome",
             "npm x eslint",
             "pnpm dlx biome",
             "pnpm dlx eslint",
             "pnpm exec biome",
             "pnpm exec eslint",
-            "pnpm run biome",
-            "pnpm run eslint",
-            "pnpm run lint",
-            "pnpm run-script biome",
-            "pnpm run-script eslint",
-            "pnpm run-script lint",
-            "npm biome",
-            "npm eslint",
-            "npm lint",
             "npx biome",
             "npx eslint",
-            "npx lint",
-            "pnpm biome",
-            "pnpm eslint",
-            "pnpm lint",
             "pnpx biome",
             "pnpx eslint",
-            "pnpx lint",
             "biome",
             "eslint",
-            "lint",
         ];
         for command in commands {
-            assert!(
-                matches!(
-                    classify_command(command),
-                    Classification::Supported {
-                        rtk_equivalent: "bdo lint",
-                        ..
-                    }
-                ),
-                "Failed for command: {}",
-                command
-            );
+            let expected = match command.split_whitespace().last().unwrap() {
+                "eslint" => "bdo lint eslint",
+                "biome" => "bdo lint biome",
+                other => unreachable!("not a linter: {other}"),
+            };
+            match classify_command(command) {
+                Classification::Supported { rtk_equivalent, .. } => {
+                    assert_eq!(rtk_equivalent, expected, "{command}");
+                }
+                other => panic!("Failed for command: {command}: {other:?}"),
+            }
         }
     }
 
@@ -2810,52 +2759,106 @@ mod tests {
         let commands = vec![
             "npm exec biome",
             "npm exec eslint",
-            "npm rum biome",
-            "npm rum eslint",
-            "npm rum lint",
-            "npm run biome",
-            "npm run eslint",
-            "npm run lint",
-            "npm run-script biome",
-            "npm run-script eslint",
-            "npm run-script lint",
-            "npm urn biome",
-            "npm urn eslint",
-            "npm urn lint",
             "npm x biome",
             "npm x eslint",
             "pnpm dlx biome",
             "pnpm dlx eslint",
             "pnpm exec biome",
             "pnpm exec eslint",
-            "pnpm run biome",
-            "pnpm run eslint",
-            "pnpm run lint",
-            "pnpm run-script biome",
-            "pnpm run-script eslint",
-            "pnpm run-script lint",
-            "npm biome",
-            "npm eslint",
-            "npm lint",
             "npx biome",
             "npx eslint",
-            "npx lint",
-            "pnpm biome",
-            "pnpm eslint",
-            "pnpm lint",
             "pnpx biome",
             "pnpx eslint",
-            "pnpx lint",
             "biome",
             "eslint",
-            "lint",
         ];
         for command in commands {
+            let expected = match command.split_whitespace().last().unwrap() {
+                "eslint" => "bdo lint eslint",
+                "biome" => "bdo lint biome",
+                other => unreachable!("not a linter: {other}"),
+            };
             assert_eq!(
                 rewrite_command_no_prefixes(command, &[]),
-                Some("bdo lint".into()),
+                Some(expected.into()),
                 "Failed for command: {}",
                 command
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_eslint_keeps_quoted_operands_and_environment_prefixes() {
+        for (command, expected) in [
+            (
+                "eslint 'sh' \"payload with spaces\"",
+                "bdo lint eslint 'sh' \"payload with spaces\"",
+            ),
+            ("FOO=1 eslint ruff", "FOO=1 bdo lint eslint ruff"),
+            (
+                "eslint sh && eslint ruff",
+                "bdo lint eslint sh && bdo lint eslint ruff",
+            ),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(command, &[]),
+                Some(expected.into()),
+                "{command}"
+            );
+        }
+    }
+
+    /// `npm run X` and `pnpm X` run the project's script named X, which may run any
+    /// tool with any arguments. Only forms that run the tool itself go to its filter.
+    #[test]
+    fn test_script_runs_reach_the_package_manager_not_the_tool() {
+        for (command, expected) in [
+            ("npm run lint", Some("bdo npm run lint")),
+            ("npm run eslint .", Some("bdo npm run eslint .")),
+            (
+                "npm run-script biome check",
+                Some("bdo npm run-script biome check"),
+            ),
+            ("npm rum tsc", Some("bdo npm rum tsc")),
+            ("npm run tsc --noEmit", Some("bdo npm run tsc --noEmit")),
+            ("npm urn vitest run", Some("bdo npm urn vitest run")),
+            ("npm run jest", Some("bdo npm run jest")),
+            (
+                "npm run prettier --check .",
+                Some("bdo npm run prettier --check ."),
+            ),
+            ("npm run next build", Some("bdo npm run next build")),
+            (
+                "npm run playwright test",
+                Some("bdo npm run playwright test"),
+            ),
+            (
+                "npm run prisma generate",
+                Some("bdo npm run prisma generate"),
+            ),
+            ("pnpm run lint", Some("bdo pnpm run lint")),
+            ("pnpm run-script vitest", Some("bdo pnpm run-script vitest")),
+            ("pnpm lint", None),
+            ("pnpm eslint .", None),
+            ("pnpm tsc", None),
+            ("pnpm vitest run", None),
+            ("pnpm jest", None),
+            ("npm eslint .", None),
+            ("lint", None),
+            ("npx lint src", Some("bdo npx lint src")),
+            // The tool itself still goes to its filter.
+            ("eslint .", Some("bdo lint eslint .")),
+            ("npx eslint .", Some("bdo lint eslint .")),
+            ("npm exec eslint .", Some("bdo lint eslint .")),
+            ("npm x biome check", Some("bdo lint biome check")),
+            ("pnpm exec tsc", Some("bdo tsc")),
+            ("pnpm dlx vitest run", Some("bdo vitest")),
+            ("pnpx jest", Some("bdo jest")),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(command, &[]).as_deref(),
+                expected,
+                "{command}"
             );
         }
     }
@@ -2867,16 +2870,6 @@ mod tests {
             "jest",
             "npm exec jest run",
             "npm exec jest",
-            "npm jest run",
-            "npm jest",
-            "npm rum jest run",
-            "npm rum jest",
-            "npm run jest run",
-            "npm run jest",
-            "npm run-script jest run",
-            "npm run-script jest",
-            "npm urn jest run",
-            "npm urn jest",
             "npm x jest run",
             "npm x jest",
             "npx jest run",
@@ -2885,12 +2878,6 @@ mod tests {
             "pnpm dlx jest",
             "pnpm exec jest run",
             "pnpm exec jest",
-            "pnpm jest run",
-            "pnpm jest",
-            "pnpm run jest run",
-            "pnpm run jest",
-            "pnpm run-script jest run",
-            "pnpm run-script jest",
             "pnpx jest run",
             "pnpx jest",
         ];
@@ -2916,16 +2903,6 @@ mod tests {
             "jest",
             "npm exec jest run",
             "npm exec jest",
-            "npm jest run",
-            "npm jest",
-            "npm rum jest run",
-            "npm rum jest",
-            "npm run jest run",
-            "npm run jest",
-            "npm run-script jest run",
-            "npm run-script jest",
-            "npm urn jest run",
-            "npm urn jest",
             "npm x jest run",
             "npm x jest",
             "npx jest run",
@@ -2934,12 +2911,6 @@ mod tests {
             "pnpm dlx jest",
             "pnpm exec jest run",
             "pnpm exec jest",
-            "pnpm jest run",
-            "pnpm jest",
-            "pnpm run jest run",
-            "pnpm run jest",
-            "pnpm run-script jest run",
-            "pnpm run-script jest",
             "pnpx jest run",
             "pnpx jest",
         ];
@@ -2958,16 +2929,6 @@ mod tests {
         let commands = vec![
             "npm exec vitest run",
             "npm exec vitest",
-            "npm rum vitest run",
-            "npm rum vitest",
-            "npm run vitest run",
-            "npm run vitest",
-            "npm run-script vitest run",
-            "npm run-script vitest",
-            "npm urn vitest run",
-            "npm urn vitest",
-            "npm vitest run",
-            "npm vitest",
             "npm x vitest run",
             "npm x vitest",
             "npx vitest run",
@@ -2976,12 +2937,6 @@ mod tests {
             "pnpm dlx vitest",
             "pnpm exec vitest run",
             "pnpm exec vitest",
-            "pnpm run vitest run",
-            "pnpm run vitest",
-            "pnpm run-script vitest run",
-            "pnpm run-script vitest",
-            "pnpm vitest run",
-            "pnpm vitest",
             "pnpx vitest run",
             "pnpx vitest",
             "vitest run",
@@ -3007,16 +2962,6 @@ mod tests {
         let commands = vec![
             "npm exec vitest run",
             "npm exec vitest",
-            "npm rum vitest run",
-            "npm rum vitest",
-            "npm run vitest run",
-            "npm run vitest",
-            "npm run-script vitest run",
-            "npm run-script vitest",
-            "npm urn vitest run",
-            "npm urn vitest",
-            "npm vitest run",
-            "npm vitest",
             "npm x vitest run",
             "npm x vitest",
             "npx vitest run",
@@ -3025,12 +2970,6 @@ mod tests {
             "pnpm dlx vitest",
             "pnpm exec vitest run",
             "pnpm exec vitest",
-            "pnpm run vitest run",
-            "pnpm run vitest",
-            "pnpm run-script vitest run",
-            "pnpm run-script vitest",
-            "pnpm vitest run",
-            "pnpm vitest",
             "pnpx vitest run",
             "pnpx vitest",
             "vitest run",
@@ -3050,18 +2989,10 @@ mod tests {
     fn test_classify_prisma() {
         let commands = vec![
             "npm exec prisma",
-            "npm rum prisma",
-            "npm run prisma",
-            "npm run-script prisma",
-            "npm urn prisma",
             "npm x prisma",
             "pnpm dlx prisma",
             "pnpm exec prisma",
-            "pnpm run prisma",
-            "pnpm run-script prisma",
-            "npm prisma",
             "npx prisma",
-            "pnpm prisma",
             "pnpx prisma",
             "prisma",
         ];
@@ -3084,18 +3015,10 @@ mod tests {
     fn test_rewrite_prisma() {
         let commands = vec![
             "npm exec prisma",
-            "npm rum prisma",
-            "npm run prisma",
-            "npm run-script prisma",
-            "npm urn prisma",
             "npm x prisma",
             "pnpm dlx prisma",
             "pnpm exec prisma",
-            "pnpm run prisma",
-            "pnpm run-script prisma",
-            "npm prisma",
             "npx prisma",
-            "pnpm prisma",
             "pnpx prisma",
             "prisma",
         ];
@@ -3113,18 +3036,10 @@ mod tests {
     fn test_rewrite_prettier() {
         let commands = vec![
             "npm exec prettier",
-            "npm rum prettier",
-            "npm run prettier",
-            "npm run-script prettier",
-            "npm urn prettier",
             "npm x prettier",
             "pnpm dlx prettier",
             "pnpm exec prettier",
-            "pnpm run prettier",
-            "pnpm run-script prettier",
-            "npm prettier",
             "npx prettier",
-            "pnpm prettier",
             "pnpx prettier",
             "prettier",
         ];

@@ -1240,9 +1240,17 @@ impl Tracker {
             };
         match oldest {
             Some(ts) => {
-                let first = chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%dT%H:%M:%S")
-                    .or_else(|_| chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S"))
-                    .map(|dt| dt.and_utc())
+                // `record()` writes RFC 3339 with an offset; the naive forms are
+                // older rows.
+                let first = DateTime::parse_from_rfc3339(&ts)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .or_else(|_| {
+                        chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%dT%H:%M:%S")
+                            .or_else(|_| {
+                                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
+                            })
+                            .map(|dt| dt.and_utc())
+                    })
                     .unwrap_or_else(|_| chrono::Utc::now());
                 let days = (chrono::Utc::now() - first).num_days();
                 Ok(days.max(0))
@@ -2207,5 +2215,116 @@ mod tests {
             failures.total, 0,
             "parse_failures table should be empty after reset"
         );
+    }
+
+    // Timestamps are stored the way `to_rfc3339()` writes them, and the windows
+    // below compare those strings in SQL. A different form would put old and
+    // new rows on different sides of a cutoff.
+
+    fn insert_command_at(tracker: &Tracker, at: &str, saved: i64) {
+        tracker
+            .conn
+            .execute(
+                "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens, output_tokens, saved_tokens, savings_pct) VALUES (?1, 'x', 'bdo x', ?2, 0, ?2, 100)",
+                params![at, saved],
+            )
+            .unwrap();
+    }
+
+    fn insert_failure_at(tracker: &Tracker, at: &str) {
+        tracker
+            .conn
+            .execute(
+                "INSERT INTO parse_failures (timestamp, raw_command, error_message, fallback_succeeded) VALUES (?1, 'x', 'e', 0)",
+                params![at],
+            )
+            .unwrap();
+    }
+
+    fn hours_ago(hours: i64) -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::hours(hours)
+    }
+
+    fn count_rows(tracker: &Tracker, table: &str) -> i64 {
+        tracker
+            .conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn test_stored_timestamps_keep_their_rfc3339_form() {
+        let form = regex::Regex::new(
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3}|\.\d{6}|\.\d{9})?\+00:00$",
+        )
+        .unwrap();
+        let tracker = Tracker::new_in_memory().unwrap();
+        tracker
+            .record("git status", "bdo git status", 100, 20, 5)
+            .unwrap();
+        tracker.record_parse_failure("bad", "err", true).unwrap();
+
+        for table in ["commands", "parse_failures"] {
+            let stored: String = tracker
+                .conn
+                .query_row(&format!("SELECT timestamp FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert!(form.is_match(&stored), "{table}: {stored}");
+            let at = DateTime::parse_from_rfc3339(&stored).unwrap();
+            let age = (Utc::now() - at.with_timezone(&Utc)).num_seconds();
+            assert!((0..60).contains(&age), "{table}: {stored}");
+
+            if table == "commands" {
+                let recent = tracker.get_recent(1).unwrap();
+                assert_eq!(recent[0].timestamp, at.with_timezone(&Utc));
+            }
+        }
+    }
+
+    #[test]
+    fn test_windows_count_rows_by_their_time() {
+        let mut tracker = Tracker::new_in_memory().unwrap();
+        let ages = [1, 23, 25, 24 * 29, 24 * 31];
+        for (hours, saved) in ages.iter().zip([1, 10, 100, 1000, 10000]) {
+            insert_command_at(&tracker, &hours_ago(*hours).to_rfc3339(), saved);
+            insert_failure_at(&tracker, &hours_ago(*hours).to_rfc3339());
+        }
+
+        let day_ago = hours_ago(24);
+        assert_eq!(tracker.count_commands_since(day_ago).unwrap(), 2);
+        assert_eq!(tracker.tokens_saved_24h(day_ago).unwrap(), 11);
+        assert_eq!(tracker.parse_failures_since(day_ago).unwrap(), 2);
+        assert_eq!(tracker.tokens_saved_30d().unwrap(), 1111);
+
+        let days: std::collections::HashSet<_> = ages[..4]
+            .iter()
+            .map(|h| hours_ago(*h).date_naive())
+            .collect();
+        assert_eq!(tracker.active_days_30d().unwrap(), days.len() as i64);
+
+        tracker.history_days = 30;
+        tracker.cleanup_old().unwrap();
+        assert_eq!(count_rows(&tracker, "commands"), 4);
+        assert_eq!(count_rows(&tracker, "parse_failures"), 4);
+    }
+
+    #[test]
+    fn test_first_seen_days_counts_from_the_oldest_record() {
+        let ten_days_ago = Utc::now() - chrono::Duration::days(10);
+        let stored_forms = [
+            ten_days_ago.to_rfc3339(),
+            ten_days_ago.format("%Y-%m-%dT%H:%M:%S").to_string(),
+            ten_days_ago.format("%Y-%m-%d %H:%M:%S").to_string(),
+        ];
+        for oldest in stored_forms {
+            let tracker = Tracker::new_in_memory().unwrap();
+            insert_command_at(&tracker, &oldest, 1);
+            insert_command_at(&tracker, &hours_ago(1).to_rfc3339(), 1);
+            assert_eq!(tracker.first_seen_days().unwrap(), 10, "{oldest}");
+        }
     }
 }

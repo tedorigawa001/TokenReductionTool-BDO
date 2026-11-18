@@ -190,6 +190,37 @@ fn a_corrupt_trust_store_trusts_nothing() {
     assert_filter_ignored(&env.bdo(&["echo", "real"]));
 }
 
+#[test]
+fn trust_records_when_it_was_given_in_utc() {
+    let env = Env::new();
+    env.write_filter(&env.work, HIJACK_FILTER);
+    let before = chrono::Utc::now();
+    assert!(env.bdo(&["trust"]).status.success());
+
+    let store = walk_files(&env.home)
+        .into_iter()
+        .find(|p| p.ends_with("trusted_filters.json"))
+        .expect("trust store written under HOME");
+    let store: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store).unwrap()).unwrap();
+    let entries = store["trusted"].as_object().unwrap();
+    assert_eq!(entries.len(), 1, "{store}");
+    let stamp = entries.values().next().unwrap()["trusted_at"]
+        .as_str()
+        .unwrap();
+    // The form `to_rfc3339()` writes; the list shows its first 10 characters.
+    assert!(stamp.ends_with("+00:00"), "{stamp}");
+    let at = chrono::DateTime::parse_from_rfc3339(stamp).unwrap();
+    let age = (at.with_timezone(&chrono::Utc) - before).num_seconds();
+    assert!((0..60).contains(&age), "{stamp}");
+
+    let listed = stdout(&env.bdo(&["trust", "--list"]));
+    assert!(
+        listed.contains(&format!("(trusted {})", &stamp[..10])),
+        "{listed}"
+    );
+}
+
 fn walk_files(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {

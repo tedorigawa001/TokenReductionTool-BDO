@@ -567,6 +567,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_trx_files_in_dir_measures_across_offsets() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        // The same wall-clock span written in UTC and in UTC+01:00.
+        let trx = r#"<?xml version="1.0" encoding="utf-8"?>
+<TestRun>
+  <Times start="2026-02-21T11:57:27.0000000Z" finish="2026-02-21T12:57:29.5000000+01:00" />
+  <ResultSummary outcome="Completed">
+    <Counters total="1" executed="1" passed="1" failed="0" />
+  </ResultSummary>
+</TestRun>"#;
+        std::fs::write(temp_dir.path().join("a.trx"), trx).expect("write trx");
+
+        let summary = parse_trx_files_in_dir(temp_dir.path()).expect("summary");
+        assert_eq!(summary.duration_text.as_deref(), Some("2.5 s"));
+    }
+
+    #[test]
     fn test_parse_trx_files_in_dir_since_ignores_older_files() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let trx_dir = temp_dir.path().join("TestResults");

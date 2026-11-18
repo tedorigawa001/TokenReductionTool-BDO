@@ -61,12 +61,25 @@ fn filter_since_days(entries: &[AuditEntry], days: u64) -> Vec<&AuditEntry> {
     }
 
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
-    let cutoff_str = cutoff.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     entries
         .iter()
-        .filter(|e| e.timestamp >= cutoff_str)
+        .filter(|e| entry_instant(&e.timestamp).is_some_and(|at| at >= cutoff))
         .collect()
+}
+
+/// When an entry was logged. The hook writes UTC with a `Z`; versions up to
+/// 0.50.8 wrote the local clock with no offset, read here in the local zone.
+fn entry_instant(timestamp: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::TimeZone;
+    if let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) {
+        return Some(at.with_timezone(&chrono::Utc));
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S").ok()?;
+    chrono::Local
+        .from_local_datetime(&naive)
+        .earliest()
+        .map(|at| at.with_timezone(&chrono::Utc))
 }
 
 pub fn run(since_days: u64, verbose: u8) -> Result<()> {

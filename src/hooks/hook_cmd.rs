@@ -385,7 +385,8 @@ fn audit_log_inner(action: &str, original: &str, rewritten: &str) -> Option<()> 
         std::fs::create_dir_all(dir).ok()?;
     }
     let mut file = open_private_audit_log(&path)?;
-    let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
+    // UTC with its `Z`, so `hook-audit --since` places it on any clock.
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
     writeln!(
         file,
         "{} | {} | {} | {}",
@@ -1300,7 +1301,7 @@ mod tests {
                 .append(true)
                 .open(&log_path)
                 .unwrap();
-            let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
+            let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
             writeln!(file, "{} | rewrite | git status | bdo git status", ts).unwrap();
         }
 

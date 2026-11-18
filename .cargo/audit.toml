@@ -1,0 +1,7 @@
+# cargo-audit configuration. CI runs `cargo audit --deny warnings`.
+[advisories]
+ignore = [
+    # chrono is unmaintained (not a vulnerability; no fixed version exists).
+    # Temporary: remove this entry in the PR that replaces chrono with jiff.
+    "RUSTSEC-2026-0543",
+]

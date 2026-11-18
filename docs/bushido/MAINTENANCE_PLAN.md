@@ -283,6 +283,12 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 - **未対応**: pnpm がスクリプトを先に探すことは pnpm の実物では確かめていない（この環境にない）。
   `bdo pnpm typecheck` は、スクリプトではなく tsc を直接実行する（書き換えでは作られない）。
 
+### 2026-11-18 — `chrono` の保守終了（RUSTSEC-2026-0543）
+
+- **CI の `audit-check` が止まる**: CI は `cargo audit --deny warnings` で、保守終了（unmaintained）の
+  注意でも失敗する。脆弱性ではなく修正版もないため、`.cargo/audit.toml` でこの ID だけを一時的に除外した。
+- **後始末**: `chrono` を `jiff` に置き換える PR で、この除外を削除する。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

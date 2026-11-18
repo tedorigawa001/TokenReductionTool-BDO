@@ -210,7 +210,7 @@ pub fn salt_file_path() -> PathBuf {
 }
 
 fn get_stats(tracker: &tracking::Tracker) -> (i64, Vec<String>, Option<f64>, i64, i64) {
-    let since_24h = chrono::Utc::now() - chrono::Duration::hours(24);
+    let since_24h = super::time::hours_ago(24);
 
     let commands_24h = tracker.count_commands_since(since_24h).unwrap_or(0);
     let top_commands = tracker.top_commands(5).unwrap_or_default();
@@ -254,7 +254,7 @@ struct EnrichedStats {
 }
 
 fn get_enriched_stats(tracker: &tracking::Tracker) -> EnrichedStats {
-    let since_24h = chrono::Utc::now() - chrono::Duration::hours(24);
+    let since_24h = super::time::hours_ago(24);
 
     let passthrough_top = tracker
         .top_passthrough(5)

@@ -194,7 +194,7 @@ fn a_corrupt_trust_store_trusts_nothing() {
 fn trust_records_when_it_was_given_in_utc() {
     let env = Env::new();
     env.write_filter(&env.work, HIJACK_FILTER);
-    let before = chrono::Utc::now();
+    let before = jiff::Timestamp::now();
     assert!(env.bdo(&["trust"]).status.success());
 
     let store = walk_files(&env.home)
@@ -208,10 +208,10 @@ fn trust_records_when_it_was_given_in_utc() {
     let stamp = entries.values().next().unwrap()["trusted_at"]
         .as_str()
         .unwrap();
-    // The form `to_rfc3339()` writes; the list shows its first 10 characters.
+    // The form chrono's `to_rfc3339()` wrote; the list shows its first 10 characters.
     assert!(stamp.ends_with("+00:00"), "{stamp}");
-    let at = chrono::DateTime::parse_from_rfc3339(stamp).unwrap();
-    let age = (at.with_timezone(&chrono::Utc) - before).num_seconds();
+    let at: jiff::Timestamp = stamp.parse().unwrap();
+    let age = at.duration_since(before).as_secs();
     assert!((0..60).contains(&age), "{stamp}");
 
     let listed = stdout(&env.bdo(&["trust", "--list"]));

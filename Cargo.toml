@@ -32,7 +32,6 @@ colored = "2"
 dirs = "5"
 rusqlite = { version = "0.41", features = ["bundled"] }
 toml = "0.8"
-chrono = "0.4"
 tempfile = "3"
 sha2 = "0.11"
 ureq = "2"
@@ -41,6 +40,7 @@ flate2 = "1.0"
 quick-xml = "0.41"
 which = "8"
 automod = "1"
+jiff = "1.0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

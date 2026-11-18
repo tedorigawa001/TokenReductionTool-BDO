@@ -150,7 +150,7 @@ pub fn trust_filter_with_hash(filter_path: &Path, hash: &str) -> Result<()> {
         key,
         TrustEntry {
             sha256: hash.to_string(),
-            trusted_at: chrono::Utc::now().to_rfc3339(),
+            trusted_at: crate::core::time::now_rfc3339(),
         },
     );
     write_store(&store)
@@ -331,7 +331,7 @@ mod tests {
             key,
             TrustEntry {
                 sha256: hash,
-                trusted_at: chrono::Utc::now().to_rfc3339(),
+                trusted_at: crate::core::time::now_rfc3339(),
             },
         );
 

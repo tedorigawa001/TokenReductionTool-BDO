@@ -1,5 +1,6 @@
 //! Audits hook activity logs to show what commands were rewritten and when.
 
+use crate::core::time;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -60,7 +61,7 @@ fn filter_since_days(entries: &[AuditEntry], days: u64) -> Vec<&AuditEntry> {
         return entries.iter().collect();
     }
 
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+    let cutoff = time::days_ago(i64::try_from(days).unwrap_or(i64::MAX));
 
     entries
         .iter()
@@ -70,16 +71,8 @@ fn filter_since_days(entries: &[AuditEntry], days: u64) -> Vec<&AuditEntry> {
 
 /// When an entry was logged. The hook writes UTC with a `Z`; versions up to
 /// 0.50.8 wrote the local clock with no offset, read here in the local zone.
-fn entry_instant(timestamp: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    use chrono::TimeZone;
-    if let Ok(at) = chrono::DateTime::parse_from_rfc3339(timestamp) {
-        return Some(at.with_timezone(&chrono::Utc));
-    }
-    let naive = chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S").ok()?;
-    chrono::Local
-        .from_local_datetime(&naive)
-        .earliest()
-        .map(|at| at.with_timezone(&chrono::Utc))
+fn entry_instant(timestamp: &str) -> Option<jiff::Timestamp> {
+    time::parse(timestamp).or_else(|| time::parse_naive_local(timestamp))
 }
 
 pub fn run(since_days: u64, verbose: u8) -> Result<()> {

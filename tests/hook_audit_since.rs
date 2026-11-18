@@ -7,7 +7,7 @@
 //! which is why this is Unix only.
 #![cfg(unix)]
 
-use chrono::{DateTime, Duration, FixedOffset, Utc};
+use jiff::{SignedDuration, Timestamp};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -94,15 +94,16 @@ fn total(report: &str) -> Option<usize> {
 fn a_logged_hook_says_when_it_ran_in_any_timezone() {
     for (tz, _) in ZONES {
         let env = Env::new(tz);
-        let before = Utc::now();
+        let before = Timestamp::now();
         let out = env.hook("git status");
         assert!(out.status.success(), "{tz}: {out:?}");
 
         let log = fs::read_to_string(env.log()).unwrap();
         let stamp = log.split(" | ").next().unwrap();
-        let at = DateTime::parse_from_rfc3339(stamp)
+        let at: Timestamp = stamp
+            .parse()
             .unwrap_or_else(|e| panic!("{tz}: `{stamp}` names no instant: {e}"));
-        let off = (at.with_timezone(&Utc) - before).num_seconds();
+        let off = at.duration_since(before).as_secs();
         assert!(
             (-1..=60).contains(&off),
             "{tz}: `{stamp}` is {off}s from now"
@@ -114,14 +115,13 @@ fn a_logged_hook_says_when_it_ran_in_any_timezone() {
 fn only_hooks_from_the_window_are_counted_in_any_timezone() {
     for (tz, hours) in ZONES {
         let env = Env::new(tz);
-        let now = Utc::now();
-        let utc = |ago: i64| (now - Duration::hours(ago)).format("%Y-%m-%dT%H:%M:%SZ");
+        let now = Timestamp::now();
+        let utc = |ago: i64| (now - SignedDuration::from_hours(ago)).strftime("%Y-%m-%dT%H:%M:%SZ");
         // How the hook wrote it before: the local clock, with no offset.
         let local = |ago: i64| {
-            let zone = FixedOffset::east_opt(hours * 3600).unwrap();
-            (now - Duration::hours(ago))
-                .with_timezone(&zone)
-                .format("%Y-%m-%dT%H:%M:%S")
+            // A fixed offset's wall clock is UTC shifted by that offset.
+            (now - SignedDuration::from_hours(ago) + SignedDuration::from_hours(i64::from(hours)))
+                .strftime("%Y-%m-%dT%H:%M:%S")
         };
         let lines = [
             format!("{} | rewrite | git status | bdo git status", utc(1)),

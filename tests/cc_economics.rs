@@ -12,7 +12,9 @@
 //! Unix only: the stand-in is a shell script.
 #![cfg(unix)]
 
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::{SignedDuration, Timestamp, ToSpan};
 use serde_json::Value;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -41,16 +43,28 @@ esac
 "#;
 
 /// A Monday more than a week back, so its whole week has passed whatever today is.
-fn last_monday() -> NaiveDate {
-    let today = Utc::now().date_naive();
-    today - Duration::days(i64::from(today.weekday().num_days_from_monday()) + 7)
+fn last_monday() -> Date {
+    let today = utc_date(Timestamp::now());
+    days_after(monday_of(today), -7)
+}
+
+fn utc_date(instant: Timestamp) -> Date {
+    instant.to_zoned_datetime(TimeZone::UTC).date()
+}
+
+fn days_after(day: Date, days: i64) -> Date {
+    day.checked_add(days.days()).expect("date in range")
+}
+
+fn monday_of(day: Date) -> Date {
+    days_after(day, -i64::from(day.weekday().to_monday_zero_offset()))
 }
 
 struct Econ {
     _dir: tempfile::TempDir,
     /// bdo refuses a database path through a symlink, as macOS's temp dir is.
     root: PathBuf,
-    monday: NaiveDate,
+    monday: Date,
 }
 
 impl Econ {
@@ -67,7 +81,7 @@ impl Econ {
         assert_ok(&env.bdo(&["gain"]));
         let db = rusqlite::Connection::open(env.path("history.db")).expect("open db");
         for (offset, saved) in [(2, 800), (6, 200)] {
-            let day = env.monday + Duration::days(offset);
+            let day = days_after(env.monday, offset);
             db.execute(
                 "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens,
                  output_tokens, saved_tokens, savings_pct) VALUES (?1, 'git status',
@@ -91,7 +105,7 @@ impl Econ {
     }
 
     fn day(&self, offset: i64) -> String {
-        (self.monday + Duration::days(offset)).to_string()
+        days_after(self.monday, offset).to_string()
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -189,20 +203,19 @@ fn all_periods_use_utc_even_when_ccusage_is_configured_for_tokyo() {
         )
         .unwrap();
 
-        let instant = chrono::DateTime::parse_from_rfc3339(timestamp).unwrap();
-        let utc_day = instant.date_naive();
-        let tokyo_day = (instant + Duration::hours(9)).date_naive();
-        let monday =
-            |day: NaiveDate| day - Duration::days(i64::from(day.weekday().num_days_from_monday()));
+        let instant: Timestamp = timestamp.parse().unwrap();
+        let utc_day = utc_date(instant);
+        let tokyo_day = utc_date(instant + SignedDuration::from_hours(9));
+        let monday = monday_of;
         let out = env
             .command(&["cc-economics", "--all", "--format", "json"])
             .env("TZ", "Asia/Tokyo")
             .env("CC_DAY", utc_day.to_string())
             .env("CC_MONDAY", monday(utc_day).to_string())
-            .env("CC_MONTH", utc_day.format("%Y-%m").to_string())
+            .env("CC_MONTH", utc_day.strftime("%Y-%m").to_string())
             .env("CC_LOCAL_DAY", tokyo_day.to_string())
             .env("CC_LOCAL_MONDAY", monday(tokyo_day).to_string())
-            .env("CC_LOCAL_MONTH", tokyo_day.format("%Y-%m").to_string())
+            .env("CC_LOCAL_MONTH", tokyo_day.strftime("%Y-%m").to_string())
             .output()
             .unwrap();
         assert_ok(&out);
@@ -210,7 +223,7 @@ fn all_periods_use_utc_even_when_ccusage_is_configured_for_tokyo() {
         for (view, label) in [
             ("daily", utc_day.to_string()),
             ("weekly", monday(utc_day).to_string()),
-            ("monthly", utc_day.format("%Y-%m").to_string()),
+            ("monthly", utc_day.strftime("%Y-%m").to_string()),
         ] {
             let row = joined(&report, view);
             assert_eq!(row["label"], label, "{timestamp}: {view}");

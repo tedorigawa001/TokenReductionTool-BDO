@@ -386,7 +386,7 @@ fn audit_log_inner(action: &str, original: &str, rewritten: &str) -> Option<()> 
     }
     let mut file = open_private_audit_log(&path)?;
     // UTC with its `Z`, so `hook-audit --since` places it on any clock.
-    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let ts = crate::core::time::utc_seconds_z(crate::core::time::now());
     writeln!(
         file,
         "{} | {} | {} | {}",
@@ -1301,7 +1301,7 @@ mod tests {
                 .append(true)
                 .open(&log_path)
                 .unwrap();
-            let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+            let ts = crate::core::time::utc_seconds_z(crate::core::time::now());
             writeln!(file, "{} | rewrite | git status | bdo git status", ts).unwrap();
         }
 

@@ -625,7 +625,7 @@ pub fn save_telemetry_consent(accepted: bool) -> Result<()> {
     let mut config = crate::core::config::Config::load().unwrap_or_default();
     config.telemetry.consent_given = Some(accepted);
     config.telemetry.enabled = accepted;
-    config.telemetry.consent_date = Some(chrono::Utc::now().to_rfc3339());
+    config.telemetry.consent_date = Some(crate::core::time::now_rfc3339());
     config
         .save()
         .context("Failed to save telemetry consent to config.toml")

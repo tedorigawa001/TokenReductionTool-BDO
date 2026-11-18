@@ -30,8 +30,9 @@
 //!
 //! See [docs/tracking.md](../docs/tracking.md) for full documentation.
 
+use super::time;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::ffi::OsString;
@@ -148,7 +149,7 @@ pub struct Tracker {
 #[derive(Debug)]
 pub struct CommandRecord {
     /// UTC timestamp when command was executed
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: Timestamp,
     /// Bushido command that was executed (e.g., "bdo ls")
     pub rtk_cmd: String,
     /// Number of tokens saved (input - output)
@@ -515,7 +516,7 @@ impl Tracker {
             "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, project_path, agent, input_tokens, output_tokens, saved_tokens, savings_pct, exec_time_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)", // added: agent
             params![
-                Utc::now().to_rfc3339(),
+                time::now_rfc3339(),
                 original_cmd.as_ref(),
                 rtk_cmd.as_ref(),
                 project_path, // added
@@ -533,14 +534,12 @@ impl Tracker {
     }
 
     fn cleanup_old(&self) -> Result<()> {
-        let cutoff = Utc::now() - chrono::Duration::days(i64::from(self.history_days));
-        self.conn.execute(
-            "DELETE FROM commands WHERE timestamp < ?1",
-            params![cutoff.to_rfc3339()],
-        )?;
+        let cutoff = time::rfc3339(time::days_ago(i64::from(self.history_days)));
+        self.conn
+            .execute("DELETE FROM commands WHERE timestamp < ?1", params![cutoff])?;
         self.conn.execute(
             "DELETE FROM parse_failures WHERE timestamp < ?1",
-            params![cutoff.to_rfc3339()],
+            params![cutoff],
         )?;
         Ok(())
     }
@@ -576,7 +575,7 @@ impl Tracker {
             "INSERT INTO parse_failures (timestamp, raw_command, error_message, fallback_succeeded)
              VALUES (?1, ?2, ?3, ?4)",
             params![
-                Utc::now().to_rfc3339(),
+                time::now_rfc3339(),
                 raw_command.as_ref(),
                 error_message.as_ref(),
                 fallback_succeeded as i32,
@@ -1081,9 +1080,7 @@ impl Tracker {
             params![project_exact, project_glob, limit as i64], // added: project params
             |row| {
                 Ok(CommandRecord {
-                    timestamp: DateTime::parse_from_rfc3339(&row.get::<_, String>(0)?)
-                        .map(|dt| dt.with_timezone(&Utc))
-                        .unwrap_or_else(|_| Utc::now()),
+                    timestamp: time::parse(&row.get::<_, String>(0)?).unwrap_or_else(time::now),
                     rtk_cmd: row.get(1)?,
                     saved_tokens: row.get::<_, i64>(2)? as usize,
                     savings_pct: row.get(3)?,
@@ -1095,8 +1092,8 @@ impl Tracker {
     }
 
     /// Count commands since a given timestamp (for telemetry).
-    pub fn count_commands_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64> {
-        let ts = since.format("%Y-%m-%dT%H:%M:%S").to_string();
+    pub fn count_commands_since(&self, since: Timestamp) -> Result<i64> {
+        let ts = time::utc_seconds(since);
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM commands WHERE timestamp >= ?1",
             params![ts],
@@ -1144,8 +1141,8 @@ impl Tracker {
     }
 
     /// Get tokens saved in the last 24 hours (for telemetry).
-    pub fn tokens_saved_24h(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64> {
-        let ts = since.format("%Y-%m-%dT%H:%M:%S").to_string();
+    pub fn tokens_saved_24h(&self, since: Timestamp) -> Result<i64> {
+        let ts = time::utc_seconds(since);
         let saved: i64 = self.conn.query_row(
             "SELECT COALESCE(SUM(saved_tokens), 0) FROM commands WHERE timestamp >= ?1",
             params![ts],
@@ -1172,8 +1169,8 @@ impl Tracker {
     }
 
     /// Count parse failures in the last 24 hours.
-    pub fn parse_failures_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64> {
-        let ts = since.format("%Y-%m-%dT%H:%M:%S").to_string();
+    pub fn parse_failures_since(&self, since: Timestamp) -> Result<i64> {
+        let ts = time::utc_seconds(since);
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM parse_failures WHERE timestamp >= ?1",
             params![ts],
@@ -1242,17 +1239,10 @@ impl Tracker {
             Some(ts) => {
                 // `record()` writes RFC 3339 with an offset; the naive forms are
                 // older rows.
-                let first = DateTime::parse_from_rfc3339(&ts)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .or_else(|_| {
-                        chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%dT%H:%M:%S")
-                            .or_else(|_| {
-                                chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S")
-                            })
-                            .map(|dt| dt.and_utc())
-                    })
-                    .unwrap_or_else(|_| chrono::Utc::now());
-                let days = (chrono::Utc::now() - first).num_days();
+                let first = time::parse(&ts)
+                    .or_else(|| time::parse_naive_utc(&ts))
+                    .unwrap_or_else(time::now);
+                let days = time::now().duration_since(first).as_hours() / 24;
                 Ok(days.max(0))
             }
             None => Ok(0),
@@ -1261,9 +1251,7 @@ impl Tracker {
 
     /// Number of distinct active days in the last 30 days.
     pub fn active_days_30d(&self) -> Result<i64> {
-        let since = (chrono::Utc::now() - chrono::Duration::days(30))
-            .format("%Y-%m-%dT%H:%M:%S")
-            .to_string();
+        let since = time::utc_seconds(time::days_ago(30));
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(DISTINCT DATE(timestamp)) FROM commands WHERE timestamp >= ?1",
             params![since],
@@ -1317,9 +1305,7 @@ impl Tracker {
 
     /// Tokens saved in the last 30 days.
     pub fn tokens_saved_30d(&self) -> Result<i64> {
-        let since = (chrono::Utc::now() - chrono::Duration::days(30))
-            .format("%Y-%m-%dT%H:%M:%S")
-            .to_string();
+        let since = time::utc_seconds(time::days_ago(30));
         let saved: i64 = self.conn.query_row(
             "SELECT COALESCE(SUM(saved_tokens), 0) FROM commands WHERE timestamp >= ?1",
             params![since],
@@ -1846,7 +1832,7 @@ mod tests {
             .conn
             .execute(
                 "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, input_tokens, output_tokens, saved_tokens, savings_pct) VALUES (?1, 'x', 'bdo x', 1, 1, 0, 0)",
-                params![(Utc::now() - chrono::Duration::days(2)).to_rfc3339()],
+                params![time::rfc3339(time::days_ago(2))],
             )
             .unwrap();
 
@@ -2217,7 +2203,7 @@ mod tests {
         );
     }
 
-    // Timestamps are stored the way `to_rfc3339()` writes them, and the windows
+    // Timestamps are stored the way chrono's `to_rfc3339()` wrote them, and the windows
     // below compare those strings in SQL. A different form would put old and
     // new rows on different sides of a cutoff.
 
@@ -2241,8 +2227,8 @@ mod tests {
             .unwrap();
     }
 
-    fn hours_ago(hours: i64) -> DateTime<Utc> {
-        Utc::now() - chrono::Duration::hours(hours)
+    fn hours_ago(hours: i64) -> Timestamp {
+        time::hours_ago(hours)
     }
 
     fn count_rows(tracker: &Tracker, table: &str) -> i64 {
@@ -2274,13 +2260,13 @@ mod tests {
                 })
                 .unwrap();
             assert!(form.is_match(&stored), "{table}: {stored}");
-            let at = DateTime::parse_from_rfc3339(&stored).unwrap();
-            let age = (Utc::now() - at.with_timezone(&Utc)).num_seconds();
+            let at = time::parse(&stored).unwrap();
+            let age = time::now().duration_since(at).as_secs();
             assert!((0..60).contains(&age), "{table}: {stored}");
 
             if table == "commands" {
                 let recent = tracker.get_recent(1).unwrap();
-                assert_eq!(recent[0].timestamp, at.with_timezone(&Utc));
+                assert_eq!(recent[0].timestamp, at);
             }
         }
     }
@@ -2290,8 +2276,8 @@ mod tests {
         let mut tracker = Tracker::new_in_memory().unwrap();
         let ages = [1, 23, 25, 24 * 29, 24 * 31];
         for (hours, saved) in ages.iter().zip([1, 10, 100, 1000, 10000]) {
-            insert_command_at(&tracker, &hours_ago(*hours).to_rfc3339(), saved);
-            insert_failure_at(&tracker, &hours_ago(*hours).to_rfc3339());
+            insert_command_at(&tracker, &time::rfc3339(hours_ago(*hours)), saved);
+            insert_failure_at(&tracker, &time::rfc3339(hours_ago(*hours)));
         }
 
         let day_ago = hours_ago(24);
@@ -2302,7 +2288,7 @@ mod tests {
 
         let days: std::collections::HashSet<_> = ages[..4]
             .iter()
-            .map(|h| hours_ago(*h).date_naive())
+            .map(|h| time::utc_seconds(hours_ago(*h))[..10].to_string())
             .collect();
         assert_eq!(tracker.active_days_30d().unwrap(), days.len() as i64);
 
@@ -2314,16 +2300,16 @@ mod tests {
 
     #[test]
     fn test_first_seen_days_counts_from_the_oldest_record() {
-        let ten_days_ago = Utc::now() - chrono::Duration::days(10);
+        let ten_days_ago = time::days_ago(10);
         let stored_forms = [
-            ten_days_ago.to_rfc3339(),
-            ten_days_ago.format("%Y-%m-%dT%H:%M:%S").to_string(),
-            ten_days_ago.format("%Y-%m-%d %H:%M:%S").to_string(),
+            time::rfc3339(ten_days_ago),
+            ten_days_ago.strftime("%Y-%m-%dT%H:%M:%S").to_string(),
+            ten_days_ago.strftime("%Y-%m-%d %H:%M:%S").to_string(),
         ];
         for oldest in stored_forms {
             let tracker = Tracker::new_in_memory().unwrap();
             insert_command_at(&tracker, &oldest, 1);
-            insert_command_at(&tracker, &hours_ago(1).to_rfc3339(), 1);
+            insert_command_at(&tracker, &time::rfc3339(hours_ago(1)), 1);
             assert_eq!(tracker.first_seen_days().unwrap(), 10, "{oldest}");
         }
     }

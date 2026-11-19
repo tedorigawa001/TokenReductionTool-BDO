@@ -947,10 +947,17 @@ fn rewrite_segment_inner(
     // Try each rewrite prefix (longest first) with word-boundary check
     for &prefix in rule.rewrite_prefixes {
         if let Some(rest) = strip_word_prefix(cmd_part, prefix) {
-            let rewritten = if rest.is_empty() {
-                format!("{}{}", rule.rtk_cmd, redirect_suffix)
+            let target = if matches!(rule.rtk_cmd, "bdo gradlew" | "bdo mvn") {
+                // Keep executable identity separate from tool arguments. The
+                // separator prevents a tool operand from changing this selector.
+                format!("{} --bdo-executable {} --", rule.rtk_cmd, prefix)
             } else {
-                format!("{} {}{}", rule.rtk_cmd, rest, redirect_suffix)
+                rule.rtk_cmd.to_string()
+            };
+            let rewritten = if rest.is_empty() {
+                format!("{}{}", target, redirect_suffix)
+            } else {
+                format!("{} {}{}", target, rest, redirect_suffix)
             };
             return Some(rewritten);
         }
@@ -3158,7 +3165,7 @@ mod tests {
     fn test_rewrite_gradlew() {
         assert_eq!(
             rewrite_command_no_prefixes("./gradlew assembleDebug", &[]),
-            Some("bdo gradlew assembleDebug".into())
+            Some("bdo gradlew --bdo-executable ./gradlew -- assembleDebug".into())
         );
     }
 
@@ -3166,7 +3173,7 @@ mod tests {
     fn test_rewrite_gradlew_no_dot_slash() {
         assert_eq!(
             rewrite_command_no_prefixes("gradlew build", &[]),
-            Some("bdo gradlew build".into())
+            Some("bdo gradlew --bdo-executable gradlew -- build".into())
         );
     }
 
@@ -3174,7 +3181,7 @@ mod tests {
     fn test_rewrite_gradlew_bat() {
         assert_eq!(
             rewrite_command_no_prefixes("gradlew.bat clean", &[]),
-            Some("bdo gradlew clean".into())
+            Some("bdo gradlew --bdo-executable gradlew.bat -- clean".into())
         );
     }
 
@@ -3182,7 +3189,7 @@ mod tests {
     fn test_rewrite_gradle() {
         assert_eq!(
             rewrite_command_no_prefixes("gradle build", &[]),
-            Some("bdo gradlew build".into())
+            Some("bdo gradlew --bdo-executable gradle -- build".into())
         );
     }
 
@@ -3316,7 +3323,7 @@ mod tests {
     fn test_rewrite_mvn_clean_install() {
         assert_eq!(
             rewrite_command_no_prefixes("mvn -B clean install", &[]),
-            Some("bdo mvn -B clean install".into())
+            Some("bdo mvn --bdo-executable mvn -- -B clean install".into())
         );
     }
 
@@ -3324,11 +3331,44 @@ mod tests {
     fn test_rewrite_mvnw_test() {
         assert_eq!(
             rewrite_command_no_prefixes("./mvnw test", &[]),
-            Some("bdo mvn test".into())
+            Some("bdo mvn --bdo-executable ./mvnw -- test".into())
         );
     }
 
     // --- Compound operator edge cases ---
+
+    #[test]
+    fn test_jvm_rewrites_preserve_executable_spelling_and_argument_boundaries() {
+        for (command, expected) in [
+            ("gradle --version", "bdo gradlew --bdo-executable gradle -- --version"),
+            ("./gradlew.bat build", "bdo gradlew --bdo-executable ./gradlew.bat -- build"),
+            ("mvnw test", "bdo mvn --bdo-executable mvnw -- test"),
+            ("mvnw.cmd package", "bdo mvn --bdo-executable mvnw.cmd -- package"),
+            ("./mvnw.cmd test", "bdo mvn --bdo-executable ./mvnw.cmd -- test"),
+            ("gradle --bdo-executable ./gradlew build", "bdo gradlew --bdo-executable gradle -- --bdo-executable ./gradlew build"),
+            ("MODE=test gradle build", "MODE=test bdo gradlew --bdo-executable gradle -- build"),
+            ("command mvn test", "command bdo mvn --bdo-executable mvn -- test"),
+            ("gradle build 2>&1", "bdo gradlew --bdo-executable gradle -- build 2>&1"),
+            ("gradle build && mvn test", "bdo gradlew --bdo-executable gradle -- build && bdo mvn --bdo-executable mvn -- test"),
+        ] {
+            assert_eq!(rewrite_command_no_prefixes(command, &[]).as_deref(), Some(expected), "{command}");
+        }
+        assert_eq!(
+            rewrite_command_no_prefixes("gradle -Pnote='a b' build", &[]).as_deref(),
+            Some("bdo gradlew --bdo-executable gradle -- -Pnote='a b' build")
+        );
+        for original in [
+            "/opt/gradle build",
+            "tools/mvn test",
+            "\"gradle\" --version",
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(original, &[]),
+                None,
+                "{original}"
+            );
+        }
+    }
 
     #[test]
     fn test_rewrite_compound_or() {

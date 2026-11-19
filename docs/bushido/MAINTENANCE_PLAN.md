@@ -310,6 +310,17 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   `trusted_at` と同じ書き出しを使う。`ecosystem_mix` の 90 日の区切りは SQLite の `datetime()`
   （空白区切り）と比べるので、ちょうど 90 日前の日の記録は時刻によらず含まれる。
 
+### 2026-11-19 — `bdo npm` の別名
+
+- **`run` の別名**（ユーザーのコミット `5d7d3e9`）: `bdo npm run-script`、`rum`、`urn` に `run` を足し、
+  一覧を出すはずが同名のスクリプトを実行していた。`x`（`exec`）も同じ。
+- **ほかのコマンドと別名**: 一覧にない名前はスクリプト名として `run` が付く。`bdo npm add express`
+  が `npm run add express`、`bdo npm stage approve` が `npm run stage approve` になっていた。npm 11.19.1
+  の `lib/utils/cmd-list.js` のコマンド 72 個と別名 57 個をすべて一覧に入れ、テストで全部を確かめる。
+  フックの書き換えが作るのは `run` と `exec` の形だけなので、直接打ったときにだけ起きていた。
+- **未対応**: npm の新しい版でコマンドが増えたら、一覧を手で更新する。`golangci-lint` の一覧は実物と
+  比べていない（この環境にない）。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

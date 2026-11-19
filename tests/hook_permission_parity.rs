@@ -71,7 +71,11 @@ impl Fixture {
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(stdout.trim()).unwrap_or(Value::Null)
+        if stdout.trim().is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_str(stdout.trim()).expect("hook must return valid JSON")
+        }
     }
 
     fn claude(&self, command: &str, cwd: &Path, project_dir: Option<&Path>) -> Value {
@@ -104,12 +108,19 @@ fn an_ask_rule_still_asks_after_the_rewrite() {
         json!({ "allow": ["Bash(*)"], "ask": ["Bash(git commit:*)"] }),
     );
     let answer = fixture.claude("git commit -m x", &fixture.project, None);
-    if rewritten(&answer).is_some() {
-        assert_eq!(decision(&answer), Some("ask"), "{answer}");
-    }
+    assert_eq!(rewritten(&answer), Some("bdo git commit -m x"), "{answer}");
+    assert_eq!(decision(&answer), Some("ask"), "{answer}");
     // Commands outside the ask rule keep their allow.
     let answer = fixture.claude("git status", &fixture.project, None);
     assert_eq!(decision(&answer), Some("allow"), "{answer}");
+}
+
+#[test]
+fn claude_leaves_a_command_without_a_matching_rule_unchanged() {
+    let fixture = Fixture::new();
+    fixture.settings(&fixture.project, json!({ "allow": ["Bash(git status)"] }));
+    let answer = fixture.claude("git status --short", &fixture.project, None);
+    assert_eq!(answer, Value::Null, "{answer}");
 }
 
 #[test]

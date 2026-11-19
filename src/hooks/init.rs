@@ -4072,8 +4072,8 @@ fn run_copilot_at(base: &Path, ctx: InitContext) -> Result<()> {
         println!("\nGitHub Copilot integration installed (project-scoped).\n");
         println!("  Hook config:    {}", hook_path.display());
         println!("  Instructions:   {}", instructions_path.display());
-        println!("\n  Works with VS Code Copilot Chat (transparent rewrite)");
-        println!("  and Copilot CLI (deny-with-suggestion).");
+        println!("\n  VS Code Copilot Chat and Copilot CLI evaluate the original command.");
+        println!("  The hook does not automatically rewrite Copilot commands.");
         println!("\n  Restart your IDE or Copilot CLI session to activate.\n");
     }
 

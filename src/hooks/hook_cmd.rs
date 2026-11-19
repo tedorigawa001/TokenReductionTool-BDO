@@ -27,86 +27,11 @@ fn read_stdin_limited() -> Result<String> {
 
 // ── Copilot hook (VS Code + Copilot CLI) ──────────────────────
 
-/// Format detected from the preToolUse JSON input.
-enum HookFormat {
-    /// Claude/Cursor-style snake_case input (`tool_name` + `tool_input.command`),
-    /// answered with `hookSpecificOutput.updatedInput`. Accepted as a fallback —
-    /// GitHub Copilot itself only ever sends the CopilotCli (camelCase) format.
-    VsCode { command: String },
-    /// GitHub Copilot CLI: camelCase `toolName` + `toolArgs` (JSON string), supports `modifiedArgs` for transparent rewrite.
-    /// Carries the full parsed `toolArgs` object so we can rewrite `command` while preserving
-    /// host-supplied metadata (description, initial_wait, mode, …) the tool requires.
-    CopilotCli { command: String, args: Value },
-    /// Non-bash tool, already uses rtk, or unknown format — pass through silently.
-    PassThrough,
-}
-
-/// Run the Copilot preToolUse hook.
-/// Auto-detects VS Code Copilot Chat vs Copilot CLI format.
+/// Run the Copilot preToolUse hook without changing the original input.
+/// Neither Copilot format exposes verified permissions to this hook.
 pub fn run_copilot() -> Result<()> {
-    let input = read_stdin_limited()?;
-
-    // Strip leading BOM(s) before trimming: some Windows hosts prepend UTF-8
-    // BOMs to hook stdin (confirmed for Cursor), which serde_json rejects.
-    let input = strip_leading_bom(&input).trim();
-    if input.is_empty() {
-        return Ok(());
-    }
-
-    let v: Value = match serde_json::from_str(input) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = writeln!(io::stderr(), "[bdo hook] Failed to parse JSON input: {e}");
-            return Ok(());
-        }
-    };
-
-    match detect_format(&v) {
-        HookFormat::VsCode { command } => handle_vscode(&command),
-        HookFormat::CopilotCli { command, args } => handle_copilot_cli(&command, &args),
-        HookFormat::PassThrough => Ok(()),
-    }
-}
-
-fn detect_format(v: &Value) -> HookFormat {
-    // VS Code Copilot Chat / Claude Code: snake_case keys
-    if let Some(tool_name) = v.get("tool_name").and_then(|t| t.as_str()) {
-        if matches!(tool_name, "runTerminalCommand" | "Bash" | "bash") {
-            if let Some(cmd) = v
-                .pointer("/tool_input/command")
-                .and_then(|c| c.as_str())
-                .filter(|c| !c.is_empty())
-            {
-                return HookFormat::VsCode {
-                    command: cmd.to_string(),
-                };
-            }
-        }
-        return HookFormat::PassThrough;
-    }
-
-    // Copilot CLI: camelCase keys, toolArgs is a JSON-encoded string
-    if let Some(tool_name) = v.get("toolName").and_then(|t| t.as_str()) {
-        if tool_name == "bash" {
-            if let Some(tool_args_str) = v.get("toolArgs").and_then(|t| t.as_str()) {
-                if let Ok(tool_args) = serde_json::from_str::<Value>(tool_args_str) {
-                    if let Some(cmd) = tool_args
-                        .get("command")
-                        .and_then(|c| c.as_str())
-                        .filter(|c| !c.is_empty())
-                    {
-                        return HookFormat::CopilotCli {
-                            command: cmd.to_string(),
-                            args: tool_args,
-                        };
-                    }
-                }
-            }
-        }
-        return HookFormat::PassThrough;
-    }
-
-    HookFormat::PassThrough
+    read_stdin_limited()?;
+    Ok(())
 }
 
 fn get_rewritten(cmd: &str) -> Option<String> {
@@ -129,8 +54,6 @@ fn get_rewritten(cmd: &str) -> Option<String> {
 
 enum HookDecision {
     AllowRewrite(String),
-    /// No rule decided: the host applies its own rules to the rewrite.
-    AskRewrite(String),
     /// An ask rule matched. The host must still ask, so the decision is sent
     /// explicitly; otherwise it would match its rules against `bdo …`.
     AskRuleRewrite(String),
@@ -139,18 +62,25 @@ enum HookDecision {
 }
 
 fn decide_from_verdict(cmd: &str, verdict: PermissionVerdict) -> HookDecision {
-    if verdict == PermissionVerdict::Deny {
-        return HookDecision::Deny;
-    }
+    decide_rewrite(cmd, verdict, || get_rewritten(cmd))
+}
+
+fn decide_rewrite(
+    cmd: &str,
+    verdict: PermissionVerdict,
+    rewrite: impl FnOnce() -> Option<String>,
+) -> HookDecision {
+    let build_decision = match verdict {
+        PermissionVerdict::Deny => return HookDecision::Deny,
+        // Without a matching rule, the host must evaluate the original input.
+        PermissionVerdict::Default => return HookDecision::Defer,
+        PermissionVerdict::Allow => HookDecision::AllowRewrite,
+        PermissionVerdict::Ask => HookDecision::AskRuleRewrite,
+    };
     if crate::discover::lexer::contains_unattestable_construct(cmd) {
         return HookDecision::Defer;
     }
-    match get_rewritten(cmd) {
-        Some(r) if verdict == PermissionVerdict::Allow => HookDecision::AllowRewrite(r),
-        Some(r) if verdict == PermissionVerdict::Ask => HookDecision::AskRuleRewrite(r),
-        Some(r) => HookDecision::AskRewrite(r),
-        None => HookDecision::Defer,
-    }
+    rewrite().map_or(HookDecision::Defer, build_decision)
 }
 
 fn decide_hook_action(cmd: &str, host: permissions::Host) -> HookDecision {
@@ -158,7 +88,7 @@ fn decide_hook_action(cmd: &str, host: permissions::Host) -> HookDecision {
 }
 
 /// [`decide_from_verdict`] plus agent attribution for hosts whose shell
-/// children carry no sniffable env vars (Gemini CLI, Copilot): every rewritten
+/// children carry no sniffable env vars (Gemini CLI): every rewritten
 /// `bdo` segment gets a `BDO_AGENT=<agent>` prefix so `bdo gain --by-agent`
 /// attributes the run deterministically. A command that already invokes `bdo`
 /// directly (agents following the instructions file do this) normally needs no
@@ -169,13 +99,7 @@ fn decide_from_verdict_for_agent(
     agent: &str,
 ) -> HookDecision {
     use crate::discover::registry::attribute_agent;
-    if verdict == PermissionVerdict::Deny {
-        return HookDecision::Deny;
-    }
-    if crate::discover::lexer::contains_unattestable_construct(cmd) {
-        return HookDecision::Defer;
-    }
-    let rewritten = match get_rewritten(cmd) {
+    decide_rewrite(cmd, verdict, || match get_rewritten(cmd) {
         Some(r) => Some(attribute_agent(&r, agent)),
         // Heredocs are never touched (same rule as get_rewritten).
         None if has_heredoc(cmd) => None,
@@ -183,93 +107,11 @@ fn decide_from_verdict_for_agent(
             let attributed = attribute_agent(cmd, agent);
             (attributed != cmd).then_some(attributed)
         }
-    };
-    match rewritten {
-        Some(r) if verdict == PermissionVerdict::Allow => HookDecision::AllowRewrite(r),
-        Some(r) if verdict == PermissionVerdict::Ask => HookDecision::AskRuleRewrite(r),
-        Some(r) => HookDecision::AskRewrite(r),
-        None => HookDecision::Defer,
-    }
+    })
 }
 
 fn decide_hook_action_for_agent(cmd: &str, host: permissions::Host, agent: &str) -> HookDecision {
     decide_from_verdict_for_agent(cmd, permissions::check_command_for(cmd, host), agent)
-}
-
-/// Copilot currently exposes no Bushido-owned permission file. Rewrites must
-/// therefore preserve Copilot's native confirmation boundary instead of
-/// borrowing another agent's allow rules.
-fn decide_copilot_action(cmd: &str) -> HookDecision {
-    decide_from_verdict_for_agent(cmd, PermissionVerdict::Default, "copilot")
-}
-
-fn handle_vscode(cmd: &str) -> Result<()> {
-    let (decision, rewritten) = match decide_copilot_action(cmd) {
-        HookDecision::Deny => {
-            audit_log("deny", cmd, "");
-            return Ok(());
-        }
-        HookDecision::Defer => return Ok(()),
-        HookDecision::AllowRewrite(r) => ("allow", r),
-        HookDecision::AskRewrite(r) | HookDecision::AskRuleRewrite(r) => ("ask", r),
-    };
-
-    audit_log("rewrite", cmd, &rewritten);
-
-    let output = json!({
-        "hookSpecificOutput": {
-            "hookEventName": PRE_TOOL_USE_KEY,
-            "permissionDecision": decision,
-            "permissionDecisionReason": "Bushido auto-rewrite",
-            "updatedInput": { "command": rewritten }
-        }
-    });
-    let _ = writeln!(io::stdout(), "{output}");
-    Ok(())
-}
-
-fn handle_copilot_cli(cmd: &str, args: &Value) -> Result<()> {
-    if let Some(response) = copilot_cli_response(cmd, args) {
-        let _ = writeln!(io::stdout(), "{response}");
-    }
-    Ok(())
-}
-
-fn copilot_cli_response(cmd: &str, args: &Value) -> Option<Value> {
-    copilot_cli_response_from_decision(args, decide_copilot_action(cmd), cmd)
-}
-
-fn copilot_cli_response_from_decision(
-    args: &Value,
-    decision: HookDecision,
-    cmd: &str,
-) -> Option<Value> {
-    let (rewritten, allow) = match decision {
-        HookDecision::Deny => {
-            audit_log("deny", cmd, "");
-            return None;
-        }
-        // Copilot has no documented `ask`: leave the command for it to confirm.
-        HookDecision::Defer | HookDecision::AskRuleRewrite(_) => return None,
-        HookDecision::AllowRewrite(r) => (r, true),
-        HookDecision::AskRewrite(r) => (r, false),
-    };
-
-    audit_log("rewrite", cmd, &rewritten);
-
-    let mut modified = args.clone();
-    if let Some(obj) = modified.as_object_mut() {
-        obj.insert("command".into(), Value::String(rewritten));
-    }
-
-    let mut response = json!({
-        "permissionDecisionReason": "Bushido auto-rewrite",
-        "modifiedArgs": modified,
-    });
-    if allow {
-        response["permissionDecision"] = json!("allow");
-    }
-    Some(response)
 }
 
 // ── Gemini hook ───────────────────────────────────────────────
@@ -309,10 +151,6 @@ pub fn run_gemini() -> Result<()> {
         // and merge the new command via `hookSpecificOutput.tool_input`.
         HookDecision::AllowRewrite(ref rewritten) => {
             audit_log("rewrite", cmd, rewritten);
-            print_gemini_rewrite(rewritten);
-        }
-        HookDecision::AskRewrite(ref rewritten) => {
-            audit_log("ask", cmd, rewritten);
             print_gemini_rewrite(rewritten);
         }
         // Gemini has no `ask` value, and its confirmationRequired list would
@@ -422,7 +260,7 @@ enum PayloadAction {
     Ignore,
 }
 
-fn process_claude_payload(v: &Value) -> PayloadAction {
+fn process_claude_payload(v: &Value, decide: impl FnOnce(&str) -> HookDecision) -> PayloadAction {
     let cmd = match v
         .pointer("/tool_input/command")
         .and_then(|c| c.as_str())
@@ -432,7 +270,7 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
         None => return PayloadAction::Ignore,
     };
 
-    let (rewritten, decision) = match decide_hook_action(cmd, permissions::Host::Claude) {
+    let (rewritten, decision) = match decide(cmd) {
         HookDecision::Deny => {
             return PayloadAction::Skip {
                 reason: "skip:deny_rule",
@@ -445,9 +283,8 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
                 cmd: cmd.to_string(),
             }
         }
-        HookDecision::AllowRewrite(r) => (r, Some("allow")),
-        HookDecision::AskRuleRewrite(r) => (r, Some("ask")),
-        HookDecision::AskRewrite(r) => (r, None),
+        HookDecision::AllowRewrite(r) => (r, "allow"),
+        HookDecision::AskRuleRewrite(r) => (r, "ask"),
     };
 
     let updated_input = {
@@ -458,15 +295,12 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
         ti
     };
 
-    let mut hook_output = json!({
+    let hook_output = json!({
         "hookEventName": PRE_TOOL_USE_KEY,
         "permissionDecisionReason": "Bushido auto-rewrite",
-        "updatedInput": updated_input
+        "updatedInput": updated_input,
+        "permissionDecision": decision
     });
-
-    if let Some(decision) = decision {
-        hook_output["permissionDecision"] = json!(decision);
-    }
 
     PayloadAction::Rewrite {
         cmd: cmd.to_string(),
@@ -492,7 +326,7 @@ pub fn run_claude() -> Result<()> {
         }
     };
 
-    match process_claude_payload(&v) {
+    match process_claude_payload(&v, |cmd| decide_hook_action(cmd, permissions::Host::Claude)) {
         PayloadAction::Rewrite {
             cmd,
             rewritten,
@@ -513,7 +347,7 @@ pub fn run_claude() -> Result<()> {
 #[cfg(test)]
 fn run_claude_inner(input: &str) -> Option<String> {
     let v: Value = serde_json::from_str(input).ok()?;
-    match process_claude_payload(&v) {
+    match process_claude_payload(&v, |cmd| decide_from_verdict(cmd, PermissionVerdict::Allow)) {
         PayloadAction::Rewrite { output, .. } => Some(output.to_string()),
         _ => None,
     }
@@ -630,74 +464,6 @@ mod tests {
         crate::discover::registry::rewrite_command(cmd, excluded, &[])
     }
 
-    // --- Copilot format detection ---
-
-    fn vscode_input(tool: &str, cmd: &str) -> Value {
-        json!({
-            "tool_name": tool,
-            "tool_input": { "command": cmd }
-        })
-    }
-
-    fn copilot_cli_input(cmd: &str) -> Value {
-        let args = serde_json::to_string(&json!({ "command": cmd })).unwrap();
-        json!({ "toolName": "bash", "toolArgs": args })
-    }
-
-    #[test]
-    fn test_detect_vscode_bash() {
-        assert!(matches!(
-            detect_format(&vscode_input("Bash", "git status")),
-            HookFormat::VsCode { .. }
-        ));
-    }
-
-    #[test]
-    fn test_detect_vscode_run_terminal_command() {
-        assert!(matches!(
-            detect_format(&vscode_input("runTerminalCommand", "cargo test")),
-            HookFormat::VsCode { .. }
-        ));
-    }
-
-    #[test]
-    fn test_detect_copilot_cli_bash() {
-        assert!(matches!(
-            detect_format(&copilot_cli_input("git status")),
-            HookFormat::CopilotCli { .. }
-        ));
-    }
-
-    #[test]
-    fn test_detect_non_bash_is_passthrough() {
-        let v = json!({ "tool_name": "editFiles" });
-        assert!(matches!(detect_format(&v), HookFormat::PassThrough));
-    }
-
-    #[test]
-    fn test_copilot_bom_prefixed_payload_is_recognized() {
-        // Windows hosts may prepend one or two UTF-8 BOMs to hook stdin
-        // (confirmed for Cursor). run_copilot strips them before parsing;
-        // verify both Copilot formats still parse after the same handling.
-        for raw in [
-            format!("\u{feff}{}", copilot_cli_input("git status")),
-            format!("\u{feff}\u{feff}{}", copilot_cli_input("git status")),
-        ] {
-            let cleaned = strip_leading_bom(&raw).trim();
-            let v: Value = serde_json::from_str(cleaned).expect("BOM-stripped JSON must parse");
-            assert!(matches!(detect_format(&v), HookFormat::CopilotCli { .. }));
-        }
-
-        let raw = format!("\u{feff}{}", vscode_input("Bash", "git status"));
-        let v: Value = serde_json::from_str(strip_leading_bom(&raw).trim()).unwrap();
-        assert!(matches!(detect_format(&v), HookFormat::VsCode { .. }));
-    }
-
-    #[test]
-    fn test_detect_unknown_is_passthrough() {
-        assert!(matches!(detect_format(&json!({})), HookFormat::PassThrough));
-    }
-
     #[test]
     fn test_get_rewritten_supported() {
         assert!(get_rewritten("git status").is_some());
@@ -716,235 +482,6 @@ mod tests {
     #[test]
     fn test_get_rewritten_heredoc() {
         assert!(get_rewritten("cat <<'EOF'\nhello\nEOF").is_none());
-    }
-
-    // --- Copilot CLI handler: transparent rewrite via modifiedArgs ---
-
-    fn cli_args(cmd: &str) -> Value {
-        json!({ "command": cmd })
-    }
-
-    #[test]
-    fn test_copilot_cli_ask_rewrite_omits_permission_decision() {
-        let r = copilot_cli_response_from_decision(
-            &cli_args("cargo test"),
-            HookDecision::AskRewrite("bdo cargo test".into()),
-            "cargo test",
-        )
-        .unwrap();
-        assert!(
-            r.get("permissionDecision").is_none(),
-            "AskRewrite must NOT set permissionDecision — Copilot then runs its normal prompt flow on the rewritten command"
-        );
-        assert_eq!(r["modifiedArgs"]["command"], "bdo cargo test");
-    }
-
-    #[test]
-    fn test_copilot_cli_allow_rewrite_returns_allow() {
-        let r = copilot_cli_response_from_decision(
-            &cli_args("cargo test"),
-            HookDecision::AllowRewrite("bdo cargo test".into()),
-            "cargo test",
-        )
-        .unwrap();
-        assert_eq!(r["permissionDecision"], "allow");
-        assert_eq!(r["modifiedArgs"]["command"], "bdo cargo test");
-    }
-
-    #[test]
-    fn test_copilot_cli_deny_returns_none() {
-        assert!(copilot_cli_response_from_decision(
-            &cli_args("cargo test"),
-            HookDecision::Deny,
-            "cargo test",
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn test_copilot_cli_defer_returns_none() {
-        // Defer covers both "no rewrite available" and the unattestable-construct gate.
-        // The hook must emit NO modifiedArgs for CVE bypass forms — no laundering.
-        assert!(copilot_cli_response_from_decision(
-            &cli_args("git status & rm -rf /tmp/x"),
-            HookDecision::Defer,
-            "git status & rm -rf /tmp/x",
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn test_copilot_cli_passthrough_unsupported() {
-        assert!(copilot_cli_response("htop", &cli_args("htop")).is_none());
-    }
-
-    #[test]
-    #[cfg(not(windows))]
-    fn test_copilot_cli_already_rtk_gets_attribution_rewrite() {
-        // No filter rewrite is needed, but the hook still rewrites to carry
-        // the BDO_AGENT attribution (agents following the instructions file
-        // type `bdo …` directly and would otherwise show up as direct usage).
-        let r = copilot_cli_response("bdo cargo test", &cli_args("bdo cargo test")).unwrap();
-        assert_eq!(
-            r["modifiedArgs"]["command"],
-            "BDO_AGENT=copilot bdo cargo test"
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_copilot_cli_passthrough_already_rtk() {
-        // Windows shells can't parse the VAR=val prefix, so attribution is
-        // disabled there and already-bdo commands pass through untouched.
-        assert!(copilot_cli_response("bdo cargo test", &cli_args("bdo cargo test")).is_none());
-    }
-
-    #[test]
-    #[cfg(not(windows))]
-    fn test_copilot_cli_attribution_is_idempotent() {
-        // Re-firing on the hook's own output must not stack prefixes.
-        let cmd = "BDO_AGENT=copilot bdo cargo test";
-        assert!(copilot_cli_response(cmd, &cli_args(cmd)).is_none());
-    }
-
-    #[test]
-    #[cfg(not(windows))]
-    fn test_copilot_cli_rewrite_carries_attribution() {
-        let r = copilot_cli_response("cargo test", &cli_args("cargo test")).unwrap();
-        assert_eq!(
-            r["modifiedArgs"]["command"],
-            "BDO_AGENT=copilot bdo cargo test"
-        );
-        assert!(
-            r.get("permissionDecision").is_none(),
-            "Copilot rewrites must preserve the host's native confirmation"
-        );
-    }
-
-    #[test]
-    fn test_copilot_decision_never_borrows_allow_rules() {
-        assert!(matches!(
-            decide_copilot_action("cargo test"),
-            HookDecision::AskRewrite(_)
-        ));
-    }
-
-    #[test]
-    fn test_copilot_cli_passthrough_heredoc() {
-        let cmd = "cat <<EOF\nhi\nEOF";
-        assert!(copilot_cli_response(cmd, &cli_args(cmd)).is_none());
-    }
-
-    #[test]
-    fn test_copilot_cli_preserves_env_prefix() {
-        let r = copilot_cli_response(
-            "RUST_LOG=debug cargo test",
-            &cli_args("RUST_LOG=debug cargo test"),
-        )
-        .unwrap();
-        let expected = if cfg!(windows) {
-            "RUST_LOG=debug bdo cargo test"
-        } else {
-            "RUST_LOG=debug BDO_AGENT=copilot bdo cargo test"
-        };
-        assert_eq!(r["modifiedArgs"]["command"], expected);
-    }
-
-    #[test]
-    fn test_copilot_cli_preserves_extra_args_fields() {
-        let args = json!({
-            "command": "cargo install ripgrep",
-            "description": "install ripgrep",
-            "initial_wait": 30,
-            "mode": "sync"
-        });
-        let r = copilot_cli_response_from_decision(
-            &args,
-            HookDecision::AskRewrite("bdo cargo install ripgrep".into()),
-            "cargo install ripgrep",
-        )
-        .unwrap();
-        let modified = &r["modifiedArgs"];
-        assert_eq!(modified["command"], "bdo cargo install ripgrep");
-        assert_eq!(modified["description"], "install ripgrep");
-        assert_eq!(modified["initial_wait"], 30);
-        assert_eq!(modified["mode"], "sync");
-    }
-
-    fn end_to_end(cmd: &str) -> Option<Value> {
-        let verdict = crate::hooks::permissions::check_command_with_rules(
-            cmd,
-            &[],
-            &[],
-            &["Bash(git:*)".to_string()],
-        );
-        copilot_cli_response_from_decision(&cli_args(cmd), decide_from_verdict(cmd, verdict), cmd)
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_safe_forms_still_rewrite() {
-        for cmd in ["git status", "git status 2>&1"] {
-            let r = end_to_end(cmd).unwrap_or_else(|| panic!("expected rewrite for {cmd:?}"));
-            assert_eq!(
-                r["modifiedArgs"]["command"].as_str().unwrap(),
-                format!("bdo {cmd}"),
-                "safe form {cmd:?} must rewrite",
-            );
-        }
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_newline_bypass_never_auto_allows() {
-        let r = end_to_end("git status\nrm -rf /tmp/x");
-        if let Some(resp) = r {
-            assert!(
-                resp.get("permissionDecision").is_none(),
-                "newline-hidden command must not produce permissionDecision: \"allow\""
-            );
-        }
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_background_bypass_never_auto_allows() {
-        let r = end_to_end("git status & rm -rf /tmp/x");
-        if let Some(resp) = r {
-            assert!(
-                resp.get("permissionDecision").is_none(),
-                "background-& hidden command must not produce permissionDecision: \"allow\""
-            );
-        }
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_command_substitution_returns_none() {
-        assert!(
-            end_to_end("git log --pretty=$(rm -rf /tmp/x)").is_none(),
-            "$( ) command substitution must not produce modifiedArgs"
-        );
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_backtick_substitution_returns_none() {
-        assert!(
-            end_to_end("git log --pretty=`rm -rf /tmp/x`").is_none(),
-            "backtick substitution must not produce modifiedArgs"
-        );
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_file_redirect_amp_returns_none() {
-        assert!(
-            end_to_end("git status >& /tmp/evil").is_none(),
-            ">&file redirect must not produce modifiedArgs"
-        );
-    }
-
-    #[test]
-    fn test_copilot_cli_cve_file_redirect_returns_none() {
-        assert!(
-            end_to_end("git status > /tmp/evil").is_none(),
-            ">file redirect must not produce modifiedArgs"
-        );
     }
 
     // --- Gemini format ---
@@ -1131,8 +668,7 @@ mod tests {
         let hook = &v["hookSpecificOutput"];
 
         assert_eq!(hook["hookEventName"], PRE_TOOL_USE_KEY);
-        // permissionDecision is only set when an explicit allow rule matches;
-        // with default-to-ask semantics (no rules configured), it is absent.
+        assert_eq!(hook["permissionDecision"], "allow");
         assert_eq!(hook["permissionDecisionReason"], "Bushido auto-rewrite");
         assert!(hook["updatedInput"].is_object());
         assert!(hook["updatedInput"]["command"].is_string());
@@ -1434,10 +970,10 @@ mod tests {
     }
 
     #[test]
-    fn test_decide_ask_for_default_verdict() {
+    fn test_decide_defers_for_default_verdict() {
         assert!(matches!(
             decide_with_rules("git status", &[], &[], &[]),
-            HookDecision::AskRewrite(_)
+            HookDecision::Defer
         ));
     }
 
@@ -1528,7 +1064,7 @@ mod tests {
                 r#"{"decision":"deny","reason":"Blocked by Bushido permission rule"}"#.to_string()
             }
             // Gemini has no allow/ask value: rewrite via tool_input (no decision).
-            HookDecision::AllowRewrite(r) | HookDecision::AskRewrite(r) => gemini_rewrite_json(&r),
+            HookDecision::AllowRewrite(r) => gemini_rewrite_json(&r),
             HookDecision::AskRuleRewrite(_) | HookDecision::Defer => "{}".to_string(),
         }
     }
@@ -1546,22 +1082,18 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
-    fn test_gemini_default_rewrites_without_decision() {
-        // The "ask" path also rewrites with no decision (Gemini has no ask value).
-        let v: Value = serde_json::from_str(&gemini_render("git status", &[], &[], &[])).unwrap();
-        assert!(v.get("decision").is_none());
-        assert_eq!(
-            v["hookSpecificOutput"]["tool_input"]["command"],
-            "BDO_AGENT=gemini bdo git status"
-        );
+    fn test_gemini_default_leaves_input_unchanged() {
+        for command in ["git status", "bdo git status"] {
+            assert_eq!(gemini_render(command, &[], &[], &[]), "{}");
+        }
     }
 
     #[test]
     #[cfg(not(windows))]
     fn test_gemini_already_bdo_gets_attribution_only_rewrite() {
         let v: Value =
-            serde_json::from_str(&gemini_render("bdo git status", &[], &[], &[])).unwrap();
+            serde_json::from_str(&gemini_render("bdo git status", &[], &[], &all_allowed()))
+                .unwrap();
         assert_eq!(
             v["hookSpecificOutput"]["tool_input"]["command"],
             "BDO_AGENT=gemini bdo git status"
@@ -1573,7 +1105,7 @@ mod tests {
         // Second pass over already-attributed output must defer (no rewrite),
         // otherwise the hook would loop rewriting its own output forever.
         assert_eq!(
-            gemini_render("BDO_AGENT=gemini bdo git status", &[], &[], &[]),
+            gemini_render("BDO_AGENT=gemini bdo git status", &[], &[], &all_allowed()),
             "{}"
         );
     }

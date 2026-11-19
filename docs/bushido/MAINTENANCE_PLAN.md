@@ -342,7 +342,8 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   ホストは書き換え後の文字列に自分のルールを当てていた（`allow: Bash(*)` なら確認なしで実行）。
   ask に当たったときは Claude Code に `"ask"` を明示する。`ask` の値がない Gemini と Copilot CLI
   では書き換えずにホストの確認に任せる。どのルールにも当たらないとき（Default）は従来どおり
-  判定なしで書き換える（止めると、確認なしのモードではフックが何もしなくなるため）。
+  判定なしで書き換えていたが、現在のネイティブフックでは元の入力をホストに渡す。
+  Copilot CLI / VS Code も、許可ルールを取得できないため自動書き換えを行わない。
 - **括弧なしの `Bash` を読んでいなかった**: `deny: ["Bash"]` でも `git status` を allow にしていた。
   全コマンドに当たる `*` として読む。
 - **`Bash(git push)` を前方一致にしていた**: Claude Code では完全一致なので、Claude の allow だけ

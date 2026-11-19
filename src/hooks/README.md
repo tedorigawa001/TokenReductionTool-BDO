@@ -80,17 +80,18 @@ Rules are loaded from all Claude Code `settings.json` files (project + global, i
 | Deny | `permissions.deny` rule matched | 2 | Passthrough — host tool handles denial |
 | Ask | `permissions.ask` rule matched | 3 | Rewrite + let host tool prompt user |
 | Allow | `permissions.allow` rule matched | 0 | Rewrite + auto-allow |
-| Default | No rule matched | 3 | Rewrite + let host tool prompt user |
+| Default | No rule matched | 3 | Native hooks leave the input unchanged for the host to evaluate |
 
 ### Per-tool support
 
-| Tool | ask support | Behavior on Default |
+| Native hook | Behavior on explicit Ask | Behavior on Default |
 |------|------------|-------------------|
-| Claude Code (bdo-rewrite.sh) | Yes | `permissionDecision: "ask"` — user prompted |
-| Copilot VS Code (bdo hook copilot) | Yes | `permissionDecision: "ask"` — user prompted |
-| Gemini CLI (bdo hook gemini) | No (allow/deny only) | allow (limitation — no ask mode in Gemini) |
-| Copilot CLI (bdo hook copilot) | No updatedInput | deny-with-suggestion (unchanged) |
-| Codex | ask parsed but no-op | allow (limitation — fails open) |
+| Claude Code | Rewrites with `permissionDecision: "ask"` | Original input |
+| Cursor | Original input | Original input |
+| Gemini CLI | Original input | Original input |
+| Copilot CLI / VS Code | No permission rules available to the hook | Original input; no automatic rewrite |
+
+The advisory `bdo rewrite` exit-code protocol is unchanged. Use `bdo hook claude` for Claude Code rather than the legacy shell wrapper.
 
 ### Implementation
 

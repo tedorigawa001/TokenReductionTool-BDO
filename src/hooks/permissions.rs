@@ -1,4 +1,5 @@
 use super::constants::{CLAUDE_DIR, CURSOR_DIR, GEMINI_DIR, SETTINGS_JSON, SETTINGS_LOCAL_JSON};
+use crate::core::bounded_read::{read_text, Links};
 use crate::core::stream::exec_capture;
 use crate::discover::lexer::{canonicalize_segment, split_for_permissions, CanonicalSegment};
 use serde_json::Value;
@@ -159,7 +160,9 @@ fn load_permission_rules() -> (Vec<String>, Vec<String>, Vec<String>) {
     let mut allow_rules = Vec::new();
 
     for path in get_settings_paths() {
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        // Linked settings are a normal setup; FIFOs, devices and oversized
+        // files are skipped like malformed ones.
+        let Some(content) = read_text(&path, Links::Follow) else {
             continue;
         };
         let Ok(json) = serde_json::from_str::<Value>(&content) else {
@@ -214,7 +217,7 @@ fn get_settings_paths() -> Vec<PathBuf> {
 }
 
 fn read_json(path: &std::path::Path) -> Option<Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_text(path, Links::Follow)?;
     match serde_json::from_str::<Value>(&content) {
         Ok(v) => Some(v),
         Err(_) => {

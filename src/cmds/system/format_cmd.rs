@@ -1,6 +1,7 @@
 //! Runs code formatters (Prettier, Ruff) and shows only files that changed.
 
 use crate::core::stream::exec_capture;
+use crate::core::bounded_read::{read_text, Links};
 use crate::core::tracking;
 use crate::core::truncate::CAP_WARNINGS;
 use crate::core::utils::{package_manager_exec, resolved_command};
@@ -29,7 +30,7 @@ fn detect_formatter_in_dir(args: &[String], dir: &Path) -> String {
     let pyproject_path = dir.join("pyproject.toml");
     if pyproject_path.exists() {
         // Read pyproject.toml to detect formatter
-        if let Ok(content) = std::fs::read_to_string(&pyproject_path) {
+        if let Some(content) = read_text(&pyproject_path, Links::Refuse) {
             // Check for [tool.black] section
             if content.contains("[tool.black]") {
                 return "black".to_string();
@@ -293,6 +294,45 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+
+    /// `f` must return within 5 seconds: a FIFO would block a plain read.
+    #[cfg(unix)]
+    fn within_5s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("blocked on a repository file")
+    }
+
+    #[cfg(unix)]
+    fn mkfifo(path: &std::path::Path) {
+        let status = std::process::Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_detect_formatter_ignores_pyproject_fifos_and_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        mkfifo(&root.join("pyproject.toml"));
+        let fifo_root = root.clone();
+        let detected = within_5s(move || detect_formatter_in_dir(&[], &fifo_root));
+        assert_ne!(detected, "black");
+
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("pyproject.toml");
+        fs::write(&target, "[tool.black]\n").unwrap();
+        fs::remove_file(root.join("pyproject.toml")).unwrap();
+        std::os::unix::fs::symlink(&target, root.join("pyproject.toml")).unwrap();
+        assert_ne!(detect_formatter_in_dir(&[], &root), "black");
+
+        fs::remove_file(root.join("pyproject.toml")).unwrap();
+        fs::write(root.join("pyproject.toml"), "[tool.black]\n").unwrap();
+        assert_eq!(detect_formatter_in_dir(&[], &root), "black");
+    }
     use tempfile::TempDir;
 
     #[test]

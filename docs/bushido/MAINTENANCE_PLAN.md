@@ -321,6 +321,20 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
 - **未対応**: npm の新しい版でコマンドが増えたら、一覧を手で更新する。`golangci-lint` の一覧は実物と
   比べていない（この環境にない）。
 
+### 2026-11-19 — リポジトリのファイルの読み方（リンク、FIFO、大きさ）
+
+- **ユーザーのコミット**: `learn --write-rules` と `init` のプロジェクト内の書き込み・削除がリンクを
+  たどらない。`stale` と `review` は、リンク、FIFO、1 MiB を超えるファイルを読まない（`read_repo_text`）。
+- **同じ種類の残り**: フックは、コマンドのたびにプロジェクトの `.claude/settings.json` と
+  `settings.local.json`（Gemini の設定も）を上限なしで読んでいた。FIFO で止まったままになることを確認
+  した。`/dev/zero` へのリンクなら git で配れる。`deps`、`map --changed`、`test-changed` の
+  `package.json`、`format` の `pyproject.toml` も同じで、リンクの先の外のファイルも読んでいた。
+- **直し方**: `src/core/bounded_read.rs` に読み方をまとめた。開くときに待たず、通常のファイルで
+  1 MiB 以下だけを読む。フックの設定はリンクをたどる（設定をリンクで置くのは普通の使い方）。
+  リポジトリのファイルはリンクをたどらない。`read_repo_text` もこれを使う。
+- **未対応**: 1 MiB を超えるフックの設定は、壊れた設定と同じく読み飛ばす（その中の deny も効かない）。
+  `bdo read` や `bdo json` など、人がファイルを指定するコマンドは対象外。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

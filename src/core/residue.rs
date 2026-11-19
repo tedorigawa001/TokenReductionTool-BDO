@@ -2,9 +2,8 @@
 //! strings (legacy names, broken install URLs). Used by `bdo review` (scoped to
 //! the change set) and `bdo stale` (whole tracked tree).
 
+use crate::core::bounded_read::{self, Links};
 use regex::Regex;
-use std::fs::{Metadata, OpenOptions};
-use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -14,11 +13,7 @@ use std::sync::OnceLock;
 /// …) — the marker itself is the signal, not its wrapper.
 pub const INLINE_IGNORE_MARKER: &str = "bdo-stale-ignore";
 
-/// Audits inspect small source/configuration files, not arbitrary data streams.
-/// Oversized files are skipped in full, never scanned as a truncated prefix.
-pub const MAX_SCAN_BYTES: u64 = 1024 * 1024;
-
-/// Read bounded UTF-8 from a regular, repository-local file. `root` is the
+/// Read bounded UTF-8 (see [`bounded_read`]) from a regular, repository-local file. `root` is the
 /// trusted repository root; every component beneath it must be link-free.
 pub fn read_repo_text(root: &Path, relative: &Path) -> Option<String> {
     if relative.is_absolute() {
@@ -27,48 +22,7 @@ pub fn read_repo_text(root: &Path, relative: &Path) -> Option<String> {
     let root = root.canonicalize().ok()?;
     let path = root.join(relative);
     crate::core::utils::ensure_project_path_safe(&root, &path).ok()?;
-    if !scannable_file(&std::fs::symlink_metadata(&path).ok()?) {
-        return None;
-    }
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // A last-component swap must neither follow a link nor block on FIFO
-        // open. The opened handle is checked again before any read.
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
-    }
-    let file = options.open(path).ok()?;
-    if !scannable_file(&file.metadata().ok()?) {
-        return None;
-    }
-    read_limited_text(file)
-}
-
-fn scannable_file(metadata: &Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return false; // FILE_ATTRIBUTE_REPARSE_POINT
-        }
-    }
-    metadata.is_file() && metadata.len() <= MAX_SCAN_BYTES
-}
-
-fn read_limited_text(input: impl Read) -> Option<String> {
-    let mut content = String::new();
-    input
-        .take(MAX_SCAN_BYTES + 1)
-        .read_to_string(&mut content)
-        .ok()?;
-    (content.len() as u64 <= MAX_SCAN_BYTES).then_some(content)
+    bounded_read::read_text(&path, Links::Refuse)
 }
 
 /// Load `.bdostaleignore` (gitignore-style globs) from the repo root, if present.
@@ -264,6 +218,7 @@ pub fn scan_doc_command_drift(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::bounded_read::MAX_TEXT_BYTES as MAX_SCAN_BYTES;
 
     #[test]
     fn test_repo_text_size_boundary_and_invalid_inputs() {
@@ -282,19 +237,6 @@ mod tests {
         assert!(read_repo_text(dir.path(), Path::new(".")).is_none());
         assert!(read_repo_text(dir.path(), Path::new("../file")).is_none());
         assert!(read_repo_text(dir.path(), &path).is_none());
-    }
-
-    #[test]
-    fn test_limited_read_enforces_cap_independent_of_metadata() {
-        // Represents a stream which has grown beyond its earlier size check.
-        let bytes = vec![b'x'; MAX_SCAN_BYTES as usize + 4096];
-        let mut input = std::io::Cursor::new(bytes);
-        assert!(read_limited_text(&mut input).is_none());
-        assert_eq!(input.position(), MAX_SCAN_BYTES + 1);
-        assert_eq!(
-            read_limited_text(&b"valid text\n"[..]).as_deref(),
-            Some("valid text\n")
-        );
     }
 
     #[test]

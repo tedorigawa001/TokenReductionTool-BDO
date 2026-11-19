@@ -81,9 +81,12 @@ fn directory_link(target: &Path, link: &Path) {
     std::os::unix::fs::symlink(target, link).unwrap();
     #[cfg(windows)]
     {
+        // Rebuild with `\` separators: `mklink` reads a `/` inside its link
+        // argument (as in `.pi/extensions`) as the start of a switch.
+        let link: PathBuf = link.components().collect();
         let output = Command::new("cmd.exe")
             .args(["/d", "/c", "mklink", "/J"])
-            .arg(link)
+            .arg(&link)
             .arg(target)
             .output()
             .unwrap();

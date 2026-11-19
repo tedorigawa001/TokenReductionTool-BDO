@@ -5,6 +5,48 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.9] (2026-11-19)
+
+Fixes for commands that ran, read or wrote files a repository controls, and for history
+and audit times off by the local time zone.
+
+### Security
+
+- **`bdo rspec`, `bdo rubocop` and `bdo rake` ran Bundler whenever a `Gemfile`
+  existed.** Bundler evaluates the `Gemfile` as Ruby code, so a repository could run
+  code from a command such as `rspec --version`. bdo now runs the command as given, and
+  keeps `bundle exec` only when you wrote it. To run in a bundle on purpose, use
+  `bundle exec bdo rspec …`.
+- **`gradle` and `mvn`, rewritten by the hook, ran the repository's `./gradlew` or
+  `./mvnw` instead.** The program you named is now the one that runs. Typing
+  `bdo gradlew` or `bdo mvn` yourself still uses the local wrapper when there is one.
+- **The hook read the project's Claude and Gemini settings with no limit.** A FIFO there
+  stalled every command, and a link to `/dev/zero` would fill memory. Settings files are
+  now read without waiting, only when they are regular files of at most 1 MiB. Linked
+  settings still apply. A settings file over 1 MiB is skipped like a malformed one, so
+  its deny rules do not apply either.
+- **`deps`, `map --changed`, `test-changed`, `format`, `stale` and `review` read
+  repository files through links, FIFOs and devices.** A link could copy a file from
+  outside the repository into their output. They now skip links, FIFOs and files over
+  1 MiB.
+- **`learn --write-rules` and project-level `init` and `init --uninstall` followed
+  links.** A link in `.claude/rules`, `.github`, `.pi` or similar could make them write
+  or delete files outside the project. They now refuse links and Windows junctions,
+  including in `--dry-run`. Global configuration may still be linked.
+- **rustix is updated to 1.1.6 for RUSTSEC-2026-0486.** bdo doesn't call the affected
+  functions.
+
+### Fixed
+
+- **`hook-audit --since N` counted entries by the wrong hours.** The hook wrote the
+  local time with no offset and compared it to UTC, so ahead of UTC older entries were
+  counted, and behind UTC recent ones were dropped. The hook now writes UTC. Entries from
+  0.50.8 and earlier are read as local time.
+- **The days since first use, sent with telemetry when it is enabled, were always 0.**
+- **`bdo npm add express` ran `npm run add express`.** 61 of npm's own commands and
+  aliases, such as `add` and `stage`, were taken as script names. All of npm 11.19.1's
+  commands and aliases now reach npm as given.
+
 ## [0.50.8] (2026-11-10)
 
 A security update for the bundled SQLite, and fixes for commands that ran a different

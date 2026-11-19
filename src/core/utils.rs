@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use regex::Regex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Where a bdo-managed path came from: bdo's own default location, or a
@@ -18,6 +18,63 @@ use std::process::Command;
 pub enum PathSource {
     Default,
     Override,
+}
+
+/// Reject repository-controlled links before a project-scoped filesystem write.
+/// The base is the caller's trusted project root; global configuration can keep
+/// its separate, intentional symlink behavior.
+pub(crate) fn ensure_project_path_safe(base: &Path, target: &Path) -> Result<()> {
+    let base = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(base)
+    };
+    let target = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        base.join(target)
+    };
+    let relative = target.strip_prefix(&base).with_context(|| {
+        format!(
+            "Refusing project write outside {}: {}",
+            base.display(),
+            target.display()
+        )
+    })?;
+
+    let mut current = base;
+    for component in relative.components() {
+        use std::path::Component;
+        match component {
+            Component::Normal(part) => current.push(part),
+            Component::CurDir => continue,
+            _ => anyhow::bail!("Refusing non-local project path: {}", target.display()),
+        }
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) => {
+                // Windows junctions are reparse points, but need not be
+                // reported as symbolic links by FileType::is_symlink().
+                #[cfg(windows)]
+                let is_link = {
+                    use std::os::windows::fs::MetadataExt;
+                    meta.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT
+                };
+                #[cfg(not(windows))]
+                let is_link = meta.file_type().is_symlink();
+                if is_link {
+                    anyhow::bail!(
+                        "Refusing project write through symlink or reparse point: {}",
+                        current.display()
+                    );
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err).with_context(|| format!("Failed to inspect {}", current.display()))
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Truncates a string to `max_len` characters, appending `...` if needed.

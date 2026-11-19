@@ -110,9 +110,8 @@ pub fn run(
             print!("{}", report);
 
             if write_rules && !rules.is_empty() {
-                let rules_path = ".claude/rules/cli-corrections.md";
-                write_rules_file(&rules, rules_path)?;
-                println!("\nWritten to: {}", rules_path);
+                write_rules_file(&rules, &std::env::current_dir()?)?;
+                println!("\nWritten to: {}", report::RULES_PATH);
             }
         }
     }

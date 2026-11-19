@@ -1,5 +1,6 @@
 //! Sets up Bushido hooks so AI coding agents automatically route commands through Bushido.
 
+use crate::core::utils::ensure_project_path_safe;
 use anyhow::{Context, Result};
 use std::ffi::OsString;
 use std::fs;
@@ -381,52 +382,6 @@ fn write_if_changed(path: &Path, content: &str, name: &str, ctx: InitContext) ->
         }
         Ok(true)
     }
-}
-
-/// Reject repository-controlled symlinks before a project-scoped write.
-/// Global user configuration deliberately retains its existing symlink behavior.
-fn ensure_project_path_safe(base: &Path, target: &Path) -> Result<()> {
-    let base = if base.is_absolute() {
-        base.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(base)
-    };
-    let target = if target.is_absolute() {
-        target.to_path_buf()
-    } else {
-        base.join(target)
-    };
-    let relative = target.strip_prefix(&base).with_context(|| {
-        format!(
-            "Refusing project write outside {}: {}",
-            base.display(),
-            target.display()
-        )
-    })?;
-
-    let mut current = base;
-    for component in relative.components() {
-        use std::path::Component;
-        match component {
-            Component::Normal(part) => current.push(part),
-            Component::CurDir => continue,
-            _ => anyhow::bail!("Refusing non-local project path: {}", target.display()),
-        }
-        match fs::symlink_metadata(&current) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                anyhow::bail!(
-                    "Refusing project write through symlink: {}",
-                    current.display()
-                )
-            }
-            Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(err).with_context(|| format!("Failed to inspect {}", current.display()))
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Resolve the final write target: if `path` is a symlink, follow it so

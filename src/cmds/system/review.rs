@@ -6,10 +6,13 @@
 //! Scoped to the change set (working tree, or `--against <ref>`), not the whole
 //! repo — keeping the output small, in the spirit of the rest of bdo.
 
-use crate::core::changes::{changed_files, in_git_repo, repo_root, rust_test_targets};
-use crate::core::residue::{artifact_reason, load_ignore, scan_stale};
+use crate::core::changes::{
+    changed_files_root_relative, in_git_repo, repo_root, rust_test_targets,
+};
+use crate::core::residue::{artifact_reason, load_ignore, read_repo_text, scan_stale};
 use crate::core::tracking;
 use anyhow::Result;
+use std::path::Path;
 
 pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
     let timer = tracking::TimedExecution::start();
@@ -18,7 +21,7 @@ pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
         anyhow::bail!("bdo review: not inside a git repository");
     }
 
-    let changes = changed_files(against, None)?;
+    let changes = changed_files_root_relative(against, None)?;
     let base_label = against.unwrap_or("uncommitted");
 
     let mut out = String::new();
@@ -44,12 +47,9 @@ pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
     // `.bdostaleignore` (rooted at the repo) suppresses residue flagging on files
     // that legitimately *document* residue (changelogs, rename ledgers). It scopes
     // ARTIFACTS + STALE MARKERS only — the CHANGED list above still shows them.
-    let ignore = repo_root().ok().map(|r| load_ignore(&r));
-    let is_ignored = |path: &str| {
-        ignore
-            .as_ref()
-            .is_some_and(|ig| ig.matched(path, false).is_ignore())
-    };
+    let root = repo_root()?;
+    let ignore = load_ignore(&root);
+    let is_ignored = |path: &str| ignore.matched(path, false).is_ignore();
 
     // ── Suspicious artifacts ─────────────────────────────────────
     let artifacts: Vec<(&str, &str)> = changes
@@ -58,19 +58,25 @@ pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
         .filter(|c| !is_ignored(&c.path))
         .filter_map(|c| artifact_reason(&c.path).map(|r| (c.path.as_str(), r)))
         .collect();
-    out.push_str(&section_header("⚠ ARTIFACTS", artifacts.len(), "likely should not be committed"));
+    out.push_str(&section_header(
+        "⚠ ARTIFACTS",
+        artifacts.len(),
+        "likely should not be committed",
+    ));
     for (path, reason) in &artifacts {
         out.push_str(&format!("  {}  [{}]\n", path, reason));
     }
 
     // ── Stale markers (scan changed, non-deleted text files) ─────
     let mut stale_hits: Vec<String> = Vec::new();
+    let mut skipped = 0usize;
     'scan: for c in &changes {
         if c.status == "D" || is_ignored(&c.path) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&c.path) else {
-            continue; // missing or binary
+        let Some(content) = read_repo_text(&root, Path::new(&c.path)) else {
+            skipped += 1;
+            continue; // linked, special, oversized, unreadable or non-UTF-8
         };
         for (lineno, label) in scan_stale(&content) {
             stale_hits.push(format!("  {}:{}  {}", c.path, lineno, label));
@@ -80,10 +86,17 @@ pub fn run(against: Option<&str>, verbose: u8) -> Result<()> {
             }
         }
     }
-    out.push_str(&section_header("⚠ STALE MARKERS", stale_hits.len(), "verify before commit"));
+    out.push_str(&section_header(
+        "⚠ STALE MARKERS",
+        stale_hits.len(),
+        "verify before commit",
+    ));
     for hit in &stale_hits {
         out.push_str(hit);
         out.push('\n');
+    }
+    if skipped > 0 {
+        out.push_str(&format!("  {skipped} file(s) skipped for content scanning (linked, non-regular, over 1 MiB, unreadable or non-UTF-8)\n"));
     }
 
     // ── Suggested tests ──────────────────────────────────────────

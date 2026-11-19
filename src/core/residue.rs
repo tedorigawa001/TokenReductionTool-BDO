@@ -3,6 +3,8 @@
 //! the change set) and `bdo stale` (whole tracked tree).
 
 use regex::Regex;
+use std::fs::{Metadata, OpenOptions};
+use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -12,13 +14,82 @@ use std::sync::OnceLock;
 /// …) — the marker itself is the signal, not its wrapper.
 pub const INLINE_IGNORE_MARKER: &str = "bdo-stale-ignore";
 
+/// Audits inspect small source/configuration files, not arbitrary data streams.
+/// Oversized files are skipped in full, never scanned as a truncated prefix.
+pub const MAX_SCAN_BYTES: u64 = 1024 * 1024;
+
+/// Read bounded UTF-8 from a regular, repository-local file. `root` is the
+/// trusted repository root; every component beneath it must be link-free.
+pub fn read_repo_text(root: &Path, relative: &Path) -> Option<String> {
+    if relative.is_absolute() {
+        return None;
+    }
+    let root = root.canonicalize().ok()?;
+    let path = root.join(relative);
+    crate::core::utils::ensure_project_path_safe(&root, &path).ok()?;
+    if !scannable_file(&std::fs::symlink_metadata(&path).ok()?) {
+        return None;
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A last-component swap must neither follow a link nor block on FIFO
+        // open. The opened handle is checked again before any read.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = options.open(path).ok()?;
+    if !scannable_file(&file.metadata().ok()?) {
+        return None;
+    }
+    read_limited_text(file)
+}
+
+fn scannable_file(metadata: &Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return false; // FILE_ATTRIBUTE_REPARSE_POINT
+        }
+    }
+    metadata.is_file() && metadata.len() <= MAX_SCAN_BYTES
+}
+
+fn read_limited_text(input: impl Read) -> Option<String> {
+    let mut content = String::new();
+    input
+        .take(MAX_SCAN_BYTES + 1)
+        .read_to_string(&mut content)
+        .ok()?;
+    (content.len() as u64 <= MAX_SCAN_BYTES).then_some(content)
+}
+
 /// Load `.bdostaleignore` (gitignore-style globs) from the repo root, if present.
 /// Files it matches are skipped by both `bdo stale` and `bdo review` — for files
 /// that legitimately *document* residue (a changelog, a rename ledger). Absent or
 /// unparseable → an empty matcher (nothing ignored).
 pub fn load_ignore(root: &Path) -> ignore::gitignore::Gitignore {
     let mut b = ignore::gitignore::GitignoreBuilder::new(root);
-    let _ = b.add(root.join(".bdostaleignore")); // Some(err) on read failure — ignore
+    let path = root.join(".bdostaleignore");
+    if let Some(content) = read_repo_text(root, Path::new(".bdostaleignore")) {
+        // Preserve GitignoreBuilder::add's BOM/CRLF handling and keep valid
+        // patterns even when another line is malformed, without reopening it.
+        for (index, line) in content.lines().enumerate() {
+            let line = if index == 0 {
+                line.trim_start_matches('\u{feff}')
+            } else {
+                line
+            };
+            let _ = b.add_line(Some(path.clone()), line);
+        }
+    }
     b.build()
         .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty())
 }
@@ -193,6 +264,65 @@ pub fn scan_doc_command_drift(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_repo_text_size_boundary_and_invalid_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        std::fs::write(&path, vec![b'a'; MAX_SCAN_BYTES as usize]).unwrap();
+        assert_eq!(
+            read_repo_text(dir.path(), Path::new("file")).unwrap().len(),
+            MAX_SCAN_BYTES as usize
+        );
+        std::fs::write(&path, vec![b'a'; MAX_SCAN_BYTES as usize + 1]).unwrap();
+        assert!(read_repo_text(dir.path(), Path::new("file")).is_none());
+        std::fs::write(&path, [0xff]).unwrap();
+        assert!(read_repo_text(dir.path(), Path::new("file")).is_none());
+        assert!(read_repo_text(dir.path(), Path::new("missing")).is_none());
+        assert!(read_repo_text(dir.path(), Path::new(".")).is_none());
+        assert!(read_repo_text(dir.path(), Path::new("../file")).is_none());
+        assert!(read_repo_text(dir.path(), &path).is_none());
+    }
+
+    #[test]
+    fn test_limited_read_enforces_cap_independent_of_metadata() {
+        // Represents a stream which has grown beyond its earlier size check.
+        let bytes = vec![b'x'; MAX_SCAN_BYTES as usize + 4096];
+        let mut input = std::io::Cursor::new(bytes);
+        assert!(read_limited_text(&mut input).is_none());
+        assert_eq!(input.position(), MAX_SCAN_BYTES + 1);
+        assert_eq!(
+            read_limited_text(&b"valid text\n"[..]).as_deref(),
+            Some("valid text\n")
+        );
+    }
+
+    #[test]
+    fn test_load_ignore_preserves_bom_crlf_anchoring_negation_and_valid_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".bdostaleignore"),
+            "\u{feff}/root.md\r\ndocs/*.md\r\n!docs/keep.md\r\n[\r\nother.md\r\n",
+        )
+        .unwrap();
+        let ignore = load_ignore(dir.path());
+        assert!(ignore.matched("root.md", false).is_ignore());
+        assert!(!ignore.matched("nested/root.md", false).is_ignore());
+        assert!(ignore.matched("docs/a.md", false).is_ignore());
+        assert!(!ignore.matched("docs/keep.md", false).is_ignore());
+        assert!(ignore.matched("other.md", false).is_ignore());
+    }
+
+    #[test]
+    fn test_load_ignore_discards_oversize_file_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut content = String::from("secret.md\n#");
+        content.push_str(&"x".repeat(MAX_SCAN_BYTES as usize));
+        std::fs::write(dir.path().join(".bdostaleignore"), content).unwrap();
+        assert!(!load_ignore(dir.path())
+            .matched("secret.md", false)
+            .is_ignore());
+    }
 
     #[test]
     fn test_artifact_reason_dir_segment_vs_substring() {

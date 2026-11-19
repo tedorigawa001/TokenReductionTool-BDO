@@ -92,7 +92,11 @@ fn learn_rejects_parent_directory_links_before_any_external_write() {
         let fixture = Fixture::new();
         let outside = fixture.home.join("outside");
         fs::create_dir(&outside).unwrap();
-        let link = fixture.project.join(component);
+        // Join each part, so Windows gets `\` separators: `mklink` reads a
+        // `/` inside its link argument as the start of a switch.
+        let link = component
+            .split('/')
+            .fold(fixture.project.clone(), |path, part| path.join(part));
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, &link).unwrap();

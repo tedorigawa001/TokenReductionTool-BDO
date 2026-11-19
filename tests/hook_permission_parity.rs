@@ -185,6 +185,10 @@ fn settings_come_from_the_project_directory_not_a_nested_claude_directory() {
     assert_eq!(decision(&answer), Some("allow"), "{answer}");
 }
 
+// Gemini's settings live in the home directory, which `dirs` takes from the OS
+// on Windows rather than from HOME or USERPROFILE, so the fixture's home is
+// not seen there (as in tests/hook_agents.rs).
+#[cfg(unix)]
 #[test]
 fn gemini_leaves_commands_that_need_confirmation_as_written() {
     let fixture = Fixture::new();

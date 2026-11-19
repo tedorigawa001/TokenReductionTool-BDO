@@ -1,10 +1,14 @@
 //! Formats and persists correction suggestions for the user.
 
+use crate::core::utils::ensure_project_path_safe;
 use crate::learn::detector::CorrectionRule;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
+
+pub const RULES_PATH: &str = ".claude/rules/cli-corrections.md";
 
 pub fn format_console_report(
     rules: &[CorrectionRule],
@@ -51,11 +55,15 @@ pub fn format_console_report(
     output
 }
 
-pub fn write_rules_file(rules: &[CorrectionRule], path: &str) -> Result<()> {
-    let path_obj = Path::new(path);
+pub fn write_rules_file(rules: &[CorrectionRule], project_root: &Path) -> Result<()> {
+    let root = project_root
+        .canonicalize()
+        .context("Failed to resolve project root")?;
+    let path = root.join(RULES_PATH);
+    ensure_project_path_safe(&root, &path)?;
 
     // Create parent directory if it doesn't exist
-    if let Some(parent) = path_obj.parent() {
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
 
@@ -65,8 +73,7 @@ pub fn write_rules_file(rules: &[CorrectionRule], path: &str) -> Result<()> {
 
     if rules.is_empty() {
         content.push_str("No CLI corrections detected yet.\n");
-        fs::write(path, content)?;
-        return Ok(());
+        return persist_rules_file(&root, &path, &content);
     }
 
     // Group by base command
@@ -105,7 +112,19 @@ pub fn write_rules_file(rules: &[CorrectionRule], path: &str) -> Result<()> {
         content.push('\n');
     }
 
-    fs::write(path, content)?;
+    persist_rules_file(&root, &path, &content)
+}
+
+fn persist_rules_file(root: &Path, path: &Path, content: &str) -> Result<()> {
+    ensure_project_path_safe(root, path)?;
+    let parent = path.parent().context("Missing rules directory")?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(content.as_bytes())?;
+    // Never canonicalize the destination or truncate its existing inode:
+    // replacement leaves hardlink referents unchanged too.
+    ensure_project_path_safe(root, path)?;
+    file.persist(path)
+        .with_context(|| format!("Failed to replace {}", path.display()))?;
     Ok(())
 }
 
@@ -172,15 +191,129 @@ mod tests {
         }];
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let path = temp_dir.path().join("cli-corrections.md");
-        let path_str = path.to_str().unwrap();
+        let path = temp_dir.path().join(RULES_PATH);
 
-        write_rules_file(&rules, path_str).unwrap();
+        write_rules_file(&rules, temp_dir.path()).unwrap();
 
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("# CLI Corrections"));
         assert!(content.contains("## Git commit"));
         assert!(content.contains("Use `git commit --amend` not `git commit --ammend`"));
         assert!(content.contains("(seen 3x)"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_rules_file_rejects_external_file_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.md");
+        fs::write(&victim, "outside sentinel").unwrap();
+        let target = project.path().join(RULES_PATH);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        symlink(&victim, &target).unwrap();
+
+        let result = write_rules_file(&[], project.path());
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "outside sentinel");
+        assert!(result.is_err(), "a repository symlink must be rejected");
+        assert!(fs::symlink_metadata(&target)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_rules_file_rejects_dangling_and_relative_file_links() {
+        use std::os::unix::fs::symlink;
+
+        for exists in [false, true] {
+            let project = tempfile::tempdir().unwrap();
+            let victim = project.path().join("victim.md");
+            if exists {
+                fs::write(&victim, "sentinel").unwrap();
+            }
+            let target = project.path().join(RULES_PATH);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            symlink("../../victim.md", &target).unwrap();
+
+            assert!(write_rules_file(&[], project.path()).is_err());
+            if exists {
+                assert_eq!(fs::read_to_string(&victim).unwrap(), "sentinel");
+            } else {
+                assert!(!victim.exists());
+            }
+            assert_eq!(
+                fs::read_link(&target).unwrap(),
+                Path::new("../../victim.md")
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_rules_file_rejects_parent_links_before_creating_directories() {
+        use std::os::unix::fs::symlink;
+
+        for linked_component in [".claude", ".claude/rules"] {
+            let project = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let link = project.path().join(linked_component);
+            fs::create_dir_all(link.parent().unwrap()).unwrap();
+            symlink(outside.path(), &link).unwrap();
+
+            assert!(write_rules_file(&[], project.path()).is_err());
+            assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+            assert!(fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+    }
+
+    #[test]
+    fn test_write_rules_file_updates_normal_file_and_empty_rules() {
+        let project = tempfile::tempdir().unwrap();
+        let target = project.path().join(RULES_PATH);
+        write_rules_file(&[], project.path()).unwrap();
+        let expected = "# CLI Corrections (auto-generated by bdo learn)\n\
+                        # Run `bdo learn --write-rules` to update\n\n\
+                        No CLI corrections detected yet.\n";
+        assert_eq!(fs::read_to_string(&target).unwrap(), expected);
+        fs::write(&target, "old rules".repeat(100)).unwrap();
+        write_rules_file(&[], project.path()).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), expected);
+        assert_eq!(fs::read_dir(target.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn test_write_rules_file_replaces_hardlink_without_modifying_other_name() {
+        let project = tempfile::tempdir().unwrap();
+        let victim = project.path().join("outside-name.md");
+        fs::write(&victim, "sentinel").unwrap();
+        let target = project.path().join(RULES_PATH);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::hard_link(&victim, &target).unwrap();
+
+        write_rules_file(&[], project.path()).unwrap();
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "sentinel");
+        assert!(fs::read_to_string(&target)
+            .unwrap()
+            .contains("# CLI Corrections"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_rules_file_accepts_an_aliased_project_root() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let alias = temp.path().join("alias");
+        symlink(&project, &alias).unwrap();
+        write_rules_file(&[], &alias).unwrap();
+        assert!(project.join(RULES_PATH).is_file());
     }
 }

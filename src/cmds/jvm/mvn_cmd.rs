@@ -8,7 +8,7 @@
 use crate::core::runner::{self, RunOptions};
 use crate::core::truncate::CAP_WARNINGS;
 use crate::core::utils::{resolved_command, strip_ansi};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
@@ -154,8 +154,7 @@ fn is_boilerplate(line: &str) -> bool {
 /// Note: the `[ERROR]   Class.test:25 …` failures-summary entries (3-space
 /// indent, no `<<<` marker) do NOT match.
 fn is_per_test_subline(line: &str) -> bool {
-    line.starts_with("[ERROR] ")
-        && (line.contains("<<< FAILURE!") || line.contains("<<< ERROR!"))
+    line.starts_with("[ERROR] ") && (line.contains("<<< FAILURE!") || line.contains("<<< ERROR!"))
 }
 
 // ── English-footer guard ────────────────────────────────────────────────────
@@ -812,8 +811,7 @@ pub fn filter_quiet(raw: &str) -> String {
         if CLOSE.is_match(line) {
             out.push_str(line);
             out.push('\n');
-            failure_trail =
-                line.contains("<<< FAILURE!") || line.contains("<<< ERROR!");
+            failure_trail = line.contains("<<< FAILURE!") || line.contains("<<< ERROR!");
             continue;
         }
 
@@ -885,35 +883,37 @@ fn mvn_binary() -> &'static str {
     }
 }
 
-fn new_mvn_command(args: &[String]) -> Command {
-    let mut cmd = if cfg!(windows) {
-        if Path::new(".\\mvnw.cmd").exists() {
-            Command::new(".\\mvnw.cmd")
-        } else {
-            resolved_command("mvn")
-        }
-    } else if Path::new("./mvnw").exists() {
-        Command::new("./mvnw")
-    } else {
-        resolved_command("mvn")
-    };
+/// Preserve both the executable and whether it was selected through PATH.
+pub const EXECUTABLES: &[&str] = &["mvn", "mvnw", "mvnw.cmd", "./mvnw", "./mvnw.cmd"];
+
+fn new_mvn_command(tool: &str, args: &[String]) -> Command {
+    let mut cmd = resolved_command(tool);
     cmd.args(args);
     cmd
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
-pub fn run(args: &[String], verbose: u8) -> Result<i32> {
+pub fn run(args: &[String], verbose: u8, executable: Option<&str>) -> Result<i32> {
+    // Only the manual convenience can discover a wrapper. Automatic rewrites
+    // always supply their original executable, even for passthrough modes.
+    let tool = match executable {
+        Some(name) => EXECUTABLES
+            .iter()
+            .copied()
+            .find(|candidate| *candidate == name)
+            .context("Unsupported Maven executable")?,
+        None => mvn_binary(),
+    };
     // Verbose flags bypass filtering — user wants full output.
     if args
         .iter()
         .any(|a| matches!(a.as_str(), "-X" | "--debug" | "-e" | "--errors"))
     {
         let osargs: Vec<OsString> = args.iter().map(OsString::from).collect();
-        return runner::run_passthrough(mvn_binary(), &osargs, verbose);
+        return runner::run_passthrough(tool, &osargs, verbose);
     }
 
-    let tool = mvn_binary();
     let args_display = args.join(" ");
 
     // Quiet mode: standard footer guard can't fire (no `BUILD SUCCESS` line
@@ -926,7 +926,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
             return runner::run_passthrough(tool, &osargs, verbose);
         }
         return runner::run_filtered(
-            new_mvn_command(args),
+            new_mvn_command(tool, args),
             tool,
             &args_display,
             filter_quiet,
@@ -938,21 +938,21 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
 
     match phase {
         MvnPhase::Test => runner::run_filtered(
-            new_mvn_command(args),
+            new_mvn_command(tool, args),
             tool,
             &args_display,
             filter_surefire,
             RunOptions::with_tee("mvn_test"),
         ),
         MvnPhase::Compile => runner::run_filtered(
-            new_mvn_command(args),
+            new_mvn_command(tool, args),
             tool,
             &args_display,
             filter_compile,
             RunOptions::with_tee("mvn_compile"),
         ),
         MvnPhase::Package => runner::run_filtered(
-            new_mvn_command(args),
+            new_mvn_command(tool, args),
             tool,
             &args_display,
             filter_package,
@@ -1044,10 +1044,7 @@ mod tests {
     }
     #[test]
     fn phase_plugin_goal_passthrough() {
-        assert_eq!(
-            detect_phase(&s(["dependency:tree"])),
-            MvnPhase::Passthrough
-        );
+        assert_eq!(detect_phase(&s(["dependency:tree"])), MvnPhase::Passthrough);
     }
     #[test]
     fn phase_empty_passthrough() {
@@ -1110,11 +1107,7 @@ mod tests {
             "passing-test Running line dropped; got:\n{}",
             o
         );
-        assert!(
-            o.contains("BUILD SUCCESS"),
-            "footer preserved; got:\n{}",
-            o
-        );
+        assert!(o.contains("BUILD SUCCESS"), "footer preserved; got:\n{}", o);
         assert!(
             o.contains("Tests run: 977, Failures: 0"),
             "aggregate preserved; got:\n{}",
@@ -1160,11 +1153,7 @@ mod tests {
             "2.x ` - in ` close-line matched; passing block dropped; got:\n{}",
             o
         );
-        assert!(
-            o.contains("BUILD SUCCESS"),
-            "footer preserved; got:\n{}",
-            o
-        );
+        assert!(o.contains("BUILD SUCCESS"), "footer preserved; got:\n{}", o);
     }
 
     /// 3.x WARNING-prefixed close line (class with only skipped tests) must
@@ -1195,8 +1184,16 @@ mod tests {
                  \n\
                  [INFO] BUILD FAILURE\n";
         let o = filter_surefire(i);
-        assert!(o.contains("AssertionFailedError"), "exception preserved; got:\n{}", o);
-        assert!(o.contains("at x.Foo.bar"), "user frame preserved; got:\n{}", o);
+        assert!(
+            o.contains("AssertionFailedError"),
+            "exception preserved; got:\n{}",
+            o
+        );
+        assert!(
+            o.contains("at x.Foo.bar"),
+            "user frame preserved; got:\n{}",
+            o
+        );
         assert!(
             !o.contains("at org.junit."),
             "framework frame stripped in trail; got:\n{}",
@@ -1480,7 +1477,11 @@ mod tests {
     fn surefire_keeps_compile_continuation_on_test_phase() {
         let i = include_str!("../../../tests/fixtures/mvn_test_compile_fail_slice_raw.txt");
         let o = filter_surefire(i);
-        assert!(o.contains("cannot find symbol"), "ERROR line preserved; got:\n{}", o);
+        assert!(
+            o.contains("cannot find symbol"),
+            "ERROR line preserved; got:\n{}",
+            o
+        );
         assert!(
             o.contains("symbol:   variable bar"),
             "indented `symbol:` continuation preserved; got:\n{}",
@@ -1502,7 +1503,11 @@ mod tests {
     fn package_still_keeps_compile_error_continuation_after_refactor() {
         let i = include_str!("../../../tests/fixtures/mvn_compile_error_slice_raw.txt");
         let o = filter_package(i);
-        assert!(o.contains("cannot find symbol"), "ERROR line preserved; got:\n{}", o);
+        assert!(
+            o.contains("cannot find symbol"),
+            "ERROR line preserved; got:\n{}",
+            o
+        );
         assert!(
             o.contains("symbol:   variable bar"),
             "indented `symbol:` continuation preserved; got:\n{}",
@@ -1602,8 +1607,8 @@ mod tests {
 
     #[test]
     fn package_handles_crlf_line_endings() {
-        let i_lf = include_str!("../../../tests/fixtures/mvn_install_slice_raw.txt")
-            .replace("\r\n", "\n");
+        let i_lf =
+            include_str!("../../../tests/fixtures/mvn_install_slice_raw.txt").replace("\r\n", "\n");
         let o_lf = filter_package(&i_lf);
         let i_crlf = i_lf.replace('\n', "\r\n");
         let o_crlf = filter_package(&i_crlf);
@@ -1792,11 +1797,7 @@ mod tests {
             "second per-module SUCCESS row preserved; got:\n{}",
             o
         );
-        assert!(
-            o.contains("BUILD SUCCESS"),
-            "footer preserved; got:\n{}",
-            o
-        );
+        assert!(o.contains("BUILD SUCCESS"), "footer preserved; got:\n{}", o);
     }
 
     /// `mvn install` on a multi-module reactor build where one module fails
@@ -1833,7 +1834,11 @@ mod tests {
             "resume hint preserved (actionable signal); got:\n{}",
             o
         );
-        assert!(!o.contains("[Help 1]"), "help boilerplate stripped; got:\n{}", o);
+        assert!(
+            !o.contains("[Help 1]"),
+            "help boilerplate stripped; got:\n{}",
+            o
+        );
         assert!(
             !o.contains("Re-run Maven"),
             "re-run hint stripped; got:\n{}",
@@ -1930,7 +1935,9 @@ mod tests {
     #[test]
     #[ignore]
     fn print_savings_summary() {
-        let pf = gunzip(include_bytes!("../../../tests/fixtures/mvn_test_pass_full_raw.txt.gz"));
+        let pf = gunzip(include_bytes!(
+            "../../../tests/fixtures/mvn_test_pass_full_raw.txt.gz"
+        ));
         let pf_out = filter_surefire(&pf);
         let pf_in_tok = count_tokens(&pf);
         let pf_out_tok = count_tokens(&pf_out);
@@ -1940,7 +1947,9 @@ mod tests {
             pf_in_tok, pf_out_tok, pf_s
         );
 
-        let inst = gunzip(include_bytes!("../../../tests/fixtures/mvn_install_full_raw.txt.gz"));
+        let inst = gunzip(include_bytes!(
+            "../../../tests/fixtures/mvn_install_full_raw.txt.gz"
+        ));
         let inst_out = filter_package(&inst);
         let inst_in_tok = count_tokens(&inst);
         let inst_out_tok = count_tokens(&inst_out);
@@ -2107,6 +2116,3 @@ mod tests {
         );
     }
 }
-
-
-

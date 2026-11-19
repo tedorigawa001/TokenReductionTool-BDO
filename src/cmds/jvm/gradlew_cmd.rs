@@ -2,7 +2,7 @@ use crate::core::runner::{self, RunOptions};
 use crate::core::stream::StreamFilter;
 use crate::core::truncate::CAP_LIST;
 use crate::core::utils::resolved_command;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::ffi::OsString;
@@ -78,24 +78,18 @@ fn gradlew_binary() -> &'static str {
     }
 }
 
-/// Builds a Gradle `Command`.
-///
-/// Local wrappers (`./gradlew`, `gradlew.bat`) are passed as string literals so
-/// semgrep's `dynamic-command-execution` rule stays happy. The `gradle` system
-/// binary is resolved via `resolved_command("gradle")` for PATHEXT support on
-/// Windows (`.CMD`/`.BAT` shims) — matches how cargo, golangci-lint, etc. do it.
-fn new_gradle_command(args: &[String]) -> Command {
-    let mut cmd = if cfg!(windows) {
-        if std::path::Path::new(".\\gradlew.bat").exists() {
-            Command::new(".\\gradlew.bat")
-        } else {
-            resolved_command("gradle")
-        }
-    } else if std::path::Path::new("./gradlew").exists() {
-        Command::new("./gradlew")
-    } else {
-        resolved_command("gradle")
-    };
+/// Exact executable spellings carried by automatic rewrites. Bare wrapper
+/// names retain PATH lookup; explicit paths must not fall back to another tool.
+pub const EXECUTABLES: &[&str] = &[
+    "gradle",
+    "gradlew",
+    "gradlew.bat",
+    "./gradlew",
+    "./gradlew.bat",
+];
+
+fn new_gradle_command(tool: &str, args: &[String]) -> Command {
+    let mut cmd = resolved_command(tool);
     cmd.args(args);
     cmd
 }
@@ -117,19 +111,28 @@ impl StreamFilter for BuildLineFilter {
     }
 }
 
-pub fn run(args: &[String], verbose: u8) -> Result<i32> {
+pub fn run(args: &[String], verbose: u8, executable: Option<&str>) -> Result<i32> {
+    // Keep the manual `bdo gradlew` convenience, but every automatic rewrite
+    // supplies the original executable and must never use repository discovery.
+    let tool = match executable {
+        Some(name) => EXECUTABLES
+            .iter()
+            .copied()
+            .find(|candidate| *candidate == name)
+            .context("Unsupported Gradle executable")?,
+        None => gradlew_binary(),
+    };
     // Verbose flags bypass filtering — user wants full output
     if args
         .iter()
         .any(|a| a == "--stacktrace" || a == "--info" || a == "--debug" || a == "--full-stacktrace")
     {
         let osargs: Vec<OsString> = args.iter().map(OsString::from).collect();
-        return runner::run_passthrough(gradlew_binary(), &osargs, verbose);
+        return runner::run_passthrough(tool, &osargs, verbose);
     }
 
-    let cmd = new_gradle_command(args);
+    let cmd = new_gradle_command(tool, args);
     let args_display = args.join(" ");
-    let tool = gradlew_binary();
 
     match detect_task(args) {
         GradlewTask::Build => runner::run_streamed(
@@ -169,7 +172,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         ),
         GradlewTask::Other => {
             let osargs: Vec<OsString> = args.iter().map(OsString::from).collect();
-            runner::run_passthrough(gradlew_binary(), &osargs, verbose)
+            runner::run_passthrough(tool, &osargs, verbose)
         }
     }
 }
@@ -392,7 +395,8 @@ fn filter_lint(output: &str) -> String {
             continue;
         }
 
-        let is_android_lint = ANDROID_LINT_ERROR.is_match(line) || ANDROID_LINT_WARNING.is_match(line);
+        let is_android_lint =
+            ANDROID_LINT_ERROR.is_match(line) || ANDROID_LINT_WARNING.is_match(line);
 
         if BUILD_STATUS.is_match(line)
             || ACTIONABLE.is_match(line)
@@ -404,7 +408,11 @@ fn filter_lint(output: &str) -> String {
             result_lines.push(line);
             // Only Android lint violations have multi-line context;
             // ktlint/detekt/summary lines are single-line.
-            context_remaining = if is_android_lint { MAX_CONTEXT_LINES } else { 0 };
+            context_remaining = if is_android_lint {
+                MAX_CONTEXT_LINES
+            } else {
+                0
+            };
             continue;
         }
 
@@ -515,10 +523,7 @@ fn filter_dependencies(output: &str) -> String {
             result.push_str(&format!("  {}\n", dep));
         }
         if deps.len() > MAX_GRADLE_DEPS {
-            result.push_str(&format!(
-                "  ... +{} more\n",
-                deps.len() - MAX_GRADLE_DEPS
-            ));
+            result.push_str(&format!("  ... +{} more\n", deps.len() - MAX_GRADLE_DEPS));
         }
     }
 
@@ -1044,9 +1049,18 @@ BUILD SUCCESSFUL in 8s
             .filter(|l| filter_build_line(l))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(output.contains("BUILD SUCCESSFUL"), "should keep BUILD SUCCESSFUL");
-        assert!(output.contains("actionable tasks"), "should keep actionable tasks line");
-        assert!(!output.contains("> Task :"), "should strip task progress lines");
+        assert!(
+            output.contains("BUILD SUCCESSFUL"),
+            "should keep BUILD SUCCESSFUL"
+        );
+        assert!(
+            output.contains("actionable tasks"),
+            "should keep actionable tasks line"
+        );
+        assert!(
+            !output.contains("> Task :"),
+            "should strip task progress lines"
+        );
     }
 
     #[test]
@@ -1060,16 +1074,28 @@ BUILD SUCCESSFUL in 8s
         assert!(output.contains("BUILD FAILED"), "should keep BUILD FAILED");
         assert!(output.contains("FAILURE:"), "should keep failure header");
         assert!(output.contains("e: "), "should keep error lines");
-        assert!(!output.contains("> Task :"), "should strip task progress lines");
+        assert!(
+            !output.contains("> Task :"),
+            "should strip task progress lines"
+        );
     }
 
     #[test]
     fn test_test_success_output_format() {
         let input = include_str!("../../../tests/fixtures/gradlew_test_raw.txt");
         let output = filter_test(input);
-        assert!(output.contains("tests completed"), "should keep test summary");
-        assert!(output.contains("BUILD SUCCESSFUL"), "should keep BUILD SUCCESSFUL");
-        assert!(!output.contains("PASSED"), "should strip passing test lines");
+        assert!(
+            output.contains("tests completed"),
+            "should keep test summary"
+        );
+        assert!(
+            output.contains("BUILD SUCCESSFUL"),
+            "should keep BUILD SUCCESSFUL"
+        );
+        assert!(
+            !output.contains("PASSED"),
+            "should strip passing test lines"
+        );
     }
 
     #[test]
@@ -1077,18 +1103,33 @@ BUILD SUCCESSFUL in 8s
         let input = include_str!("../../../tests/fixtures/gradlew_test_failed_raw.txt");
         let output = filter_test(input);
         assert!(output.contains("FAILED"), "should keep failed test names");
-        assert!(output.contains("tests completed"), "should keep test summary");
+        assert!(
+            output.contains("tests completed"),
+            "should keep test summary"
+        );
         assert!(output.contains("BUILD FAILED"), "should keep BUILD FAILED");
-        assert!(!output.contains("PASSED"), "should strip passing test lines");
-        assert!(!output.contains("at org.junit."), "should strip framework frames");
+        assert!(
+            !output.contains("PASSED"),
+            "should strip passing test lines"
+        );
+        assert!(
+            !output.contains("at org.junit."),
+            "should strip framework frames"
+        );
     }
 
     #[test]
     fn test_connected_output_format() {
         let input = include_str!("../../../tests/fixtures/gradlew_connected_raw.txt");
         let output = filter_connected(input);
-        assert!(output.contains("BUILD SUCCESSFUL"), "should keep BUILD SUCCESSFUL");
-        assert!(!output.contains("INSTRUMENTATION_STATUS"), "should strip instrumentation noise");
+        assert!(
+            output.contains("BUILD SUCCESSFUL"),
+            "should keep BUILD SUCCESSFUL"
+        );
+        assert!(
+            !output.contains("INSTRUMENTATION_STATUS"),
+            "should strip instrumentation noise"
+        );
     }
 
     #[test]
@@ -1096,9 +1137,15 @@ BUILD SUCCESSFUL in 8s
         let input = include_str!("../../../tests/fixtures/gradlew_lint_raw.txt");
         let output = filter_lint(input);
         assert!(output.contains("Error:"), "should keep error violations");
-        assert!(output.contains("Warning:"), "should keep warning violations");
+        assert!(
+            output.contains("Warning:"),
+            "should keep warning violations"
+        );
         assert!(output.contains("BUILD FAILED"), "should keep BUILD FAILED");
-        assert!(!output.contains("Wrote HTML report"), "should strip report paths");
+        assert!(
+            !output.contains("Wrote HTML report"),
+            "should strip report paths"
+        );
     }
 
     #[test]
@@ -1136,10 +1183,19 @@ BUILD SUCCESSFUL in 4s"#;
         let filtered: Vec<&str> = input.lines().filter(|l| filter_build_line(l)).collect();
         let output = filtered.join("\n");
         assert!(output.contains("w: "), "kotlinc warnings must be kept");
-        assert!(output.contains("warning: [options]"), "javac warnings must be kept");
-        assert!(output.contains("Warning: Gradle"), "Gradle warnings must be kept");
+        assert!(
+            output.contains("warning: [options]"),
+            "javac warnings must be kept"
+        );
+        assert!(
+            output.contains("Warning: Gradle"),
+            "Gradle warnings must be kept"
+        );
         assert!(output.contains("BUILD SUCCESSFUL"), "status must be kept");
-        assert!(!output.contains("> Task :"), "task progress must be stripped");
+        assert!(
+            !output.contains("> Task :"),
+            "task progress must be stripped"
+        );
     }
 
     // ── CHECK (BUILD FILTER ON MIXED OUTPUT) ────────────────────────────────

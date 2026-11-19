@@ -2,12 +2,12 @@
 //!
 //! Parses the standard Minitest output format produced by both `rake test` and
 //! `rails test`, filtering down to failures/errors and the summary line.
-//! Uses `ruby_exec("rake")` to auto-detect `bundle exec`.
+//! Keeps explicit Bundler and Rake/Rails selection from hook rewrites.
 
 use crate::core::runner;
 use crate::core::truncate::CAP_WARNINGS;
 use crate::core::utils::{ruby_exec, strip_ansi};
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 const MAX_RAKE_FAILURES: usize = CAP_WARNINGS;
 
@@ -49,8 +49,28 @@ fn looks_like_test_path(arg: &str) -> bool {
         || path.contains("_spec.rb")
 }
 
-pub fn run(args: &[String], verbose: u8) -> Result<i32> {
-    let (tool, effective_args) = select_runner(args);
+pub const EXECUTABLES: &[&str] = &[
+    "rake",
+    "rails",
+    "bin/rails",
+    "bundle-exec-rake",
+    "bundle-exec-rails",
+];
+
+pub fn run(args: &[String], verbose: u8, executable: Option<&str>) -> Result<i32> {
+    let (tool, effective_args) = match executable {
+        Some(name) => (
+            EXECUTABLES
+                .iter()
+                .copied()
+                .find(|candidate| *candidate == name)
+                .context("Unsupported Rake/Rails invocation")?,
+            args.to_vec(),
+        ),
+        // Retain the manual `bdo rake test <file>` convenience. Automatic
+        // rewrites must keep the original Rake/Rails choice instead.
+        None => select_runner(args),
+    };
     let mut cmd = ruby_exec(tool);
     for arg in &effective_args {
         cmd.arg(arg);

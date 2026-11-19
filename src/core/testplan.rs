@@ -18,6 +18,7 @@
 //! live. `display` strings are for human-readable logging only and are never
 //! parsed or executed.
 
+use crate::core::bounded_read::{read_text, Links};
 use crate::core::changes::{rust_test_targets, Change};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -227,7 +228,7 @@ enum JsRunner {
 /// and vitest is not; vitest otherwise (the modern default, also used when
 /// `package.json` is missing or names neither).
 fn js_runner(root: &Path) -> JsRunner {
-    let pkg = std::fs::read_to_string(root.join("package.json")).unwrap_or_default();
+    let pkg = read_text(&root.join("package.json"), Links::Refuse).unwrap_or_default();
     let names = |name: &str| pkg.contains(&format!("\"{name}\""));
     if names("jest") && !names("vitest") {
         JsRunner::Jest
@@ -239,6 +240,54 @@ fn js_runner(root: &Path) -> JsRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `f` must return within 5 seconds: a FIFO would block a plain read.
+    #[cfg(unix)]
+    fn within_5s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("blocked on a repository file")
+    }
+
+    #[cfg(unix)]
+    fn mkfifo(path: &std::path::Path) {
+        let status = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_js_runner_ignores_package_json_fifos_and_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        mkfifo(&root.join("package.json"));
+        let fifo_root = root.clone();
+        assert!(matches!(
+            within_5s(move || js_runner(&fifo_root)),
+            JsRunner::Vitest
+        ));
+
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("package.json");
+        std::fs::write(&target, r#"{"devDependencies":{"jest":"1"}}"#).unwrap();
+        std::fs::remove_file(root.join("package.json")).unwrap();
+        std::os::unix::fs::symlink(&target, root.join("package.json")).unwrap();
+        assert!(matches!(js_runner(&root), JsRunner::Vitest));
+
+        std::fs::remove_file(root.join("package.json")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"devDependencies":{"jest":"1"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(js_runner(&root), JsRunner::Jest));
+    }
 
     fn ch(status: &str, path: &str) -> Change {
         Change {

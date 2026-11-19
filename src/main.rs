@@ -749,6 +749,9 @@ enum Commands {
 
     /// Rake/Rails test with compact Minitest output (Ruby)
     Rake {
+        /// Original Ruby invocation selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(rake_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// Rake arguments (e.g., test, test TEST=path/to/test.rb)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -756,6 +759,9 @@ enum Commands {
 
     /// RuboCop linter with compact output (Ruby)
     Rubocop {
+        /// Original Ruby invocation selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(rubocop_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// RuboCop arguments (e.g., --auto-correct, -A)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -763,6 +769,9 @@ enum Commands {
 
     /// RSpec test runner with compact output (Rails/Ruby)
     Rspec {
+        /// Original Ruby invocation selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(rspec_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// RSpec arguments (e.g., spec/models, --tag focus)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -798,6 +807,9 @@ enum Commands {
     /// Android Gradle wrapper with compact output (build, test, lint)
     #[command(name = "gradlew")]
     Gradlew {
+        /// Original executable selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(gradlew_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// Gradle tasks and arguments (e.g., assembleDebug, testDebugUnitTest, lint, --info)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -806,6 +818,9 @@ enum Commands {
     /// Apache Maven wrapper with compact output (test, integration-test, compile, package, install, verify, deploy)
     #[command(name = "mvn")]
     Mvn {
+        /// Original executable selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(mvn_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// Maven goals and arguments (e.g., clean install, -DskipTests test, -X)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -1232,6 +1247,45 @@ const BDO_META_COMMANDS: &[&str] = &[
     "rewrite",
 ];
 
+/// A rewritten JVM/Ruby invocation carries a leading invocation selector. Resolve
+/// it before native raw routing so private options never reach the real tool.
+/// Keep raw operands as OsString, including non-UTF-8 arguments on Unix.
+fn rewritten_tool_route(rest: &[OsString]) -> Option<core::raw::Route> {
+    let choices = match rest.first()?.to_str()? {
+        "gradlew" => gradlew_cmd::EXECUTABLES,
+        "mvn" => mvn_cmd::EXECUTABLES,
+        "rake" => rake_cmd::EXECUTABLES,
+        "rspec" => rspec_cmd::EXECUTABLES,
+        "rubocop" => rubocop_cmd::EXECUTABLES,
+        _ => return None,
+    };
+    let flag = rest.get(1)?.to_str()?;
+    let (name, start) = if flag == "--bdo-executable" {
+        (rest.get(2).and_then(|s| s.to_str()).unwrap_or(""), 3)
+    } else {
+        (flag.strip_prefix("--bdo-executable=")?, 2)
+    };
+    let Some(invocation) = choices.iter().copied().find(|candidate| *candidate == name) else {
+        // Let clap reject an invalid selector, never reinterpret it as a
+        // native tool invocation or fall back to repository discovery.
+        return Some(core::raw::Route::Normal);
+    };
+    let mut args = &rest[start..];
+    if args.first().is_some_and(|arg| arg == "--") {
+        args = &args[1..];
+    }
+    let (program, mut prefix) = if let Some(tool) = invocation.strip_prefix("bundle-exec-") {
+        ("bundle", vec![OsString::from("exec"), OsString::from(tool)])
+    } else {
+        (invocation, Vec::new())
+    };
+    prefix.extend_from_slice(args);
+    Some(core::raw::Route::Native {
+        program: program.into(),
+        args: prefix,
+    })
+}
+
 /// Raw mode (`--raw` / `BDO_RAW=1`), routed before clap. Returns the exit
 /// code when the command was exec'd natively; `None` means continue with the
 /// normal parse, with raw mode left active for the command to honor.
@@ -1247,8 +1301,10 @@ fn run_raw_if_requested() -> Result<Option<i32>> {
     core::raw::activate();
 
     let rest = &argv[globals.rest_start..];
-    let route = core::raw::route(rest, BDO_META_COMMANDS, |program| {
-        which::which(program).is_ok()
+    let route = rewritten_tool_route(rest).unwrap_or_else(|| {
+        core::raw::route(rest, BDO_META_COMMANDS, |program| {
+            which::which(program).is_ok()
+        })
     });
     match route {
         core::raw::Route::Native { program, args } => {
@@ -1299,6 +1355,13 @@ fn run_fallback(parse_error: clap::Error) -> Result<i32> {
     // Bushido meta-commands should never fall back to raw execution.
     // e.g. `rtk gain --badtypo` should show Clap's error, not try to run `gain` from $PATH.
     if BDO_META_COMMANDS.contains(&args[0].as_str()) {
+        parse_error.exit();
+    }
+
+    // An invalid private invocation selector must fail closed, not run a native
+    // program with bdo's private arguments after a clap error.
+    let args_os: Vec<_> = args.iter().map(OsString::from).collect();
+    if rewritten_tool_route(&args_os).is_some() {
         parse_error.exit();
     }
 
@@ -2463,11 +2526,20 @@ fn run_cli() -> Result<i32> {
 
         Commands::Mypy { args } => mypy_cmd::run(&args, cli.verbose)?,
 
-        Commands::Rake { args } => rake_cmd::run(&args, cli.verbose)?,
+        Commands::Rake {
+            args,
+            bdo_executable,
+        } => rake_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
-        Commands::Rubocop { args } => rubocop_cmd::run(&args, cli.verbose)?,
+        Commands::Rubocop {
+            args,
+            bdo_executable,
+        } => rubocop_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
-        Commands::Rspec { args } => rspec_cmd::run(&args, cli.verbose)?,
+        Commands::Rspec {
+            args,
+            bdo_executable,
+        } => rspec_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
         Commands::Pip { args } => pip_cmd::run(&args, cli.verbose)?,
 
@@ -2490,9 +2562,15 @@ fn run_cli() -> Result<i32> {
 
         Commands::GolangciLint { args } => golangci_cmd::run(&args, cli.verbose)?,
 
-        Commands::Gradlew { args } => gradlew_cmd::run(&args, cli.verbose)?,
+        Commands::Gradlew {
+            args,
+            bdo_executable,
+        } => gradlew_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
-        Commands::Mvn { args } => mvn_cmd::run(&args, cli.verbose)?,
+        Commands::Mvn {
+            args,
+            bdo_executable,
+        } => mvn_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
         Commands::HookAudit { since } => {
             hooks::hook_audit_cmd::run(since, cli.verbose)?;
@@ -2849,6 +2927,85 @@ mod tests {
     use clap::Parser;
     use std::cell::Cell;
 
+    #[cfg(unix)]
+    #[test]
+    fn test_jvm_raw_selector_preserves_non_utf8_operands() {
+        use std::os::unix::ffi::OsStringExt;
+        let operand = OsString::from_vec(vec![b'x', 0xff]);
+        for (subcommand, program) in [("gradlew", "./gradlew"), ("mvn", "./mvnw")] {
+            let args = vec![
+                subcommand.into(),
+                "--bdo-executable".into(),
+                program.into(),
+                "--".into(),
+                operand.clone(),
+            ];
+            assert_eq!(
+                rewritten_tool_route(&args),
+                Some(core::raw::Route::Native {
+                    program: program.into(),
+                    args: vec![operand.clone()]
+                })
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_ruby_raw_selector_preserves_bundle_context_and_non_utf8_operands() {
+        use std::os::unix::ffi::OsStringExt;
+        let operand = OsString::from_vec(vec![b'x', 0xff]);
+        for tool in ["rubocop", "rspec", "rake"] {
+            let args = vec![
+                tool.into(),
+                format!("--bdo-executable=bundle-exec-{tool}").into(),
+                "--".into(),
+                operand.clone(),
+            ];
+            assert_eq!(
+                rewritten_tool_route(&args),
+                Some(core::raw::Route::Native {
+                    program: "bundle".into(),
+                    args: vec!["exec".into(), tool.into(), operand.clone()]
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn test_jvm_raw_selector_validates_both_option_forms() {
+        for (subcommand, program) in [("gradlew", "gradle"), ("mvn", "mvn")] {
+            let args: Vec<OsString> = [
+                subcommand.to_string(),
+                format!("--bdo-executable={program}"),
+                "--".into(),
+                "--".into(),
+                "--bdo-executable".into(),
+                "sh".into(),
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+            assert_eq!(
+                rewritten_tool_route(&args),
+                Some(core::raw::Route::Native {
+                    program: program.into(),
+                    args: vec!["--".into(), "--bdo-executable".into(), "sh".into()]
+                })
+            );
+            for tail in [
+                vec!["--bdo-executable"],
+                vec!["--bdo-executable", "sh"],
+                vec!["--bdo-executable=sh"],
+            ] {
+                let args: Vec<_> = std::iter::once(subcommand)
+                    .chain(tail)
+                    .map(OsString::from)
+                    .collect();
+                assert_eq!(rewritten_tool_route(&args), Some(core::raw::Route::Normal));
+            }
+        }
+    }
     fn sv(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
     }

@@ -4,7 +4,9 @@
 //! entire repo. Exits non-zero when anything is found, so it can gate CI.
 
 use crate::core::changes;
-use crate::core::residue::{artifact_reason, load_ignore, scan_doc_command_drift, scan_stale};
+use crate::core::residue::{
+    artifact_reason, load_ignore, read_repo_text, scan_doc_command_drift, scan_stale,
+};
 use crate::core::tracking;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -52,9 +54,11 @@ pub fn run(path: Option<&Path>, verbose: u8, valid_commands: &[String]) -> Resul
     // `bdo --help` doesn't recognize (renamed/removed since the doc was written).
     let mut drift_display: Vec<String> = Vec::new();
     let mut drift_count = 0usize;
+    let mut skipped = 0usize;
     for f in &files {
-        let Ok(content) = std::fs::read_to_string(root.join(f)) else {
-            continue; // missing or binary
+        let Some(content) = read_repo_text(&root, Path::new(f)) else {
+            skipped += 1;
+            continue; // linked, special, oversized, unreadable or non-UTF-8
         };
         for (lineno, label) in scan_stale(&content) {
             stale_count += 1;
@@ -76,11 +80,17 @@ pub fn run(path: Option<&Path>, verbose: u8, valid_commands: &[String]) -> Resul
     }
 
     let mut out = String::new();
-    out.push_str(&format!("bdo stale — scanned {} tracked files", files.len()));
+    out.push_str(&format!(
+        "bdo stale — scanned {} tracked files",
+        files.len()
+    ));
     if ignored > 0 {
         out.push_str(&format!(" ({} ignored via .bdostaleignore)", ignored));
     }
     out.push('\n');
+    if skipped > 0 {
+        out.push_str(&format!("  {skipped} file(s) skipped for content scanning (linked, non-regular, over 1 MiB, unreadable or non-UTF-8)\n"));
+    }
 
     out.push_str(&section_header("⚠ TRACKED ARTIFACTS", artifacts.len()));
     for (path, reason) in &artifacts {
@@ -125,7 +135,11 @@ pub fn run(path: Option<&Path>, verbose: u8, valid_commands: &[String]) -> Resul
 
     print!("{}", out);
     if verbose > 0 {
-        eprintln!("scanned {} tracked files under {}", files.len(), root.display());
+        eprintln!(
+            "scanned {} tracked files under {}",
+            files.len(),
+            root.display()
+        );
     }
     timer.track("stale", "bdo stale", "", &out);
 
@@ -163,7 +177,8 @@ mod tests {
     fn test_stale_ignore_matching() {
         let mut b = ignore::gitignore::GitignoreBuilder::new(".");
         b.add_line(None, "CHANGELOG.md").unwrap();
-        b.add_line(None, "docs/bushido/MAINTENANCE_PLAN.md").unwrap();
+        b.add_line(None, "docs/bushido/MAINTENANCE_PLAN.md")
+            .unwrap();
         let gi = b.build().unwrap();
         assert!(gi.matched("CHANGELOG.md", false).is_ignore());
         assert!(gi

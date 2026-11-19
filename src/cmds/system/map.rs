@@ -14,6 +14,7 @@
 //! one command. Drill into a hit with `bdo map <file>` or
 //! `bdo read <file> -l outline`.
 
+use crate::core::bounded_read::{read_text, Links};
 use crate::core::changes;
 use crate::core::filter::Language;
 use crate::core::outline;
@@ -62,7 +63,7 @@ pub fn run(
             .unwrap_or(Language::Unknown);
 
         // Unsupported languages (data, shell, ruby, unknown) return None — skip.
-        let Some(content) = std::fs::read_to_string(file).ok() else {
+        let Some(content) = read_text(file, Links::Refuse) else {
             continue;
         };
         let Some(sigs) = outline::signatures(&content, &lang) else {

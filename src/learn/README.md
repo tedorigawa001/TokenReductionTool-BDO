@@ -6,6 +6,8 @@
 
 Analyzes Claude Code session history to detect recurring CLI mistakes — commands that fail then get corrected by the agent. Powers the `bdo learn` command, which identifies error patterns (unknown flags, wrong paths, missing args) and can auto-generate `.claude/rules/cli-corrections.md` to prevent them.
 
+Rules export is project-scoped: symlinks and Windows reparse points in the output path are rejected before creating directories or replacing the file. Regular files are updated by replacement, without modifying other hardlink names. The trusted project root itself may be reached through a filesystem alias.
+
 ## Key Types
 
 - **`ErrorType`** — `UnknownFlag`, `CommandNotFound`, `WrongSyntax`, `WrongPath`, `MissingArg`, `PermissionDenied`, `Other(String)`

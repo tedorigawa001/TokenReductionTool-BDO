@@ -1,10 +1,10 @@
 //! Summarizes project dependencies from lock files and manifests.
 
+use crate::core::bounded_read::{read_text, Links};
 use crate::core::redact::redact_secrets;
 use crate::core::tracking;
 use crate::core::truncate::{reduced, CAP_WARNINGS};
 use anyhow::{bail, Context, Result};
-use std::fs;
 use std::path::Path;
 
 const MAX_DEPS: usize = CAP_WARNINGS;
@@ -53,8 +53,8 @@ pub fn run(path: &Path, verbose: u8) -> Result<()> {
         found = true;
         out.push_str(&format!("{} ({}):\n", label, file));
         // One broken manifest must not hide what the others say.
-        let summary = fs::read_to_string(&manifest)
-            .context("could not read it")
+        let summary = read_text(&manifest, Links::Refuse)
+            .context("could not read it (a link, not a regular file, over 1 MiB, or not UTF-8)")
             .and_then(|content| {
                 raw.push_str(&content);
                 summarize(&content)

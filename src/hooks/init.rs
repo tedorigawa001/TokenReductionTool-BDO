@@ -1,5 +1,6 @@
 //! Sets up Bushido hooks so AI coding agents automatically route commands through Bushido.
 
+use crate::core::utils::ensure_project_path_safe;
 use anyhow::{Context, Result};
 use std::ffi::OsString;
 use std::fs;
@@ -381,52 +382,6 @@ fn write_if_changed(path: &Path, content: &str, name: &str, ctx: InitContext) ->
         }
         Ok(true)
     }
-}
-
-/// Reject repository-controlled symlinks before a project-scoped write.
-/// Global user configuration deliberately retains its existing symlink behavior.
-fn ensure_project_path_safe(base: &Path, target: &Path) -> Result<()> {
-    let base = if base.is_absolute() {
-        base.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(base)
-    };
-    let target = if target.is_absolute() {
-        target.to_path_buf()
-    } else {
-        base.join(target)
-    };
-    let relative = target.strip_prefix(&base).with_context(|| {
-        format!(
-            "Refusing project write outside {}: {}",
-            base.display(),
-            target.display()
-        )
-    })?;
-
-    let mut current = base;
-    for component in relative.components() {
-        use std::path::Component;
-        match component {
-            Component::Normal(part) => current.push(part),
-            Component::CurDir => continue,
-            _ => anyhow::bail!("Refusing non-local project path: {}", target.display()),
-        }
-        match fs::symlink_metadata(&current) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                anyhow::bail!(
-                    "Refusing project write through symlink: {}",
-                    current.display()
-                )
-            }
-            Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(err).with_context(|| format!("Failed to inspect {}", current.display()))
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Resolve the final write target: if `path` is a symlink, follow it so
@@ -1658,20 +1613,23 @@ fn remove_dir_if_empty(dir: Option<&Path>) {
 
 /// Agents whose rules live in the current project, and which `-g` does not change.
 pub fn uninstall_project_rules(agent: &str, ctx: InitContext) -> Result<()> {
-    let removed = match agent {
-        "cline" => remove_appended_rules(Path::new(".clinerules"), CLINE_RULES, ctx)?,
-        "windsurf" => remove_appended_rules(Path::new(".windsurfrules"), WINDSURF_RULES, ctx)?,
-        "kilocode" => remove_named_rules(
-            Path::new(".kilocode/rules/bdo-rules.md"),
-            KILOCODE_RULES,
-            ctx,
-        )?,
-        "antigravity" => remove_named_rules(
-            Path::new(".agents/rules/antigravity-bdo-rules.md"),
+    let (path, rules, named) = match agent {
+        "cline" => (".clinerules", CLINE_RULES, false),
+        "windsurf" => (".windsurfrules", WINDSURF_RULES, false),
+        "kilocode" => (".kilocode/rules/bdo-rules.md", KILOCODE_RULES, true),
+        "antigravity" => (
+            ".agents/rules/antigravity-bdo-rules.md",
             ANTIGRAVITY_RULES,
-            ctx,
-        )?,
+            true,
+        ),
         other => anyhow::bail!("No project rules to remove for {other}"),
+    };
+    let path = Path::new(path);
+    ensure_project_path_safe(Path::new("."), path)?;
+    let removed = if named {
+        remove_named_rules(path, rules, ctx)?
+    } else {
+        remove_appended_rules(path, rules, ctx)?
     };
     match (removed, ctx.dry_run) {
         (true, false) => println!("Bushido uninstalled ({agent}): rules removed from this project"),
@@ -2922,6 +2880,9 @@ fn ensure_pi_extensions_dir(parent: &Path, name: &str, ctx: InitContext) -> Resu
 fn uninstall_pi(global: bool, ctx: InitContext) -> Result<()> {
     let InitContext { verbose, dry_run } = ctx;
     let plugin_path = pi_plugin_path_for_scope(global)?;
+    if !global {
+        ensure_project_path_safe(Path::new("."), &plugin_path)?;
+    }
     let mut removed: Vec<String> = Vec::new();
 
     if plugin_path.exists() {
@@ -2974,6 +2935,7 @@ pub fn run_pi_mode(global: bool, ctx: InitContext) -> Result<()> {
         path
     } else {
         let path = pi_plugin_path_for_scope(false)?;
+        ensure_project_path_safe(Path::new("."), &path)?;
         if let Some(parent) = path.parent() {
             ensure_pi_extensions_dir(parent, "local Pi extensions directory", ctx)?;
         }
@@ -4153,6 +4115,10 @@ fn uninstall_copilot_at(base: &Path, ctx: InitContext) -> Result<Vec<String>> {
     let mut removed = Vec::new();
 
     let hook_path = github_dir.join(HOOKS_SUBDIR).join(COPILOT_HOOK_FILE);
+    let instructions_path = github_dir.join(COPILOT_INSTRUCTIONS_FILE);
+    // Preflight every project path before deleting even the first artifact.
+    ensure_project_path_safe(base, &hook_path)?;
+    ensure_project_path_safe(base, &instructions_path)?;
     if hook_path.exists() {
         if dry_run {
             println!(
@@ -4168,7 +4134,6 @@ fn uninstall_copilot_at(base: &Path, ctx: InitContext) -> Result<Vec<String>> {
         removed.push(format!("Hook config: {}", hook_path.display()));
     }
 
-    let instructions_path = github_dir.join(COPILOT_INSTRUCTIONS_FILE);
     if remove_block_from_file(&instructions_path, ctx)? {
         removed.push(format!(
             "{}: removed bdo-instructions block",

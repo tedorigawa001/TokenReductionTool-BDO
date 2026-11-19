@@ -47,6 +47,23 @@ fn git_stdout(args: &[&str]) -> Result<String> {
 /// runs with `--untracked-files=all` so untracked directories are expanded into
 /// their individual files rather than collapsed to `dir/`.
 pub fn changed_files(against: Option<&str>, pathspec: Option<&Path>) -> Result<Vec<Change>> {
+    changed_files_impl(against, pathspec, false)
+}
+
+/// Root-relative names for consumers that open files anchored at repo_root.
+/// Keep the legacy collection contract for callers with cwd-based resolution.
+pub fn changed_files_root_relative(
+    against: Option<&str>,
+    pathspec: Option<&Path>,
+) -> Result<Vec<Change>> {
+    changed_files_impl(against, pathspec, true)
+}
+
+fn changed_files_impl(
+    against: Option<&str>,
+    pathspec: Option<&Path>,
+    root_relative: bool,
+) -> Result<Vec<Change>> {
     let spec = pathspec.and_then(|p| p.to_str());
     // Append `-- <pathspec>` so git filters by path itself.
     fn push_spec<'a>(args: &mut Vec<&'a str>, spec: Option<&'a str>) {
@@ -59,12 +76,18 @@ pub fn changed_files(against: Option<&str>, pathspec: Option<&Path>) -> Result<V
     match against {
         Some(base) => {
             let mut diff_args = vec!["diff", "--name-status", "-z", base];
+            if root_relative {
+                diff_args.push("--no-relative");
+            }
             push_spec(&mut diff_args, spec);
             let mut changes = parse_name_status_z(&git_stdout(&diff_args)?);
 
             // `git diff` only sees tracked changes; add untracked files so new
             // files are still considered in --against mode.
             let mut ls_args = vec!["ls-files", "--others", "--exclude-standard", "-z"];
+            if root_relative {
+                ls_args.push("--full-name");
+            }
             push_spec(&mut ls_args, spec);
             let untracked = git_stdout(&ls_args)?;
             for path in untracked.split('\0').filter(|p| !p.is_empty()) {

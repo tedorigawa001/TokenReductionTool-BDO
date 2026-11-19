@@ -14,6 +14,8 @@ Boundary notes:
 - `rewrite_cmd.rs` is a thin CLI bridge — it exists to serve hooks (hooks call `bdo rewrite` as a subprocess) and delegates entirely to `discover/registry`.
 - `trust.rs` gates project-local TOML filter execution. It lives here because the trust workflow is tied to hook-installed filter discovery, not to the core filter engine.
 
+Project-scoped setup and removal reject repository-controlled symlinks and Windows reparse points before accessing their artifacts, including in dry-run mode. Copilot removal validates both artifact paths before deleting either one. Global configuration retains its intentional symlink support; Cline, Windsurf, Kilo Code and Antigravity rule removal remains project-scoped even with `-g`.
+
 ## Purpose
 LLM agent integration layer that installs, validates, and executes command-rewriting hooks for AI coding assistants. Hooks intercept raw CLI commands (e.g., `git status`) and rewrite them to Bushido equivalents (e.g., `bdo git status`) so that LLM agents automatically benefit from token savings without explicit user configuration.
 

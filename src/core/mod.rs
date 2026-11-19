@@ -1,6 +1,7 @@
 //! Building blocks shared across all Bushido modules.
 
 pub mod args_utils;
+pub mod bounded_read;
 pub mod changes;
 pub mod comments;
 pub mod config;

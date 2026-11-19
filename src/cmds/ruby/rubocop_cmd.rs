@@ -7,7 +7,7 @@
 
 use crate::core::runner;
 use crate::core::utils::ruby_exec;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 
 // ── JSON structures matching RuboCop's --format json output ─────────────────
@@ -50,8 +50,16 @@ struct RubocopSummary {
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
-pub fn run(args: &[String], verbose: u8) -> Result<i32> {
-    let mut cmd = ruby_exec("rubocop");
+pub const EXECUTABLES: &[&str] = &["rubocop", "bundle-exec-rubocop"];
+
+pub fn run(args: &[String], verbose: u8, executable: Option<&str>) -> Result<i32> {
+    let invocation = executable.unwrap_or("rubocop");
+    let invocation = EXECUTABLES
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == invocation)
+        .context("Unsupported RuboCop invocation")?;
+    let mut cmd = ruby_exec(invocation);
 
     let is_autocorrect = args
         .iter()

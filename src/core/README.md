@@ -104,7 +104,7 @@ Key functions available to all command modules:
 | `tool_exists(name)` | Check if a CLI tool is available |
 | `detect_package_manager()` | Detect pnpm/yarn/npm from lockfiles |
 | `package_manager_exec(tool)` | Build `Command` using detected package manager |
-| `ruby_exec(tool)` | Auto-detect `bundle exec` when `Gemfile` exists |
+| `ruby_exec(tool)` | Run an explicit Ruby invocation; never infer Bundler from a Gemfile |
 | `count_tokens(text)` | Estimate tokens: `ceil(chars / 4.0)` |
 
 ## Consumer Contracts

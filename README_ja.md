@@ -86,7 +86,7 @@ bdo gain        # トークン節約統計が表示されるはず
 bdo init --global
 
 # 2. Claude Code を再起動してテスト
-git status  # 自動的に bdo git status に書き換え
+git status  # 許可ルール（例: Bash(git status:*)）があれば bdo git status に書き換え
 ```
 
 ## 仕組み

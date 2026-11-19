@@ -250,16 +250,15 @@ pub fn fallback_tail(output: &str, label: &str, n: usize) -> String {
     lines[start..].join("\n")
 }
 
-/// Build a Command for Ruby tools, auto-detecting bundle exec.
-/// Uses `bundle exec <tool>` when a Gemfile exists (transitive deps like rake
-/// won't appear in the Gemfile but still need bundler for version isolation).
+/// Run an explicit Ruby invocation, validated by its caller. Bundler is selected
+/// only by a `bundle-exec-<tool>` selector, never by repository file discovery.
 pub fn ruby_exec(tool: &str) -> Command {
-    if std::path::Path::new("Gemfile").exists() {
-        let mut c = Command::new("bundle");
-        c.arg("exec").arg(tool);
-        return c;
+    if let Some(tool) = tool.strip_prefix("bundle-exec-") {
+        let mut command = resolved_command("bundle");
+        command.arg("exec").arg(tool);
+        return command;
     }
-    Command::new(tool)
+    resolved_command(tool)
 }
 
 /// SHA-256 of `data` as 64 lowercase hex chars — the format `sha256sum` prints

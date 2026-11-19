@@ -947,10 +947,16 @@ fn rewrite_segment_inner(
     // Try each rewrite prefix (longest first) with word-boundary check
     for &prefix in rule.rewrite_prefixes {
         if let Some(rest) = strip_word_prefix(cmd_part, prefix) {
-            let target = if matches!(rule.rtk_cmd, "bdo gradlew" | "bdo mvn") {
+            let target = if matches!(
+                rule.rtk_cmd,
+                "bdo gradlew" | "bdo mvn" | "bdo rake" | "bdo rspec" | "bdo rubocop"
+            ) {
                 // Keep executable identity separate from tool arguments. The
                 // separator prevents a tool operand from changing this selector.
-                format!("{} --bdo-executable {} --", rule.rtk_cmd, prefix)
+                // Explicit Bundler context is one finite selector, not shell
+                // syntax. Plain tools never acquire it from a Gemfile.
+                let executable = prefix.replace(' ', "-");
+                format!("{} --bdo-executable {} --", rule.rtk_cmd, executable)
             } else {
                 rule.rtk_cmd.to_string()
             };
@@ -3336,6 +3342,93 @@ mod tests {
     }
 
     // --- Compound operator edge cases ---
+
+    #[test]
+    fn test_ruby_rewrites_preserve_explicit_invocation_and_operands() {
+        for (original, expected) in [
+            (
+                "rubocop --version",
+                "bdo rubocop --bdo-executable rubocop -- --version",
+            ),
+            (
+                "rspec --version",
+                "bdo rspec --bdo-executable rspec -- --version",
+            ),
+            (
+                "bin/rspec spec/a_spec.rb",
+                "bdo rspec --bdo-executable bin/rspec -- spec/a_spec.rb",
+            ),
+            (
+                "bundle exec rubocop --version",
+                "bdo rubocop --bdo-executable bundle-exec-rubocop -- --version",
+            ),
+            (
+                "bundle exec rspec spec/a_spec.rb",
+                "bdo rspec --bdo-executable bundle-exec-rspec -- spec/a_spec.rb",
+            ),
+            (
+                "rake test test/a_test.rb",
+                "bdo rake --bdo-executable rake -- test test/a_test.rb",
+            ),
+            ("rails test", "bdo rake --bdo-executable rails -- test"),
+            (
+                "bin/rails test",
+                "bdo rake --bdo-executable bin/rails -- test",
+            ),
+            (
+                "bundle exec rails test",
+                "bdo rake --bdo-executable bundle-exec-rails -- test",
+            ),
+            (
+                "bundle exec rake test",
+                "bdo rake --bdo-executable bundle-exec-rake -- test",
+            ),
+            (
+                "RAILS_ENV=test bundle exec rake test",
+                "RAILS_ENV=test bdo rake --bdo-executable bundle-exec-rake -- test",
+            ),
+            (
+                "rubocop 'file with spaces.rb'",
+                "bdo rubocop --bdo-executable rubocop -- 'file with spaces.rb'",
+            ),
+            (
+                "rspec --bdo-executable bundle-exec-rspec",
+                "bdo rspec --bdo-executable rspec -- --bdo-executable bundle-exec-rspec",
+            ),
+            (
+                "bundle exec rspec spec/a_spec.rb 2>&1",
+                "bdo rspec --bdo-executable bundle-exec-rspec -- spec/a_spec.rb 2>&1",
+            ),
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(original, &[]).as_deref(),
+                Some(expected),
+                "{original}"
+            );
+        }
+        // Unsupported bin/absolute forms remain untouched, rather than losing
+        // a path or silently changing the selected tool.
+        for original in [
+            "bin/rake test",
+            "bundle exec bin/rails test",
+            "/opt/rubocop --version",
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(original, &[]),
+                None,
+                "{original}"
+            );
+        }
+        assert_eq!(
+            super::rewrite_command(
+                "bundle exec rspec spec/a_spec.rb",
+                &[],
+                &["bundle exec".into()]
+            )
+            .as_deref(),
+            Some("bundle exec bdo rspec --bdo-executable rspec -- spec/a_spec.rb")
+        );
+    }
 
     #[test]
     fn test_jvm_rewrites_preserve_executable_spelling_and_argument_boundaries() {

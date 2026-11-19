@@ -8,7 +8,7 @@
 use crate::core::runner;
 use crate::core::truncate::{reduced, CAP_WARNINGS};
 use crate::core::utils::{fallback_tail, ruby_exec, truncate};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Deserialize;
@@ -66,8 +66,16 @@ struct RspecSummary {
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
-pub fn run(args: &[String], verbose: u8) -> Result<i32> {
-    let mut cmd = ruby_exec("rspec");
+pub const EXECUTABLES: &[&str] = &["rspec", "bin/rspec", "bundle-exec-rspec"];
+
+pub fn run(args: &[String], verbose: u8, executable: Option<&str>) -> Result<i32> {
+    let invocation = executable.unwrap_or("rspec");
+    let invocation = EXECUTABLES
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == invocation)
+        .context("Unsupported RSpec invocation")?;
+    let mut cmd = ruby_exec(invocation);
 
     let has_format = args.iter().any(|a| {
         a == "--format"

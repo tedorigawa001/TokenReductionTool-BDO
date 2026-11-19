@@ -749,6 +749,9 @@ enum Commands {
 
     /// Rake/Rails test with compact Minitest output (Ruby)
     Rake {
+        /// Original Ruby invocation selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(rake_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// Rake arguments (e.g., test, test TEST=path/to/test.rb)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -756,6 +759,9 @@ enum Commands {
 
     /// RuboCop linter with compact output (Ruby)
     Rubocop {
+        /// Original Ruby invocation selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(rubocop_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// RuboCop arguments (e.g., --auto-correct, -A)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -763,6 +769,9 @@ enum Commands {
 
     /// RSpec test runner with compact output (Rails/Ruby)
     Rspec {
+        /// Original Ruby invocation selected before the hook rewrite
+        #[arg(long, hide = true, value_parser = clap::builder::PossibleValuesParser::new(rspec_cmd::EXECUTABLES))]
+        bdo_executable: Option<String>,
         /// RSpec arguments (e.g., spec/models, --tag focus)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -1238,13 +1247,16 @@ const BDO_META_COMMANDS: &[&str] = &[
     "rewrite",
 ];
 
-/// A rewritten JVM invocation carries a leading executable selector. Resolve
+/// A rewritten JVM/Ruby invocation carries a leading invocation selector. Resolve
 /// it before native raw routing so private options never reach the real tool.
 /// Keep raw operands as OsString, including non-UTF-8 arguments on Unix.
-fn jvm_selected_route(rest: &[OsString]) -> Option<core::raw::Route> {
+fn rewritten_tool_route(rest: &[OsString]) -> Option<core::raw::Route> {
     let choices = match rest.first()?.to_str()? {
         "gradlew" => gradlew_cmd::EXECUTABLES,
         "mvn" => mvn_cmd::EXECUTABLES,
+        "rake" => rake_cmd::EXECUTABLES,
+        "rspec" => rspec_cmd::EXECUTABLES,
+        "rubocop" => rubocop_cmd::EXECUTABLES,
         _ => return None,
     };
     let flag = rest.get(1)?.to_str()?;
@@ -1253,7 +1265,7 @@ fn jvm_selected_route(rest: &[OsString]) -> Option<core::raw::Route> {
     } else {
         (flag.strip_prefix("--bdo-executable=")?, 2)
     };
-    let Some(program) = choices.iter().copied().find(|candidate| *candidate == name) else {
+    let Some(invocation) = choices.iter().copied().find(|candidate| *candidate == name) else {
         // Let clap reject an invalid selector, never reinterpret it as a
         // native tool invocation or fall back to repository discovery.
         return Some(core::raw::Route::Normal);
@@ -1262,9 +1274,15 @@ fn jvm_selected_route(rest: &[OsString]) -> Option<core::raw::Route> {
     if args.first().is_some_and(|arg| arg == "--") {
         args = &args[1..];
     }
+    let (program, mut prefix) = if let Some(tool) = invocation.strip_prefix("bundle-exec-") {
+        ("bundle", vec![OsString::from("exec"), OsString::from(tool)])
+    } else {
+        (invocation, Vec::new())
+    };
+    prefix.extend_from_slice(args);
     Some(core::raw::Route::Native {
         program: program.into(),
-        args: args.to_vec(),
+        args: prefix,
     })
 }
 
@@ -1283,7 +1301,7 @@ fn run_raw_if_requested() -> Result<Option<i32>> {
     core::raw::activate();
 
     let rest = &argv[globals.rest_start..];
-    let route = jvm_selected_route(rest).unwrap_or_else(|| {
+    let route = rewritten_tool_route(rest).unwrap_or_else(|| {
         core::raw::route(rest, BDO_META_COMMANDS, |program| {
             which::which(program).is_ok()
         })
@@ -1340,10 +1358,10 @@ fn run_fallback(parse_error: clap::Error) -> Result<i32> {
         parse_error.exit();
     }
 
-    // An invalid private JVM selector must fail closed, not run a native
+    // An invalid private invocation selector must fail closed, not run a native
     // program with bdo's private arguments after a clap error.
     let args_os: Vec<_> = args.iter().map(OsString::from).collect();
-    if jvm_selected_route(&args_os).is_some() {
+    if rewritten_tool_route(&args_os).is_some() {
         parse_error.exit();
     }
 
@@ -2508,11 +2526,20 @@ fn run_cli() -> Result<i32> {
 
         Commands::Mypy { args } => mypy_cmd::run(&args, cli.verbose)?,
 
-        Commands::Rake { args } => rake_cmd::run(&args, cli.verbose)?,
+        Commands::Rake {
+            args,
+            bdo_executable,
+        } => rake_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
-        Commands::Rubocop { args } => rubocop_cmd::run(&args, cli.verbose)?,
+        Commands::Rubocop {
+            args,
+            bdo_executable,
+        } => rubocop_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
-        Commands::Rspec { args } => rspec_cmd::run(&args, cli.verbose)?,
+        Commands::Rspec {
+            args,
+            bdo_executable,
+        } => rspec_cmd::run(&args, cli.verbose, bdo_executable.as_deref())?,
 
         Commands::Pip { args } => pip_cmd::run(&args, cli.verbose)?,
 
@@ -2914,10 +2941,32 @@ mod tests {
                 operand.clone(),
             ];
             assert_eq!(
-                jvm_selected_route(&args),
+                rewritten_tool_route(&args),
                 Some(core::raw::Route::Native {
                     program: program.into(),
                     args: vec![operand.clone()]
+                })
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_ruby_raw_selector_preserves_bundle_context_and_non_utf8_operands() {
+        use std::os::unix::ffi::OsStringExt;
+        let operand = OsString::from_vec(vec![b'x', 0xff]);
+        for tool in ["rubocop", "rspec", "rake"] {
+            let args = vec![
+                tool.into(),
+                format!("--bdo-executable=bundle-exec-{tool}").into(),
+                "--".into(),
+                operand.clone(),
+            ];
+            assert_eq!(
+                rewritten_tool_route(&args),
+                Some(core::raw::Route::Native {
+                    program: "bundle".into(),
+                    args: vec!["exec".into(), tool.into(), operand.clone()]
                 })
             );
         }
@@ -2938,7 +2987,7 @@ mod tests {
             .map(OsString::from)
             .collect();
             assert_eq!(
-                jvm_selected_route(&args),
+                rewritten_tool_route(&args),
                 Some(core::raw::Route::Native {
                     program: program.into(),
                     args: vec!["--".into(), "--bdo-executable".into(), "sh".into()]
@@ -2953,7 +3002,7 @@ mod tests {
                     .chain(tail)
                     .map(OsString::from)
                     .collect();
-                assert_eq!(jvm_selected_route(&args), Some(core::raw::Route::Normal));
+                assert_eq!(rewritten_tool_route(&args), Some(core::raw::Route::Normal));
             }
         }
     }

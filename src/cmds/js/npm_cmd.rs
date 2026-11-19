@@ -25,7 +25,13 @@ const NPM_SUBCOMMANDS: &[&str] = &[
     "link",
     "audit",
     "fund",
+    // These alias `run`; with no script argument they only list scripts.
+    // Injecting another `run` would execute a script named after the alias.
+    "run-script",
+    "rum",
+    "urn",
     "exec",
+    "x",
     "explain",
     "why",
     "search",

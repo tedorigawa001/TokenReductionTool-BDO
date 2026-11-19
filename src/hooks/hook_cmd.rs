@@ -129,7 +129,11 @@ fn get_rewritten(cmd: &str) -> Option<String> {
 
 enum HookDecision {
     AllowRewrite(String),
+    /// No rule decided: the host applies its own rules to the rewrite.
     AskRewrite(String),
+    /// An ask rule matched. The host must still ask, so the decision is sent
+    /// explicitly; otherwise it would match its rules against `bdo …`.
+    AskRuleRewrite(String),
     Defer,
     Deny,
 }
@@ -143,6 +147,7 @@ fn decide_from_verdict(cmd: &str, verdict: PermissionVerdict) -> HookDecision {
     }
     match get_rewritten(cmd) {
         Some(r) if verdict == PermissionVerdict::Allow => HookDecision::AllowRewrite(r),
+        Some(r) if verdict == PermissionVerdict::Ask => HookDecision::AskRuleRewrite(r),
         Some(r) => HookDecision::AskRewrite(r),
         None => HookDecision::Defer,
     }
@@ -181,6 +186,7 @@ fn decide_from_verdict_for_agent(
     };
     match rewritten {
         Some(r) if verdict == PermissionVerdict::Allow => HookDecision::AllowRewrite(r),
+        Some(r) if verdict == PermissionVerdict::Ask => HookDecision::AskRuleRewrite(r),
         Some(r) => HookDecision::AskRewrite(r),
         None => HookDecision::Defer,
     }
@@ -205,7 +211,7 @@ fn handle_vscode(cmd: &str) -> Result<()> {
         }
         HookDecision::Defer => return Ok(()),
         HookDecision::AllowRewrite(r) => ("allow", r),
-        HookDecision::AskRewrite(r) => ("ask", r),
+        HookDecision::AskRewrite(r) | HookDecision::AskRuleRewrite(r) => ("ask", r),
     };
 
     audit_log("rewrite", cmd, &rewritten);
@@ -243,7 +249,8 @@ fn copilot_cli_response_from_decision(
             audit_log("deny", cmd, "");
             return None;
         }
-        HookDecision::Defer => return None,
+        // Copilot has no documented `ask`: leave the command for it to confirm.
+        HookDecision::Defer | HookDecision::AskRuleRewrite(_) => return None,
         HookDecision::AllowRewrite(r) => (r, true),
         HookDecision::AskRewrite(r) => (r, false),
     };
@@ -308,7 +315,9 @@ pub fn run_gemini() -> Result<()> {
             audit_log("ask", cmd, rewritten);
             print_gemini_rewrite(rewritten);
         }
-        HookDecision::Defer => print_gemini_allow(),
+        // Gemini has no `ask` value, and its confirmationRequired list would
+        // not match `bdo …`: leave the command for Gemini to confirm.
+        HookDecision::AskRuleRewrite(_) | HookDecision::Defer => print_gemini_allow(),
     }
 
     Ok(())
@@ -423,7 +432,7 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
         None => return PayloadAction::Ignore,
     };
 
-    let (rewritten, allow) = match decide_hook_action(cmd, permissions::Host::Claude) {
+    let (rewritten, decision) = match decide_hook_action(cmd, permissions::Host::Claude) {
         HookDecision::Deny => {
             return PayloadAction::Skip {
                 reason: "skip:deny_rule",
@@ -436,8 +445,9 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
                 cmd: cmd.to_string(),
             }
         }
-        HookDecision::AllowRewrite(r) => (r, true),
-        HookDecision::AskRewrite(r) => (r, false),
+        HookDecision::AllowRewrite(r) => (r, Some("allow")),
+        HookDecision::AskRuleRewrite(r) => (r, Some("ask")),
+        HookDecision::AskRewrite(r) => (r, None),
     };
 
     let updated_input = {
@@ -454,11 +464,8 @@ fn process_claude_payload(v: &Value) -> PayloadAction {
         "updatedInput": updated_input
     });
 
-    if allow {
-        hook_output
-            .as_object_mut()
-            .unwrap()
-            .insert("permissionDecision".into(), json!("allow"));
+    if let Some(decision) = decision {
+        hook_output["permissionDecision"] = json!(decision);
     }
 
     PayloadAction::Rewrite {
@@ -1522,7 +1529,7 @@ mod tests {
             }
             // Gemini has no allow/ask value: rewrite via tool_input (no decision).
             HookDecision::AllowRewrite(r) | HookDecision::AskRewrite(r) => gemini_rewrite_json(&r),
-            HookDecision::Defer => "{}".to_string(),
+            HookDecision::AskRuleRewrite(_) | HookDecision::Defer => "{}".to_string(),
         }
     }
 

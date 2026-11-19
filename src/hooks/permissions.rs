@@ -41,15 +41,43 @@ pub fn check_command_for(cmd: &str, host: Host) -> PermissionVerdict {
         Host::Cursor => load_cursor_rules(),
         Host::Gemini => load_gemini_rules(),
     };
-    check_command_with_rules(cmd, &deny_rules, &ask_rules, &allow_rules)
+    // Claude Code reads `Bash(git push)` as exactly `git push`; Cursor's and
+    // Gemini's rules without a wildcard are prefixes.
+    let allow_match = match host {
+        Host::Claude => AllowMatch::Exact,
+        Host::Cursor | Host::Gemini => AllowMatch::Prefix,
+    };
+    check_command_with_rules_matching(cmd, &deny_rules, &ask_rules, &allow_rules, allow_match)
+}
+
+/// How an allow rule without a wildcard matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AllowMatch {
+    /// `git push` allows `git push` only.
+    Exact,
+    /// `git push` allows `git push` and `git push origin main`.
+    Prefix,
 }
 
 /// Internal implementation allowing tests to inject rules without file I/O.
+#[cfg(test)]
 pub(crate) fn check_command_with_rules(
     cmd: &str,
     deny_rules: &[String],
     ask_rules: &[String],
     allow_rules: &[String],
+) -> PermissionVerdict {
+    check_command_with_rules_matching(cmd, deny_rules, ask_rules, allow_rules, AllowMatch::Prefix)
+}
+
+/// Deny and ask rules without a wildcard always match as prefixes: reading
+/// them wider than the host does only adds a prompt.
+pub(crate) fn check_command_with_rules_matching(
+    cmd: &str,
+    deny_rules: &[String],
+    ask_rules: &[String],
+    allow_rules: &[String],
+    allow_match: AllowMatch,
 ) -> PermissionVerdict {
     // Judge what bash will run: `--for\<newline>ce` is `--force`.
     let cmd = &*crate::discover::lexer::remove_line_continuations(cmd);
@@ -116,9 +144,13 @@ pub(crate) fn check_command_with_rules(
         // Allow — every non-empty segment must match an allow rule independently.
         // As soon as one segment fails to match, the entire chain loses Allow status.
         if all_segments_allowed {
-            let matched = allow_rules
-                .iter()
-                .any(|pattern| command_matches_pattern(segment, pattern));
+            let matched = allow_rules.iter().any(|pattern| {
+                if allow_match == AllowMatch::Exact && !pattern.contains('*') {
+                    segment == pattern
+                } else {
+                    command_matches_pattern(segment, pattern)
+                }
+            });
             if !matched {
                 all_segments_allowed = false;
             }
@@ -186,14 +218,17 @@ fn load_permission_rules() -> (Vec<String>, Vec<String>, Vec<String>) {
 
 /// Extract Bash-scoped patterns from a JSON array and append them to `target`.
 ///
-/// Only rules with a `Bash(...)` prefix are kept. Non-Bash rules (e.g. `Read(...)`) are ignored.
+/// Only `Bash(...)` rules and a bare `Bash`, which covers every command, are
+/// kept. Non-Bash rules (e.g. `Read(...)`) are ignored.
 fn append_bash_rules(rules_value: Option<&Value>, target: &mut Vec<String>) {
     let Some(arr) = rules_value.and_then(|v| v.as_array()) else {
         return;
     };
     for rule in arr {
         if let Some(s) = rule.as_str() {
-            if s.starts_with("Bash(") {
+            if s == "Bash" {
+                target.push("*".to_string());
+            } else if s.starts_with("Bash(") {
                 target.push(extract_bash_pattern(s).to_string());
             }
         }
@@ -204,7 +239,7 @@ fn append_bash_rules(rules_value: Option<&Value>, target: &mut Vec<String>) {
 fn get_settings_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    if let Some(root) = find_project_root() {
+    if let Some(root) = claude_project_dir().or_else(find_project_root) {
         paths.push(root.join(CLAUDE_DIR).join(SETTINGS_JSON));
         paths.push(root.join(CLAUDE_DIR).join(SETTINGS_LOCAL_JSON));
     }
@@ -312,6 +347,14 @@ fn load_gemini_rules() -> (Vec<String>, Vec<String>, Vec<String>) {
         append_wrapped_rules(tools.get("confirmationRequired"), &shells, &mut ask);
     }
     (deny, ask, allow)
+}
+
+/// The project directory Claude Code started in, which it passes to hooks.
+/// Its settings are the ones Claude Code applies; a `.claude/` nearer to the
+/// working directory (a vendored package, a nested repository) is not.
+fn claude_project_dir() -> Option<PathBuf> {
+    let dir = PathBuf::from(std::env::var_os("CLAUDE_PROJECT_DIR")?);
+    (dir.is_absolute() && dir.is_dir()).then_some(dir)
 }
 
 /// Locate the project root by walking up from CWD looking for `.claude/`.

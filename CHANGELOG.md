@@ -5,6 +5,57 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] (2026-11-20)
+
+The hook now rewrites a command only when your permission rules decide it, so that a
+command never gets a weaker permission through bdo than your own rules would give it.
+This changes which commands bdo filters. The other changes fix how commands and
+repository files were run, read and written.
+
+### Changed
+
+- **The hook rewrites only commands that an allow or ask rule covers.** Before, it also
+  rewrote commands that no rule covered, and the agent then judged `bdo …` instead of
+  the command you wrote. A command that no rule covers is now left unchanged for the
+  agent to judge. To have a command filtered automatically, allow it, e.g.
+  `Bash(git status:*)`. If you have few allow rules, bdo will filter fewer commands
+  than before.
+- **The Copilot hook (VS Code and CLI) no longer rewrites commands.** The hook cannot
+  see Copilot's permission rules. The instructions file still asks Copilot to use `bdo`.
+- **`bdo run` and `bdo summary` pass several arguments as they are.** Before, the
+  arguments were joined and run through the shell. A single argument is still run as
+  a shell command, e.g. `bdo summary "make test | tail"`, and so is `bdo run -c`.
+
+### Security
+
+- **An ask rule was lost when the hook rewrote the command.** With `Bash(*)` allowed
+  and `Bash(git commit:*)` set to ask, `git commit` could run without a prompt. Claude
+  Code now gets an explicit `ask`. Gemini has no `ask` value, so there the command is
+  left unchanged for Gemini to confirm.
+- **A bare `Bash` rule was ignored.** With `"deny": ["Bash"]`, the hook still allowed
+  `git status`. A bare `Bash` rule now covers every command.
+- **`Bash(git push)` allowed `git push origin main`.** Claude Code reads a rule without
+  a wildcard as an exact match, and the hook now does the same for allow rules.
+- **The hook read the nearest `.claude/` settings instead of the project's.** A nested
+  package's allow rules replaced the project's ask rules. The hook now reads the
+  settings in `CLAUDE_PROJECT_DIR`.
+- **`bdo run` and `bdo summary` could run commands from file names.** A quoted file
+  name such as `a$(touch x).txt` became shell syntax again.
+- **The mypy fallback ran a repository's `mypy.py`.** When mypy is not installed, bdo
+  runs it as a Python module, and that put the working directory first on the module
+  path.
+- **The tsc, next, prisma and `bdo test --changed` fallbacks could download a package.**
+  When the tool is not installed, `npx` installs a package of that name without asking,
+  and a repository's `.npmrc` chooses the registry. They now use `npx --no-install`.
+- **`bdo trust` could report a filter that rewrites output as harmless.** Its risk
+  summary looked for words such as `replace` in the text, which TOML lets a file avoid,
+  e.g. with `"replace"`. The summary now reads the filters as they will be loaded
+  and lists what each one does. Control characters and text-direction characters are
+  shown escaped.
+- **dotnet wrote its build log and test results under guessable names in the shared
+  temp directory.** Another local user could plant fake test results, or read the build
+  log, which holds environment variables. Each run now uses its own private directory.
+
 ## [0.50.9] (2026-11-19)
 
 Fixes for commands that ran, read or wrote files a repository controls, and for history

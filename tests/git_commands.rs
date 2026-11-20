@@ -733,3 +733,49 @@ fn outside_a_repository_it_fails_like_git() {
         assert_eq!(out.status.code(), real.status.code(), "{args:?}: {out:?}");
     }
 }
+
+// ------------------------------------------------- failures and no-op calls
+
+#[test]
+fn add_without_a_path_stages_nothing() {
+    // Plain `git add` adds nothing; it must not become `git add .` and stage
+    // files such as `.env`.
+    let repo = Repo::new();
+    repo.write(".env", "SECRET=1\n");
+    let out = repo.bdo(&["add"]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "");
+}
+
+#[test]
+fn status_reports_a_broken_repository_as_git_does() {
+    let repo = Repo::new();
+    fs::write(repo.work.join(".git/index"), "broken").unwrap();
+    assert_same_failure(&repo, &["status"]);
+    let out = repo.bdo(&["status"]);
+    assert!(!all_output(&out).contains("Clean working tree"), "{out:?}");
+}
+
+#[test]
+fn stash_failures_keep_their_exit_code() {
+    let repo = Repo::new();
+    assert_same_failure(&repo, &["stash", "show", "stash@{5}"]);
+    let outside = repo.root.join("not-a-repo");
+    fs::create_dir_all(&outside).unwrap();
+    let real = raw_git(&outside, &["stash", "list"]);
+    if !real.status.success() {
+        let out = repo.bdo_in(&outside, &["stash", "list"]);
+        assert_eq!(out.status.code(), real.status.code(), "{out:?}");
+        assert!(!all_output(&out).contains("No stashes"), "{out:?}");
+    }
+}
+
+#[test]
+fn worktree_runs_the_subcommand_it_was_given() {
+    let repo = Repo::new();
+    let out = repo.ok(&["worktree", "list", "--porcelain"]);
+    assert!(out.contains("worktree "), "{out}");
+    // `repair` is not `list`: git prints nothing for a healthy repository.
+    let out = repo.ok(&["worktree", "repair"]);
+    assert!(!out.contains("main"), "{out}");
+}

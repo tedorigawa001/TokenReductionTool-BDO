@@ -44,6 +44,16 @@ pub fn category_avg_tokens(category: &str, subcmd: &str) -> usize {
     }
 }
 
+/// The command after any leading `VAR=value`, `env` and `sudo` words: the
+/// part the rewriter rewrites, so the part permission rules must judge.
+pub(crate) fn strip_env_prefix(segment: &str) -> &str {
+    let trimmed = segment.trim_start();
+    match ENV_PREFIX.find(trimmed) {
+        Some(m) => trimmed[m.end()..].trim_start(),
+        None => trimmed,
+    }
+}
+
 lazy_static! {
     static ref REGEX_SET: RegexSet =
         RegexSet::new(RULES.iter().map(|r| r.pattern)).expect("invalid regex patterns");

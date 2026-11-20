@@ -225,3 +225,28 @@ fn gemini_leaves_commands_that_need_confirmation_as_written() {
     );
     assert_ne!(answer, json!({}), "an allowed command is still rewritten");
 }
+
+#[test]
+fn a_prefix_before_the_command_does_not_hide_it_from_deny_or_ask_rules() {
+    // `FOO=1 git push`, `env git push` and `sudo git push` run `git push`;
+    // the hook rewrites them, so it must judge them as `git push`.
+    for prefix in ["FOO=1 ", "GIT_TRACE=0 ", "env ", "sudo ", "env FOO=1 "] {
+        let fixture = Fixture::new();
+        fixture.settings(
+            &fixture.project,
+            json!({ "allow": ["Bash(*)"], "deny": ["Bash(git push --force:*)"] }),
+        );
+        let command = format!("{prefix}git push --force");
+        let answer = fixture.claude(&command, &fixture.project, None);
+        assert_ne!(decision(&answer), Some("allow"), "{command}: {answer}");
+
+        let fixture = Fixture::new();
+        fixture.settings(
+            &fixture.project,
+            json!({ "allow": ["Bash(*)"], "ask": ["Bash(git push:*)"] }),
+        );
+        let command = format!("{prefix}git push");
+        let answer = fixture.claude(&command, &fixture.project, None);
+        assert_ne!(decision(&answer), Some("allow"), "{command}: {answer}");
+    }
+}

@@ -140,7 +140,7 @@ pub fn python_test_cmd(changes: &[Change]) -> Option<(Vec<String>, String)> {
             continue;
         }
         if is_python_test_file(&c.path) {
-            test_files.insert(c.path.clone());
+            test_files.insert(as_path_arg(&c.path));
         } else {
             let stem = c
                 .path
@@ -175,6 +175,16 @@ pub fn python_test_cmd(changes: &[Change]) -> Option<(Vec<String>, String)> {
     Some((args, display))
 }
 
+/// A repository path as a command argument: a name such as `--config=x.ts`
+/// gets a `./` so the runner reads it as a file, not an option.
+fn as_path_arg(path: &str) -> String {
+    if path.starts_with('-') {
+        format!("./{path}")
+    } else {
+        path.to_string()
+    }
+}
+
 /// A test file by pytest's discovery conventions: `test_*.py`, `*_test.py`, or
 /// any file under a `test`/`tests` directory.
 fn is_python_test_file(path: &str) -> bool {
@@ -194,7 +204,7 @@ pub fn js_test_cmd(changes: &[Change], root: &Path) -> Option<(String, Vec<Strin
             continue;
         }
         if JS_EXTS.iter().any(|e| c.path.ends_with(e)) {
-            files.insert(c.path.clone());
+            files.insert(as_path_arg(&c.path));
         }
     }
     if files.is_empty() {
@@ -292,6 +302,31 @@ mod tests {
             status: status.into(),
             path: path.into(),
         }
+    }
+
+    #[test]
+    fn test_changed_file_names_are_never_read_as_options() {
+        // A file named `--deselect=a_test.py` or `--config=evil.ts` must stay a
+        // path: as an option it could skip tests or load another config.
+        let changes = vec![
+            ch("A", "--deselect=a_test.py"),
+            ch("A", "tests/-x.py"),
+            ch("A", "--config=evil.ts"),
+        ];
+        let (args, _) = python_test_cmd(&changes).unwrap();
+        assert!(
+            args.iter().all(|a| !a.starts_with('-') || a == "-k"),
+            "{args:?}"
+        );
+        assert!(
+            args.contains(&"./--deselect=a_test.py".to_string()),
+            "{args:?}"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let (_, args, _) = js_test_cmd(&changes, dir.path()).unwrap();
+        let files: Vec<_> = args.iter().skip_while(|a| *a != "--run").skip(1).collect();
+        assert_eq!(files, ["./--config=evil.ts"], "{args:?}");
     }
 
     #[test]

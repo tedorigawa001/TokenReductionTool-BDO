@@ -1163,12 +1163,24 @@ impl Tracker {
              WHERE input_tokens = 0 AND output_tokens = 0
              GROUP BY tool ORDER BY cnt DESC LIMIT ?1",
         )?;
-        let rows = stmt.query_map(params![limit as i64], |row| {
+        // Ask for every group: names that differ only in their directory merge
+        // below, and the limit applies after that.
+        let rows = stmt.query_map(params![-1i64], |row| {
             let cmd: String = row.get(0)?;
             let count: i64 = row.get(1)?;
             Ok((cmd, count))
         })?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
+        let mut merged: Vec<(String, i64)> = Vec::new();
+        for (tool, count) in rows.filter_map(|r| r.ok()) {
+            let label = passthrough_tool_label(&tool);
+            match merged.iter_mut().find(|(name, _)| *name == label) {
+                Some((_, total)) => *total += count,
+                None => merged.push((label, count)),
+            }
+        }
+        merged.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        merged.truncate(limit);
+        Ok(merged)
     }
 
     /// Count parse failures in the last 24 hours.
@@ -1680,9 +1692,25 @@ pub fn args_display(args: &[OsString]) -> String {
         .join(" ")
 }
 
+/// The program name alone: a passthrough can be run by path
+/// (`/Users/alice/proj/run.sh`), and the directory names the user.
+fn passthrough_tool_label(tool: &str) -> String {
+    tool.rsplit(['/', '\\']).next().unwrap_or(tool).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_passthrough_label_leaves_out_the_directory() {
+        assert_eq!(
+            passthrough_tool_label("/Users/alice/proj/run-secret.sh"),
+            "run-secret.sh"
+        );
+        assert_eq!(passthrough_tool_label(r"C:\Users\alice\x.exe"), "x.exe");
+        assert_eq!(passthrough_tool_label("make"), "make");
+    }
 
     // classify_agent — pure agent detection from env-var names
     fn keys(names: &[&str]) -> Vec<String> {

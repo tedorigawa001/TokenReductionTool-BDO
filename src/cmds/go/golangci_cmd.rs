@@ -173,7 +173,7 @@ fn classify_invocation(args: &[String]) -> Invocation {
     }
 }
 
-fn find_subcommand_index(args: &[String]) -> Option<usize> {
+pub(crate) fn find_subcommand_index(args: &[String]) -> Option<usize> {
     let mut i = 0;
     while i < args.len() {
         let arg = args[i].as_str();

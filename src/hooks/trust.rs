@@ -11,6 +11,7 @@
 //! - Content changes invalidate trust (re-review required)
 //! - `BDO_TRUST_PROJECT_FILTERS=1` overrides for CI pipelines
 
+#[cfg(test)]
 use super::integrity;
 use crate::core::constants::{BDO_DATA_DIR, TRUSTED_FILTERS_JSON};
 use anyhow::{Context, Result};
@@ -93,21 +94,19 @@ fn canonical_key(filter_path: &Path) -> Result<String> {
 ///
 /// Priority: env var > hash match > untrusted.
 /// All errors are soft — if anything fails, returns Untrusted (fail-secure).
+#[cfg(test)]
 pub fn check_trust(filter_path: &Path) -> Result<TrustStatus> {
-    // Fast path: env var override for CI pipelines only.
-    // Requires a known CI env var to be set to prevent .envrc injection attacks.
-    if std::env::var("BDO_TRUST_PROJECT_FILTERS").as_deref() == Ok("1") {
-        let in_ci = std::env::var("CI").is_ok()
-            || std::env::var("GITHUB_ACTIONS").is_ok()
-            || std::env::var("GITLAB_CI").is_ok()
-            || std::env::var("JENKINS_URL").is_ok()
-            || std::env::var("BUILDKITE").is_ok();
-        if in_ci {
-            return Ok(TrustStatus::EnvOverride);
-        }
-        eprintln!(
-            "[bdo] WARNING: BDO_TRUST_PROJECT_FILTERS=1 ignored (CI environment not detected)"
-        );
+    check_trust_and_read(filter_path).map(|(status, _)| status)
+}
+
+/// The trust status and, when the file may be used, its content: the very
+/// bytes that were hashed. Reading the file again after the check would let
+/// it change in between.
+pub fn check_trust_and_read(filter_path: &Path) -> Result<(TrustStatus, Option<String>)> {
+    let text = |bytes: Vec<u8>| String::from_utf8(bytes).ok();
+    if env_override() {
+        let content = std::fs::read(filter_path).ok().and_then(text);
+        return Ok((TrustStatus::EnvOverride, content));
     }
 
     let key = canonical_key(filter_path)?;
@@ -124,20 +123,44 @@ pub fn check_trust(filter_path: &Path) -> Result<TrustStatus> {
 
     let entry = match store.trusted.get(&key) {
         Some(e) => e,
-        None => return Ok(TrustStatus::Untrusted),
+        None => return Ok((TrustStatus::Untrusted, None)),
     };
 
-    let actual_hash = integrity::compute_hash(filter_path)
+    // Read the resolved path once; the hash and the content come from it.
+    let bytes = std::fs::read(&key)
         .with_context(|| format!("Failed to hash: {}", filter_path.display()))?;
+    let actual_hash = crate::core::utils::sha256_hex(&bytes);
 
     if actual_hash == entry.sha256 {
-        Ok(TrustStatus::Trusted)
+        Ok((TrustStatus::Trusted, text(bytes)))
     } else {
-        Ok(TrustStatus::ContentChanged {
-            expected: entry.sha256.clone(),
-            actual: actual_hash,
-        })
+        Ok((
+            TrustStatus::ContentChanged {
+                expected: entry.sha256.clone(),
+                actual: actual_hash,
+            },
+            None,
+        ))
     }
+}
+
+/// `BDO_TRUST_PROJECT_FILTERS=1`, honoured only on CI.
+fn env_override() -> bool {
+    // Requires a known CI env var to be set to prevent .envrc injection attacks.
+    if std::env::var("BDO_TRUST_PROJECT_FILTERS").as_deref() != Ok("1") {
+        return false;
+    }
+    let in_ci = std::env::var("CI").is_ok()
+        || std::env::var("GITHUB_ACTIONS").is_ok()
+        || std::env::var("GITLAB_CI").is_ok()
+        || std::env::var("JENKINS_URL").is_ok()
+        || std::env::var("BUILDKITE").is_ok();
+    if !in_ci {
+        eprintln!(
+            "[bdo] WARNING: BDO_TRUST_PROJECT_FILTERS=1 ignored (CI environment not detected)"
+        );
+    }
+    in_ci
 }
 
 /// Store a pre-computed SHA-256 hash as trusted (avoids TOCTOU re-read).
@@ -255,24 +278,9 @@ pub fn run_untrust() -> Result<()> {
 // Risk analysis
 // ---------------------------------------------------------------------------
 
-/// Keep terminal controls visible rather than executing them. Only the source
-/// preview keeps its physical line breaks; decoded fields stay on one line.
-fn terminal_text(text: &str, multiline: bool) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for c in text.chars() {
-        if c == '\n' && multiline {
-            escaped.push(c);
-        } else if c.is_control()
-            || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}'
-                | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-        {
-            escaped.extend(c.escape_default());
-        } else {
-            escaped.push(c);
-        }
-    }
-    escaped
-}
+// Terminal controls stay visible rather than executing. Only the source
+// preview keeps its physical line breaks; decoded fields stay on one line.
+use crate::core::display_helpers::terminal_text;
 
 /// Built from the parsed filters, the way they will be loaded: matching the
 /// text missed `"\u0072eplace"` keys and `[ filters . x ]` headers.

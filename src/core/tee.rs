@@ -54,6 +54,24 @@ fn get_tee_dir(config: &Config) -> Option<(PathBuf, PathSource)> {
     dirs::data_local_dir().map(|d| (d.join(BDO_DATA_DIR).join("tee"), PathSource::Default))
 }
 
+/// A name bdo gives its tee files, `<epoch>_<slug>[_<nonce>].log`. The
+/// directory may hold the user's own logs (`BDO_TEE_DIR`), and rotation must
+/// never delete those.
+fn is_tee_file_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".log") else {
+        return false;
+    };
+    let Some((epoch, slug)) = stem.split_once('_') else {
+        return false;
+    };
+    epoch.len() >= 10
+        && epoch.bytes().all(|b| b.is_ascii_digit())
+        && !slug.is_empty()
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// Rotate old tee files: keep only the last `max_files`, delete oldest.
 fn cleanup_old_files(dir: &std::path::Path, max_files: usize) {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
@@ -61,7 +79,7 @@ fn cleanup_old_files(dir: &std::path::Path, max_files: usize) {
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
+        .filter(|e| is_tee_file_name(&e.file_name().to_string_lossy()))
         .collect();
 
     if entries.len() <= max_files {
@@ -649,6 +667,34 @@ mod tests {
             let filename = format!("{:010}_{}.log", 1000000 + i, "test");
             assert!(dir.join(&filename).exists());
         }
+    }
+
+    #[test]
+    fn test_cleanup_leaves_files_bdo_did_not_write() {
+        // BDO_TEE_DIR may point at a directory the user keeps other logs in.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let dir = tmpdir.path();
+        for i in 0..25 {
+            fs::write(dir.join(format!("{:03}-build.log", i)), "mine").unwrap();
+        }
+        for i in 0..3 {
+            let name = format!(
+                "{}_cargo_test_{:016x}.log",
+                1_700_000_000_000_000_000u64 + i,
+                i
+            );
+            fs::write(dir.join(name), "tee").unwrap();
+        }
+        cleanup_old_files(dir, 2);
+        for i in 0..25 {
+            assert!(dir.join(format!("{:03}-build.log", i)).exists(), "{i}");
+        }
+        let tee_left = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("17"))
+            .count();
+        assert_eq!(tee_left, 2);
     }
 
     #[test]

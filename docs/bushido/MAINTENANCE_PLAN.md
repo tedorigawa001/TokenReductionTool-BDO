@@ -962,3 +962,19 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
   ので、シェル経由で実行されるなら動かない可能性がある（未確認）。インストール時の `settings.json` の
   `.bak` は作らない。
 
+
+### 2026-11-20 — 前置きでの deny のすり抜け、git の失敗の取りこぼし
+
+0.51.0 のあとのコード点検で見つかった問題のうち、フックとコマンド実行のもの。
+- **前置きで deny・ask ルールをすり抜けた**: `FOO=1 git push --force`・`env …`・`sudo …` は、書き換えでは前置きを
+  外して `git push --force` として扱うのに、deny と ask の照合では外していなかった。`deny: Bash(git push --force:*)`
+  があっても `FOO=1 bdo git push --force` に書き換えて `allow` を返していた（本物の bdo で再現）。照合でも同じ
+  前置きを外した形を見る。
+- **`bdo git add` を引数なしで実行すると全部ステージした**: 本物の git は何も追加しないのに `.` を足していたため、
+  `.env` のような未追跡のファイルまで追加された。引数はそのまま渡す。
+- **git の失敗が空の結果に見えた**: `git status` は「not a git repository」以外の失敗（壊れた index など）で
+  「Clean working tree」と出して 0 で終わっていた。`git stash list`・`git stash show`・`git worktree list` も同じ。
+  git のエラーと終了コードをそのまま返す。`git worktree repair` や `list --porcelain` は、何も知らせずに
+  素の `list` になっていたので、`list` 以外はそのまま実行する。
+- **`bdo test --changed` でファイル名がオプションになった**: `--deselect=a_test.py` や `--config=evil.ts` という
+  名前のファイルが pytest・vitest・jest にオプションとして渡っていた。`-` で始まるパスには `./` を付ける。

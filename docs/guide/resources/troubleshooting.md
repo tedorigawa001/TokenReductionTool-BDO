@@ -99,7 +99,7 @@ Error: program not found
 
 **Fix:** Update to Bushido v0.23.1+:
 ```bash
-cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 bdo --version    # should be 0.23.1+
 ```
 
@@ -139,4 +139,4 @@ Checks:
 
 ## Still stuck?
 
-Open an issue: https://github.com/tedorigawa001/TokenReductionTool/issues
+Open an issue: https://github.com/tedorigawa001/TokenReductionTool-BDO/issues

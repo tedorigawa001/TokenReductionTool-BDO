@@ -54,9 +54,9 @@ fn run_status() -> Result<()> {
     }
 
     println!();
-    println!("Data controller: Bushido (github.com/tedorigawa001/TokenReductionTool)");
+    println!("Data controller: Bushido (github.com/tedorigawa001/TokenReductionTool-BDO)");
     println!(
-        "Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md"
+        "Details: https://github.com/tedorigawa001/TokenReductionTool-BDO/blob/main/docs/TELEMETRY.md"
     );
 
     Ok(())
@@ -74,8 +74,8 @@ fn run_enable() -> Result<()> {
     eprintln!("Bushido collects anonymous usage metrics once per day to improve filters.");
     eprintln!();
     eprintln!("  What:    command names (not arguments), token savings, OS, version");
-    eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool)");
-    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md");
+    eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool-BDO)");
+    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool-BDO/blob/main/docs/TELEMETRY.md");
     eprintln!();
     eprint!("Enable anonymous telemetry? [y/N] ");
 
@@ -150,7 +150,7 @@ fn run_forget() -> Result<()> {
             }
             Err(e) => {
                 eprintln!("bdo: could not reach server: {}", e);
-                eprintln!("  To complete erasure, open an issue at github.com/tedorigawa001/TokenReductionTool/issues");
+                eprintln!("  To complete erasure, open an issue at github.com/tedorigawa001/TokenReductionTool-BDO/issues");
                 eprintln!("  with your device hash: {}", hash);
             }
         }

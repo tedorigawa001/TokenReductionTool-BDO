@@ -19,7 +19,7 @@ if ! command -v jq &>/dev/null; then
 fi
 
 if ! command -v bdo &>/dev/null; then
-  echo "[bdo] WARNING: bdo is not installed or not in PATH. Hook cannot rewrite commands. Install: https://github.com/tedorigawa001/TokenReductionTool#installation" >&2
+  echo "[bdo] WARNING: bdo is not installed or not in PATH. Hook cannot rewrite commands. Install: https://github.com/tedorigawa001/TokenReductionTool-BDO#installation" >&2
   exit 0
 fi
 
@@ -36,7 +36,7 @@ if [ ! -f "$CACHE_FILE" ]; then
     IFS=. read -r MAJOR MINOR PATCH <<<"$BDO_VERSION"
     # Require >= 0.23.0
     if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -lt 23 ]; then
-      echo "[bdo] WARNING: bdo $BDO_VERSION is too old (need >= 0.23.0). Upgrade: cargo install --git https://github.com/tedorigawa001/TokenReductionTool" >&2
+      echo "[bdo] WARNING: bdo $BDO_VERSION is too old (need >= 0.23.0). Upgrade: cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO" >&2
       exit 0
     fi
   fi

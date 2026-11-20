@@ -99,6 +99,43 @@ else
     pass "no release build present"
 fi
 
+# 6. dist's own install step runs its installer with `curl | sh` / `irm | iex`
+#    from the build matrix, so check 2 cannot see it in this file.
+if grep -nF 'matrix.install_dist' "$WORKFLOW" >/dev/null; then
+    grep -nF 'matrix.install_dist' "$WORKFLOW" | sed 's/^/      /'
+    fail "dist is installed by the matrix's unverified installer script"
+else
+    pass "dist is not installed by an installer script"
+fi
+
+# 7. The workflow-wide token is read-only; a job that needs to write says so.
+if grep -nE '^  "?contents"?:[[:space:]]*"?write' "$WORKFLOW" >/dev/null; then
+    fail "contents: write is granted to every job (set it per job)"
+else
+    pass "no workflow-wide write token"
+fi
+
+# 8. Checkout must not leave a token in .git/config for later steps.
+if grep -nE 'persist-credentials:[[:space:]]*true' "$WORKFLOW" >/dev/null; then
+    grep -nE 'persist-credentials:[[:space:]]*true' "$WORKFLOW" | sed 's/^/      /'
+    fail "a checkout keeps its token on disk"
+else
+    pass "no checkout keeps its token on disk"
+fi
+
+# 9. Ref names and event text reach scripts through env, not `${{ }}` pasted
+#    into a script. Lines of the form `KEY: ${{ … }}` (env, outputs) are fine.
+INJECT=$(
+    grep -nE '\$\{\{[^}]*(ref_name|head_ref|outputs\.tag|github\.event\.)' "$WORKFLOW" |
+        grep -vE '^[0-9]+:[[:space:]]*(-[[:space:]]*)?"?[A-Za-z0-9_-]+"?:[[:space:]]' || true
+)
+if [ -n "$INJECT" ]; then
+    echo "$INJECT" | sed 's/^/      /'
+    fail "a ref name or event field is pasted into a script (pass it through env)"
+else
+    pass "ref names and event fields reach scripts through env"
+fi
+
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "Workflow hardening intact: $WORKFLOW"

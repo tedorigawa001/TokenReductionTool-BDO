@@ -2,6 +2,7 @@ use super::constants::{CLAUDE_DIR, CURSOR_DIR, GEMINI_DIR, SETTINGS_JSON, SETTIN
 use crate::core::bounded_read::{read_text, Links};
 use crate::core::stream::exec_capture;
 use crate::discover::lexer::{canonicalize_segment, split_for_permissions, CanonicalSegment};
+use crate::discover::registry::strip_env_prefix;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -87,15 +88,27 @@ pub(crate) fn check_command_with_rules_matching(
     // the shell will read it: `"--force"`, `--fo''rce`, `push  --force`.
     let canonical: Vec<CanonicalSegment> =
         segments.iter().map(|s| canonicalize_segment(s)).collect();
+    // `FOO=1 git push`, `env git push` and `sudo git push` run `git push`, and
+    // the rewriter rewrites them as `git push`, so deny and ask rules judge
+    // that command too.
+    let inner: Vec<CanonicalSegment> = segments
+        .iter()
+        .map(|s| canonicalize_segment(strip_env_prefix(s)))
+        .collect();
+    let restricted_by =
+        |segment: &str, canon: &CanonicalSegment, inner: &CanonicalSegment, rules: &[String]| {
+            rules.iter().any(|pattern| {
+                command_matches_pattern(segment, pattern)
+                    || command_matches_pattern(&canon.text, pattern)
+                    || command_matches_pattern(strip_env_prefix(segment), pattern)
+                    || command_matches_pattern(&inner.text, pattern)
+            })
+        };
 
     // Deny takes highest priority and pre-empts every other construct.
-    for (segment, canon) in segments.iter().zip(&canonical) {
-        for pattern in deny_rules {
-            if command_matches_pattern(segment, pattern)
-                || command_matches_pattern(&canon.text, pattern)
-            {
-                return PermissionVerdict::Deny;
-            }
+    for ((segment, canon), inner) in segments.iter().zip(&canonical).zip(&inner) {
+        if restricted_by(segment, canon, inner, deny_rules) {
+            return PermissionVerdict::Deny;
         }
     }
 
@@ -111,32 +124,24 @@ pub(crate) fn check_command_with_rules_matching(
     let mut all_segments_allowed = true;
     let mut saw_segment = false;
 
-    for (segment, canon) in segments.iter().zip(&canonical) {
+    for ((segment, canon), inner) in segments.iter().zip(&canonical).zip(&inner) {
         if segment.is_empty() {
             continue;
         }
         saw_segment = true;
 
         // Ask — if any segment matches an ask rule, the final verdict is Ask.
-        if !any_ask {
-            for pattern in ask_rules {
-                if command_matches_pattern(segment, pattern)
-                    || command_matches_pattern(&canon.text, pattern)
-                {
-                    any_ask = true;
-                    break;
-                }
-            }
+        if !any_ask && restricted_by(segment, canon, inner, ask_rules) {
+            any_ask = true;
         }
 
         // An expansion's value is unknown until it runs: `git push $X`,
         // `git push {--force,}`. If a deny or ask rule concerns this command,
         // it cannot be ruled out, so a person decides.
-        if canon.has_expansion
-            && deny_rules
-                .iter()
-                .chain(ask_rules)
-                .any(|rule| rule_concerns_command(rule, canon))
+        if (canon.has_expansion || inner.has_expansion)
+            && deny_rules.iter().chain(ask_rules).any(|rule| {
+                rule_concerns_command(rule, canon) || rule_concerns_command(rule, inner)
+            })
         {
             any_ask = true;
         }

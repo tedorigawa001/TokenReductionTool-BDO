@@ -965,6 +965,21 @@ fn run_status(args: &[String], verbose: u8, global_args: &[String]) -> Result<i3
         return Ok(result.exit_code);
     }
 
+    // Any other failure (a broken index, unsafe ownership, a lock) is git's
+    // to explain; empty output here would read as a clean tree.
+    if !result.success() {
+        if !result.stderr.trim().is_empty() {
+            eprint!("{}", result.stderr);
+        }
+        timer.track(
+            &format!("git status {}", args.join(" ")),
+            &format!("bdo git status {}", args.join(" ")),
+            &result.stderr,
+            &result.stderr,
+        );
+        return Ok(result.exit_code);
+    }
+
     let formatted = match extract_detached_head(&raw_output) {
         Some(detached_ref) => format_status_output_detached(&result.stdout, &detached_ref),
         None => format_status_output(&result.stdout),
@@ -1002,16 +1017,15 @@ fn run_add(args: &[String], verbose: u8, global_args: &[String]) -> Result<i32> 
     let mut cmd = git_cmd(global_args);
     cmd.arg("add");
 
-    // Pass all arguments directly to git (flags like -A, -p, --all, etc.)
-    if args.is_empty() {
-        cmd.arg(".");
-    } else {
-        for arg in args {
-            cmd.arg(arg);
-        }
-    }
+    // Pass all arguments directly to git (flags like -A, -p, --all, etc.).
+    // With none, git adds nothing and says so; adding `.` would stage every
+    // untracked file, `.env` included.
+    cmd.args(args);
 
     let result = exec_capture(&mut cmd).context("Failed to run git add")?;
+    if args.is_empty() && !result.stderr.trim().is_empty() {
+        eprint!("{}", result.stderr);
+    }
 
     if verbose > 0 {
         eprintln!("git add executed");
@@ -1607,6 +1621,9 @@ fn run_stash(
             let mut cmd = git_cmd(global_args);
             cmd.args(["stash", "list"]);
             let result = exec_capture(&mut cmd).context("Failed to run git stash list")?;
+            if !result.success() {
+                return Ok(report_git_failure(&timer, "git stash list", &result));
+            }
 
             if result.stdout.trim().is_empty() {
                 let msg = "No stashes";
@@ -1631,6 +1648,9 @@ fn run_stash(
                 cmd.arg(arg);
             }
             let result = exec_capture(&mut cmd).context("Failed to run git stash show")?;
+            if !result.success() {
+                return Ok(report_git_failure(&timer, "git stash show", &result));
+            }
 
             let filtered = if result.stdout.trim().is_empty() {
                 let msg = "Empty stash";
@@ -1757,6 +1777,21 @@ fn filter_stash_list(output: &str) -> String {
     result.join("\n")
 }
 
+/// Shows git's own error for a failed read-only command and returns its code,
+/// so a failure never reads as an empty result.
+fn report_git_failure(
+    timer: &tracking::TimedExecution,
+    command: &str,
+    result: &crate::core::stream::CaptureResult,
+) -> i32 {
+    let combined = result.combined();
+    if !combined.trim().is_empty() {
+        eprint!("{}", combined);
+    }
+    timer.track(command, &format!("bdo {}", command), &combined, &combined);
+    result.exit_code
+}
+
 fn run_worktree(args: &[String], verbose: u8, global_args: &[String]) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
 
@@ -1799,10 +1834,20 @@ fn run_worktree(args: &[String], verbose: u8, global_args: &[String]) -> Result<
         return Ok(0);
     }
 
-    // Default: list mode
+    // Only a plain `list` is compacted; anything else (`repair`,
+    // `list --porcelain`, ...) runs as given.
+    if !(args.is_empty() || args.len() == 1 && args[0] == "list") {
+        let mut full: Vec<OsString> = vec![OsString::from("worktree")];
+        full.extend(args.iter().map(OsString::from));
+        return run_passthrough(&full, global_args, verbose);
+    }
+
     let mut cmd = git_cmd(global_args);
     cmd.args(["worktree", "list"]);
     let result = exec_capture(&mut cmd).context("Failed to run git worktree list")?;
+    if !result.success() {
+        return Ok(report_git_failure(&timer, "git worktree list", &result));
+    }
 
     let filtered = filter_worktree_list(&result.stdout);
     println!("{}", filtered);

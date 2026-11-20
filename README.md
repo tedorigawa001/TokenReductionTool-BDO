@@ -666,9 +666,9 @@ export BDO_TELEMETRY_DISABLED=1   # Blocks telemetry regardless of consent
 
 <a href="https://www.star-history.com/?repos=tedorigawa001%2FTokenReductionTool&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=tedorigawa001/TokenReductionTool&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=tedorigawa001/TokenReductionTool&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=tedorigawa001/TokenReductionTool&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=tedorigawa001/TokenReductionTool-BDO&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=tedorigawa001/TokenReductionTool-BDO&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=tedorigawa001/TokenReductionTool-BDO&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -676,8 +676,8 @@ export BDO_TELEMETRY_DISABLED=1   # Blocks telemetry regardless of consent
 
 <a href="https://starmapper.bruniaux.com/tedorigawa001/TokenReductionTool-BDO">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool?theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool?theme=light" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool-BDO?theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool-BDO?theme=light" />
     <img alt="StarMapper" src="https://starmapper.bruniaux.com/api/map-image/tedorigawa001/TokenReductionTool-BDO" />
   </picture>
 </a>
@@ -693,7 +693,7 @@ export BDO_TELEMETRY_DISABLED=1   # Blocks telemetry regardless of consent
 
 ## Contributing
 
-Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/tedorigawa001/TokenReductionTool).
+Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/tedorigawa001/TokenReductionTool-BDO).
 
 ## License
 

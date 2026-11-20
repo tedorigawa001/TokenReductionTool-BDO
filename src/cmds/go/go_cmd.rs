@@ -230,9 +230,34 @@ fn match_go_tool(args: &[OsString]) -> Option<(GoTool, &[OsString])> {
     None
 }
 
+/// The arguments for a filtered `golangci-lint run`, without the `run` itself
+/// (bdo adds it), or `None` for another subcommand such as `fmt`, which runs
+/// unfiltered as given.
+fn golangci_run_args(args: &[OsString]) -> Option<Vec<OsString>> {
+    let text: Vec<String> = args
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    match golangci_cmd::find_subcommand_index(&text) {
+        Some(i) if text[i] == "run" => {
+            let mut rest = args.to_vec();
+            rest.remove(i);
+            Some(rest)
+        }
+        Some(_) => None,
+        None => Some(args.to_vec()),
+    }
+}
+
 /// Run `go tool golangci-lint` and filter its output via the golangci JSON filter.
 /// Reusing parts of golangci_cmd.
 fn run_go_tool_golangci_lint(args: &[OsString], verbose: u8) -> Result<i32> {
+    let Some(run_args) = golangci_run_args(args) else {
+        let mut full = vec![OsString::from("tool"), OsString::from("golangci-lint")];
+        full.extend(args.iter().cloned());
+        return crate::core::runner::run_passthrough("go", &full, verbose);
+    };
+    let args = &run_args[..];
     let timer = tracking::TimedExecution::start();
 
     let version = detect_go_tool_golangci_version();
@@ -294,9 +319,9 @@ fn run_go_tool_golangci_lint(args: &[OsString], verbose: u8) -> Result<i32> {
     );
 
     let exit_code = exit_code_from_output(&output, "go tool golangci-lint");
-    // golangci-lint: exit 0 = clean, exit 1 = lint issues found (not an error),
-    // exit 2+ = config/build error, None = killed by signal (OOM, SIGKILL)
-    Ok(if exit_code == 1 { 0 } else { exit_code })
+    // Its exit code is kept, as for `bdo golangci-lint`: 1 means issues were
+    // found, and `go tool golangci-lint run && git push` relies on that.
+    Ok(exit_code)
 }
 
 /// Parse go test -json output (NDJSON format)
@@ -746,6 +771,20 @@ fn compact_package_name(package: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_go_tool_golangci_keeps_the_subcommand_it_was_given() {
+        // `run` is added once, not again before a `run` already there.
+        assert_eq!(golangci_run_args(&os(&["run", "./..."])), Some(os(&["./..."])));
+        assert_eq!(golangci_run_args(&os(&["./..."])), Some(os(&["./..."])));
+        assert_eq!(
+            golangci_run_args(&os(&["-c", "x.yml", "run", "./..."])),
+            Some(os(&["-c", "x.yml", "./..."]))
+        );
+        // Any other subcommand is not a lint run: `fmt` formats.
+        assert_eq!(golangci_run_args(&os(&["fmt"])), None);
+        assert_eq!(golangci_run_args(&os(&["version"])), None);
+    }
 
     #[test]
     fn test_filter_go_test_all_pass() {

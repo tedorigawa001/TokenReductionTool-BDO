@@ -375,6 +375,8 @@ fn truncate_for_column(text: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
+    // Stored commands came from agents and repositories.
+    let text = &crate::core::display_helpers::terminal_text(text, false);
     let char_count = text.chars().count();
     if char_count <= width {
         return format!("{:<width$}", text, width = width);
@@ -800,4 +802,20 @@ fn confirm_reset() -> Result<bool> {
         .context("Failed to read confirmation")?;
 
     Ok(matches!(line.trim().to_lowercase().as_str(), "y" | "yes"))
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::truncate_for_column;
+
+    #[test]
+    fn stored_commands_cannot_send_terminal_escapes() {
+        // Commands come from agents and repositories; `ESC[2J` would clear
+        // the screen when `bdo gain --history` prints them.
+        for width in [5, 40] {
+            let cell = truncate_for_column("bdo [ \u{1b}[2J \u{202e}x ]", width);
+            assert!(!cell.contains('\u{1b}'), "{cell:?}");
+            assert!(!cell.contains('\u{202e}'), "{cell:?}");
+        }
+    }
 }

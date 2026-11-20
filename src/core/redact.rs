@@ -77,7 +77,7 @@ macro_rules! shell_word {
 }
 macro_rules! env_prefix {
     () => {
-        r#"\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|ACCESS_KEY|SECRET_KEY|PRIVATE_KEY|CREDENTIALS?)="#
+        r#"\b((?:[A-Z][A-Z0-9_]*)?(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|ACCESS_KEY|SECRET_KEY|PRIVATE_KEY|CREDENTIALS?)="#
     };
 }
 macro_rules! flag_prefix {
@@ -483,6 +483,13 @@ mod tests {
             "secret survived redaction: {out}"
         );
         assert!(out.contains(MASK), "no mask marker in: {out}");
+    }
+
+    #[test]
+    fn test_bare_secret_variable_names() {
+        for name in ["SECRET_KEY", "TOKEN", "PASSWORD", "API_KEY", "ACCESS_KEY"] {
+            assert_masked(&format!("{name}=abcdefgh12345678 make"), "abcdefgh12345678");
+        }
     }
 
     #[test]

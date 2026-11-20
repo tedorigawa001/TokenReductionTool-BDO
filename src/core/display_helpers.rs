@@ -6,6 +6,27 @@
 use crate::core::tracking::{DayStats, MonthStats, WeekStats};
 use crate::core::utils::format_tokens;
 
+/// `text` safe to print on a terminal: control characters and the Unicode
+/// characters that reorder text are shown escaped (`\u{1b}`), so text from a
+/// repository or an agent cannot move the cursor, clear the screen or hide
+/// what it says. With `multiline`, newlines are kept.
+pub fn terminal_text(text: &str, multiline: bool) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c == '\n' && multiline {
+            escaped.push(c);
+        } else if c.is_control()
+            || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}'
+                | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            escaped.extend(c.escape_default());
+        } else {
+            escaped.push(c);
+        }
+    }
+    escaped
+}
+
 /// Format duration in milliseconds to human-readable string
 pub fn format_duration(ms: u64) -> String {
     if ms < 1000 {

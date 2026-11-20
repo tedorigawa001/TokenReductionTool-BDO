@@ -7,7 +7,6 @@ use crate::core::utils::truncate;
 use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::process::Command;
 
 const MAX_SUMMARY_LIST: usize = CAP_WARNINGS;
 const MAX_SUMMARY_KEYS: usize = CAP_WARNINGS;
@@ -30,22 +29,27 @@ lazy_static! {
     static ref NO_WARNINGS_RE: Regex = Regex::new(r"\b0 warnings?\b").unwrap();
 }
 
-/// Run a command and provide a heuristic summary
-pub fn run(command: &str, verbose: u8) -> Result<i32> {
+/// Run a command and provide a heuristic summary.
+///
+/// A single argument is a shell command string. Several arguments are passed
+/// as they are: joining them for the shell would turn a quoted `a$(cmd).txt`
+/// back into shell syntax.
+pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
+    let command = &*args.join(" ");
 
     if verbose > 0 {
         eprintln!("Running and summarizing: {}", command);
     }
 
-    let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = Command::new("cmd");
-        c.args(["/C", command]);
-        c
-    } else {
-        let mut c = Command::new("sh");
-        c.args(["-c", command]);
-        c
+    let mut cmd = match args {
+        [] => anyhow::bail!("bdo summary: no command given (usage: bdo summary <cmd> [args...])"),
+        [shell] => crate::core::utils::shell_command(shell),
+        [program, rest @ ..] => {
+            let mut c = crate::core::utils::resolved_command(program);
+            c.args(rest);
+            c
+        }
     };
     let result = exec_capture(&mut cmd).context("Failed to execute command")?;
 

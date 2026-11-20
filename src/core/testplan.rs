@@ -200,20 +200,18 @@ pub fn js_test_cmd(changes: &[Change], root: &Path) -> Option<(String, Vec<Strin
     if files.is_empty() {
         return None;
     }
-    let (mut args, prefix) = match js_runner(root) {
+    let (args, prefix) = match js_runner(root) {
+        // `--no-install`: never download a runner that is not installed.
         JsRunner::Jest => (
-            vec!["jest".to_string(), "--findRelatedTests".to_string()],
+            &["--no-install", "--", "jest", "--findRelatedTests"][..],
             "npx jest --findRelatedTests",
         ),
         JsRunner::Vitest => (
-            vec![
-                "vitest".to_string(),
-                "related".to_string(),
-                "--run".to_string(),
-            ],
+            &["--no-install", "--", "vitest", "related", "--run"][..],
             "npx vitest related --run",
         ),
     };
+    let mut args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     args.extend(files.iter().cloned());
     let display = format!("{prefix} {}", display_join(&files));
     Some(("npx".to_string(), args, display))
@@ -363,7 +361,7 @@ mod tests {
         let changes = vec![ch("M", "src/app.ts"), ch("D", "src/gone.ts")];
         let (program, args, display) = js_test_cmd(&changes, dir.path()).unwrap();
         assert_eq!(program, "npx");
-        assert_eq!(args[0], "vitest");
+        assert_eq!(args[..3], ["--no-install", "--", "vitest"]);
         assert!(display.starts_with("npx vitest related --run "));
         assert!(display.contains("'src/app.ts'"));
         assert!(args.contains(&"src/app.ts".to_string()));
@@ -380,7 +378,7 @@ mod tests {
         .unwrap();
         let (program, args, display) = js_test_cmd(&[ch("M", "src/app.jsx")], dir.path()).unwrap();
         assert_eq!(program, "npx");
-        assert_eq!(args[0], "jest");
+        assert_eq!(args[..3], ["--no-install", "--", "jest"]);
         assert!(display.starts_with("npx jest --findRelatedTests "));
     }
 

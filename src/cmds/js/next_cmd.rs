@@ -13,9 +13,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let mut cmd = if next_exists {
         resolved_command("next")
     } else {
-        let mut c = resolved_command("npx");
-        c.arg("next");
-        c
+        crate::core::utils::npx_installed("next")
     };
 
     cmd.arg("build");

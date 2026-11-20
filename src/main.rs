@@ -343,7 +343,8 @@ enum Commands {
 
     /// Run command and show heuristic summary
     Summary {
-        /// Command to run and summarize
+        /// A program and its arguments, passed as they are; a single argument
+        /// is run as a shell command string
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
@@ -678,12 +679,13 @@ enum Commands {
         min_occurrences: usize,
     },
 
-    /// Execute a shell command via sh -c (raw, no filtering or tracking)
+    /// Execute a command (raw, no filtering or tracking)
     Run {
-        /// Command string to execute (use -c for shell-like invocation)
+        /// Shell command string, run with sh -c (cmd /C on Windows)
         #[arg(short = 'c', long = "command")]
         command: Option<String>,
-        /// Positional command arguments (alternative to -c)
+        /// A program and its arguments, passed as they are; a single
+        /// argument is run as a shell command string
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -2126,10 +2128,7 @@ fn run_cli() -> Result<i32> {
             KubectlCommands::Other(args) => container::run_kubectl_passthrough(&args, cli.verbose)?,
         },
 
-        Commands::Summary { command } => {
-            let cmd = command.join(" ");
-            summary::run(&cmd, cli.verbose)?
-        }
+        Commands::Summary { command } => summary::run(&command, cli.verbose)?,
 
         Commands::Grep {
             pattern,
@@ -2628,23 +2627,32 @@ fn run_cli() -> Result<i32> {
         }
 
         Commands::Run { command, args } => {
-            let raw = match command {
-                Some(c) => c,
-                None if !args.is_empty() => args.join(" "),
-                None => String::new(),
+            // `-c` or a single argument is a shell command string. Several
+            // arguments are passed as they are: joining them for the shell
+            // would turn a quoted `a$(cmd).txt` back into shell syntax.
+            let shell = match (&command, args.as_slice()) {
+                (Some(c), _) | (None, [c]) => Some(c.as_str()),
+                _ => None,
             };
-            if raw.trim().is_empty() {
-                0
-            } else {
-                use std::process::Command as ProcCommand;
-                let shell = if cfg!(windows) { "cmd" } else { "sh" };
-                let flag = if cfg!(windows) { "/C" } else { "-c" };
-                let status = ProcCommand::new(shell)
-                    .arg(flag)
-                    .arg(&raw)
-                    .status()
-                    .with_context(|| format!("Failed to execute: {}", raw))?;
-                status.code().unwrap_or(1)
+            let cmd = match (shell, args.as_slice()) {
+                (Some(c), _) if c.trim().is_empty() => None,
+                (Some(c), _) => Some(core::utils::shell_command(c)),
+                (None, [program, rest @ ..]) => {
+                    let mut c = core::utils::resolved_command(program);
+                    c.args(rest);
+                    Some(c)
+                }
+                (None, []) => None,
+            };
+            match cmd {
+                Some(mut cmd) => {
+                    let display = shell.map_or_else(|| args.join(" "), str::to_string);
+                    let status = cmd
+                        .status()
+                        .with_context(|| format!("Failed to execute: {display}"))?;
+                    status.code().unwrap_or(1)
+                }
+                None => 0,
             }
         }
 

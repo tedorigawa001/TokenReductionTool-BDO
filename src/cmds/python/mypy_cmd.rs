@@ -6,12 +6,18 @@ use anyhow::Result;
 use regex::Regex;
 use std::collections::HashMap;
 
+const MYPY_WITHOUT_CWD: &str = "import runpy, sys; del sys.path[0]; sys.argv[0] = 'mypy'; \
+     runpy.run_module('mypy', run_name='__main__', alter_sys=True)";
+
 pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let mut cmd = if tool_exists("mypy") {
         resolved_command("mypy")
     } else {
+        // `python3 -m` puts the working directory first on the module path,
+        // so a repository's `mypy.py` would run. `-P` needs Python 3.11, so
+        // drop that entry by hand and run the module.
         let mut c = resolved_command("python3");
-        c.arg("-m").arg("mypy");
+        c.arg("-c").arg(MYPY_WITHOUT_CWD);
         c
     };
 

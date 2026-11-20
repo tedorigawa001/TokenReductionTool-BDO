@@ -53,7 +53,12 @@ pub fn run_format(args: &[String], verbose: u8) -> Result<i32> {
     let check_mode = !has_write_mode_override(args);
     let filtered =
         format_report_summary_or_raw(report_path.as_deref(), check_mode, &raw, command_started_at);
-    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
+    let filtered = crate::core::runner::with_failure_evidence(
+        filtered,
+        &result.stdout,
+        &result.stderr,
+        result.exit_code,
+    );
     println!("{}", filtered);
 
     timer.track(
@@ -410,7 +415,10 @@ fn format_dotnet_format_output(
     }
 
     if changed_count > MAX_FORMAT_FILES {
-        output.push_str(&format!("\n… +{} more files", changed_count - MAX_FORMAT_FILES));
+        output.push_str(&format!(
+            "\n… +{} more files",
+            changed_count - MAX_FORMAT_FILES
+        ));
         let all_files = summary
             .files_with_changes
             .iter()
@@ -1242,7 +1250,12 @@ fn format_test_output(
 
     // Status line emitted last; see format_build_output (issue #1574).
     // Warnings before errors: errors survive `| tail -N` immediately above the verdict.
-    [failed_tests_section, warnings_section, errors_section, header]
+    [
+        failed_tests_section,
+        warnings_section,
+        errors_section,
+        header,
+    ]
     .into_iter()
     .filter(|s| !s.is_empty())
     .collect::<Vec<_>>()
@@ -1335,10 +1348,10 @@ fn format_restore_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::UNIX_EPOCH;
     use crate::dotnet_format_report;
     use std::fs;
     use std::time::Duration;
+    use std::time::UNIX_EPOCH;
 
     fn build_dotnet_args_for_test(
         subcommand: &str,

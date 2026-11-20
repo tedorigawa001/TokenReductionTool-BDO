@@ -309,6 +309,16 @@ pub fn describe_filters(content: &str) -> Result<Vec<FilterRisks>, String> {
                     count(def.strip_lines_matching.len(), "pattern")
                 ));
             }
+            if let Some(n) = def.truncate_lines_at {
+                risks.push(format!(
+                    "truncate_lines_at: cuts each line to at most {n} characters"
+                ));
+            }
+            if def.filter_stderr {
+                risks.push(
+                    "filter_stderr: also filters standard error, including diagnostics".into(),
+                );
+            }
             for (key, limit) in [
                 ("head_lines", def.head_lines),
                 ("tail_lines", def.tail_lines),
@@ -405,7 +415,7 @@ fn compile_filter(name: String, def: TomlFilterDef) -> Result<CompiledFilter, St
     for cmd in RUST_HANDLED_COMMANDS {
         if match_regex.is_match(cmd) {
             eprintln!(
-                "[bdo] warning: filter '{}' match_command matches '{}' which is already \
+                "[bdo] warning: filter {:?} match_command matches '{}' which is already \
                  handled by a Rust module — this filter will never activate for that command",
                 name, cmd
             );

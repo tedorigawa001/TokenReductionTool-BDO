@@ -380,7 +380,8 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   detected.」と出たまま、出力を書き換えるフィルターが信頼された（本物の bdo で再現）。読み込みと同じ解釈で
   フィルターごとに、replace・match_output・keep/strip_lines_matching・head/tail/max_lines・on_empty を
   列挙する。読めないファイルは「適用されない」と出す。ファイルの中身はこれまでどおり全文を表示する。
-  画面に ESC を混ぜて中身を隠す方法は成り立たない（TOML は制御文字を許さず、読めずに適用されない）。
+  元のファイルの表示と、TOML の解析結果・エラーを表示する際は制御文字を可視化する。
+  行の末尾を削る truncate_lines_at と、標準エラーも処理する filter_stderr も要約に出す。
 - **dotnet の一時ファイルの名前が予測できた**: 共有の一時ディレクトリに、時刻・PID・連番の名前で binlog・
   テスト結果のディレクトリ・format のレポートを作っていた。ほかのローカルユーザーが先に作れば、偽の `.trx`
   が要約に混ざり、置かれた binlog のファイルに MSBuild のログ（環境変数を含む）が書かれる。実行ごとに

@@ -978,3 +978,35 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
   素の `list` になっていたので、`list` 以外はそのまま実行する。
 - **`bdo test --changed` でファイル名がオプションになった**: `--deselect=a_test.py` や `--config=evil.ts` という
   名前のファイルが pytest・vitest・jest にオプションとして渡っていた。`-` で始まるパスには `./` を付ける。
+
+### 2026-11-20 — ローカルのファイル、記録、表示
+
+同じ点検で見つかった、ファイルと出力まわりの問題。
+- **tee のローテーションがユーザーの `.log` を消した**: tee のディレクトリにある `*.log` を、名前順に古いものから
+  消していた。`BDO_TEE_DIR` が自分のログのディレクトリを指していると `001-build.log` などが消えた（再現）。
+  bdo が付ける名前（`<epoch>_<slug>[_<nonce>].log`）のファイルだけをローテーションする。
+- **`bdo learn --write-rules` が記録のコマンドをそのまま書いた**: 改行を含むコマンドで、以後のセッションが毎回
+  読み込む `.claude/rules/cli-corrections.md` に行を足せた。制御文字を含むルールは書かず、コマンドは中の
+  バッククォートより長い囲みで書く。
+- **前置きのない秘密の変数名がマスクされなかった**: `SECRET_KEY=`・`TOKEN=`・`PASSWORD=` などが履歴と tee に
+  そのまま残った。
+- **`bdo gain --history` がエスケープシーケンスを表示した**: `bdo trust` と同じ方法でエスケープする
+  （`display_helpers::terminal_text` に移した）。
+- **テレメトリーに passthrough のフルパスが入った**: ユーザー名を含むことがあるので、ファイル名だけを送る。
+- **信頼チェックとフィルターの読み込みでファイルを 2 回読んでいた**: ハッシュを計算したのと同じ中身を読み込む。
+- **`bdo go tool golangci-lint`**: `run` が二重になり、`fmt` が lint になっていた。終了コード 1（指摘あり）を
+  0 にしていたので、`bdo golangci-lint` と同じくそのまま返す。
+
+### 2026-11-20 — リリースのワークフロー
+
+同じ点検で見つかった、CI と配布まわりの問題。
+- **build ジョブが cargo-dist のインストーラーを確認なしで実行していた**: dist の matrix の install コマンドは
+  インストーラーをネットワークからシェルに流し込む。attestation に署名できるジョブなので、差し替えられると
+  正規の証明付きの改ざんバイナリができる。`plan` と同じく `cargo install cargo-dist --locked` にした。
+- **全ジョブに `contents: write`**: 既定を読み取りにし、リリースを作る `host` だけ write にした。
+- **tap のトークンが `brew` の実行中もディスクに残った**: `persist-credentials: false` にし、最後の `git push` にだけ渡す。
+- **タグ名を `run:` に埋め込んでいた**: `env:` 経由で渡す。
+- `check-release-hardening.sh` が上の 4 つを検出する。Dependabot で actions の SHA の更新を月 1 回提案させる。
+- 古いリポジトリ名の URL を `-BDO` に置き換えた。
+- 次のリリースで初めて試されるもの: `plan` が読み取りの権限で `dist host --steps=create` を実行できるか、
+  tap への push の新しい認証。

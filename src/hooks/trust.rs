@@ -246,25 +246,34 @@ pub fn run_untrust() -> Result<()> {
 // Risk analysis
 // ---------------------------------------------------------------------------
 
+/// Built from the parsed filters, the way they will be loaded: matching the
+/// text missed `"\u0072eplace"` keys and `[ filters . x ]` headers.
 fn print_risk_summary(content: &str) {
-    let filter_count = content.matches("[filters.").count();
-    let has_replace = content.contains("replace");
-    let has_match_output = content.contains("match_output");
-    let has_dot_pattern = content.contains("pattern = \".\"") || content.contains("pattern = '.'");
-
     println!("Risk summary:");
-    println!("  Filters: {}", filter_count);
-
-    if has_replace {
-        println!("  [!] Contains 'replace' rules (can rewrite output)");
+    let filters = match crate::core::toml_filter::describe_filters(content) {
+        Ok(filters) => filters,
+        Err(e) => {
+            println!("  The file does not parse, so no filters will apply: {e}");
+            return;
+        }
+    };
+    println!("  Filters: {}", filters.len());
+    let mut any_risk = false;
+    for filter in &filters {
+        println!(
+            "  - {} (match_command {:?})",
+            filter.name, filter.match_command
+        );
+        if let Some(e) = &filter.invalid {
+            println!("      will not apply: {e}");
+            continue;
+        }
+        for risk in &filter.risks {
+            any_risk = true;
+            println!("      [!] {risk}");
+        }
     }
-    if has_match_output {
-        println!("  [!] Contains 'match_output' rules (can replace entire output)");
-    }
-    if has_dot_pattern {
-        println!("  [!] Contains catch-all pattern '.' (matches everything)");
-    }
-    if !has_replace && !has_match_output && !has_dot_pattern {
+    if !any_risk {
         println!("  No high-risk patterns detected.");
     }
 }

@@ -198,7 +198,7 @@ pub fn format_text(report: &DiscoverReport, limit: usize, verbose: bool) -> Stri
 
         out.push_str(&"-".repeat(52));
         out.push('\n');
-        out.push_str("-> github.com/tedorigawa001/TokenReductionTool/issues\n");
+        out.push_str("-> github.com/tedorigawa001/TokenReductionTool-BDO/issues\n");
     }
 
     // BDO_DISABLED bypass warning

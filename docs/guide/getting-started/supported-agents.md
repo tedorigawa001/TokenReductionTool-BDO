@@ -42,7 +42,7 @@ Agent runs "cargo test"
 | Codex CLI | AGENTS.md instructions | N/A |
 | Kilo Code | Rules file (prompt-level) | N/A |
 | Google Antigravity | Rules file (prompt-level) | N/A |
-| Mistral Vibe | Planned ([#800](https://github.com/tedorigawa001/TokenReductionTool/issues/800)) | Pending upstream |
+| Mistral Vibe | Planned ([#800](https://github.com/tedorigawa001/TokenReductionTool-BDO/issues/800)) | Pending upstream |
 
 ## Installation by agent
 
@@ -182,7 +182,7 @@ Antigravity reads `.agents/rules/` as custom instructions. Bushido adds guidance
 
 ### Mistral Vibe (planned)
 
-Support is blocked on upstream `BeforeToolCallback` ([mistral-vibe#531](https://github.com/mistralai/mistral-vibe/issues/531)). Tracked in [#800](https://github.com/tedorigawa001/TokenReductionTool/issues/800).
+Support is blocked on upstream `BeforeToolCallback` ([mistral-vibe#531](https://github.com/mistralai/mistral-vibe/issues/531)). Tracked in [#800](https://github.com/tedorigawa001/TokenReductionTool-BDO/issues/800).
 
 ## Integration tiers explained
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# bdo installer - https://github.com/tedorigawa001/TokenReductionTool
+# bdo installer - https://github.com/tedorigawa001/TokenReductionTool-BDO
 # Usage: curl -fsSL https://raw.githubusercontent.com/tedorigawa001/TokenReductionTool-BDO/refs/heads/main/install.sh | sh
 
 set -e

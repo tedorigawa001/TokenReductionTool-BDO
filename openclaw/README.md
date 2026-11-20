@@ -62,7 +62,7 @@ In `openclaw.json`:
 
 ## What gets rewritten
 
-Everything that `bdo rewrite` supports (30+ commands). See the [full command list](https://github.com/tedorigawa001/TokenReductionTool#commands).
+Everything that `bdo rewrite` supports (30+ commands). See the [full command list](https://github.com/tedorigawa001/TokenReductionTool-BDO#commands).
 
 ## What's NOT rewritten
 

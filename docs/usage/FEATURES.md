@@ -1381,7 +1381,7 @@ Bushido peut envoyer un ping anonyme une fois par jour (23h d'intervalle) pour d
 
 **Donnees envoyees :** hash de device (SHA-256 d'un sel aleatoire), version, OS, architecture, nombre de commandes/24h, top commandes, pourcentage d'economies.
 
-**Responsable du traitement :** `Bushido AI Labs` (https://github.com/tedorigawa001/TokenReductionTool)
+**Responsable du traitement :** `Bushido AI Labs` (https://github.com/tedorigawa001/TokenReductionTool-BDO)
 
 **Gerer la telemetrie :**
 ```bash

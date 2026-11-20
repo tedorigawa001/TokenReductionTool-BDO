@@ -1,0 +1,12 @@
+# Workflow actions are pinned to commit SHAs (scripts/check-release-hardening.sh),
+# so nothing moves them forward on its own. Dependabot proposes the update as a
+# PR, with the new SHA and the release notes, for a person to review.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

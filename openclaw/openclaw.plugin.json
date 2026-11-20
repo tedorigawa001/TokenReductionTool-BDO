@@ -3,7 +3,7 @@
   "name": "Bushido Token Optimizer",
   "version": "1.0.0",
   "description": "Transparently rewrites shell commands to their Bushido equivalents for 60-90% LLM token savings",
-  "homepage": "https://github.com/tedorigawa001/TokenReductionTool",
+  "homepage": "https://github.com/tedorigawa001/TokenReductionTool-BDO",
   "license": "Apache-2.0",
   "configSchema": {
     "type": "object",

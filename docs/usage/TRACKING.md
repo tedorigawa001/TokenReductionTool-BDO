@@ -369,7 +369,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install Bushido
-        run: cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+        run: cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 
       - name: Export weekly stats
         run: |
@@ -444,7 +444,7 @@ if __name__ == "__main__":
 ```rust
 // In your Cargo.toml
 // [dependencies]
-// bdo = { git = "https://github.com/tedorigawa001/TokenReductionTool" }
+// bdo = { git = "https://github.com/tedorigawa001/TokenReductionTool-BDO" }
 
 use bdo::tracking::{Tracker, TimedExecution};
 use anyhow::Result;

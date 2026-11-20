@@ -359,6 +359,28 @@ pub fn detect_package_manager() -> &'static str {
     }
 }
 
+/// A command string for the platform shell: `sh -c` or `cmd /C`.
+pub fn shell_command(command: &str) -> Command {
+    let (shell, flag) = if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("sh", "-c")
+    };
+    let mut c = Command::new(shell);
+    c.arg(flag).arg(command);
+    c
+}
+
+/// `npx` limited to what is already installed. Without `--no-install`, npx
+/// downloads and runs a package of that name when the tool is missing (it
+/// assumes yes when stdin is not a terminal), and a repository's `.npmrc`
+/// chooses the registry.
+pub fn npx_installed(tool: &str) -> Command {
+    let mut c = resolved_command("npx");
+    c.arg("--no-install").arg("--").arg(tool);
+    c
+}
+
 /// Build a Command using the detected package manager's exec mechanism.
 /// Returns a Command ready to have tool-specific args appended.
 pub fn package_manager_exec(tool: &str) -> Command {
@@ -377,11 +399,7 @@ pub fn package_manager_exec(tool: &str) -> Command {
                 c.arg("exec").arg("--").arg(tool);
                 c
             }
-            _ => {
-                let mut c = resolved_command("npx");
-                c.arg("--no-install").arg("--").arg(tool);
-                c
-            }
+            _ => npx_installed(tool),
         }
     }
 }

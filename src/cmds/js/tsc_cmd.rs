@@ -19,9 +19,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     let mut cmd = if tsc_exists {
         resolved_command("tsc")
     } else {
-        let mut c = resolved_command("npx");
-        c.arg("tsc");
-        c
+        crate::core::utils::npx_installed("tsc")
     };
 
     for arg in args {

@@ -33,9 +33,7 @@ fn create_prisma_command() -> Command {
     if tool_exists("prisma") {
         resolved_command("prisma")
     } else {
-        let mut c = resolved_command("npx");
-        c.arg("prisma");
-        c
+        crate::core::utils::npx_installed("prisma")
     }
 }
 

@@ -368,7 +368,7 @@ mod modules_that_exec_on_their_own {
             ),
             (
                 &["--raw", "prisma", "generate"][..],
-                "npx ARGV:prisma generate",
+                "npx ARGV:--no-install -- prisma generate",
             ),
             (
                 &["--raw", "playwright", "test", "--reporter=line"][..],

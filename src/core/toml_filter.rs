@@ -258,6 +258,91 @@ impl TomlFilterRegistry {
     }
 }
 
+/// What one filter in a file can do to output, for `bdo trust` to show before
+/// the user trusts it.
+pub struct FilterRisks {
+    pub name: String,
+    pub match_command: String,
+    /// One entry per way the filter changes what is shown.
+    pub risks: Vec<String>,
+    /// Why the filter will not apply, if it fails to compile.
+    pub invalid: Option<String>,
+}
+
+/// Parse a filter file the way it will be loaded and list what each filter
+/// does. Reading the parsed values, not the text, matters: TOML lets a key be
+/// written `"\u0072eplace"` and a header `[ filters . x ]`.
+pub fn describe_filters(content: &str) -> Result<Vec<FilterRisks>, String> {
+    let file: TomlFilterFile =
+        toml::from_str(content).map_err(|e| format!("TOML parse error: {e}"))?;
+    if file.schema_version != 1 {
+        return Err(format!(
+            "unsupported schema_version {} (expected 1)",
+            file.schema_version
+        ));
+    }
+    Ok(file
+        .filters
+        .into_iter()
+        .map(|(name, def)| {
+            let mut risks = Vec::new();
+            let count =
+                |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+            if !def.replace.is_empty() {
+                risks.push(format!(
+                    "replace: rewrites lines ({})",
+                    count(def.replace.len(), "rule")
+                ));
+            }
+            if !def.match_output.is_empty() {
+                risks.push(format!(
+                    "match_output: can replace the whole output with a fixed message ({})",
+                    count(def.match_output.len(), "rule")
+                ));
+            }
+            if !def.keep_lines_matching.is_empty() {
+                risks.push("keep_lines_matching: drops every line that does not match".into());
+            }
+            if !def.strip_lines_matching.is_empty() {
+                risks.push(format!(
+                    "strip_lines_matching: drops matching lines ({})",
+                    count(def.strip_lines_matching.len(), "pattern")
+                ));
+            }
+            if let Some(n) = def.truncate_lines_at {
+                risks.push(format!(
+                    "truncate_lines_at: cuts each line to at most {n} characters"
+                ));
+            }
+            if def.filter_stderr {
+                risks.push(
+                    "filter_stderr: also filters standard error, including diagnostics".into(),
+                );
+            }
+            for (key, limit) in [
+                ("head_lines", def.head_lines),
+                ("tail_lines", def.tail_lines),
+                ("max_lines", def.max_lines),
+            ] {
+                if let Some(n) = limit {
+                    risks.push(format!("{key}: keeps at most {n} lines"));
+                }
+            }
+            if def.on_empty.is_some() {
+                risks.push("on_empty: shows a fixed message when nothing is left".into());
+            }
+            let match_command = def.match_command.clone();
+            let invalid = compile_filter(name.clone(), def).err();
+            FilterRisks {
+                name,
+                match_command,
+                risks,
+                invalid,
+            }
+        })
+        .collect())
+}
+
 /// Commands already handled by dedicated Rust modules (routed by Clap before TOML).
 /// A TOML filter whose match_command matches one of these will never activate —
 /// Clap routes the command before `run_fallback()` is reached.
@@ -330,7 +415,7 @@ fn compile_filter(name: String, def: TomlFilterDef) -> Result<CompiledFilter, St
     for cmd in RUST_HANDLED_COMMANDS {
         if match_regex.is_match(cmd) {
             eprintln!(
-                "[bdo] warning: filter '{}' match_command matches '{}' which is already \
+                "[bdo] warning: filter {:?} match_command matches '{}' which is already \
                  handled by a Rust module — this filter will never activate for that command",
                 name, cmd
             );

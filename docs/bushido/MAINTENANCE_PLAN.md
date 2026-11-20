@@ -372,6 +372,24 @@ bump コミット（`Cargo.toml` / `Cargo.lock` / CHANGELOG / README のバー�
   vitest・jest も同じ。`bdo npx …` は打たれた npx をそのまま動かすので変えていない。
 - テスト: `tests/exec_argument_identity.rs`（修正前は 4 件失敗）。
 
+### 2026-11-20 — `bdo trust` のリスクの要約、dotnet の一時ファイル
+
+コードの脆弱性の点検の残り 2 件。
+- **`bdo trust` の要約が文字列の照合だった**: `[filters.` と `replace` と `match_output` の文字列を探していたため、
+  TOML のキーを `"\u0072eplace"`、見出しを `[ filters . x ]` と書くと「Filters: 0」「No high-risk patterns
+  detected.」と出たまま、出力を書き換えるフィルターが信頼された（本物の bdo で再現）。読み込みと同じ解釈で
+  フィルターごとに、replace・match_output・keep/strip_lines_matching・head/tail/max_lines・on_empty を
+  列挙する。読めないファイルは「適用されない」と出す。ファイルの中身はこれまでどおり全文を表示する。
+  元のファイルの表示と、TOML の解析結果・エラーを表示する際は制御文字を可視化する。
+  行の末尾を削る truncate_lines_at と、標準エラーも処理する filter_stderr も要約に出す。
+- **dotnet の一時ファイルの名前が予測できた**: 共有の一時ディレクトリに、時刻・PID・連番の名前で binlog・
+  テスト結果のディレクトリ・format のレポートを作っていた。ほかのローカルユーザーが先に作れば、偽の `.trx`
+  が要約に混ざり、置かれた binlog のファイルに MSBuild のログ（環境変数を含む）が書かれる。実行ごとに
+  0700 のディレクトリ（`tempfile`）を作り、その中に置く。終わると消える。`tempfile` の既定は umask に
+  従う 0755 なので、権限は明示した。dotnet がないので実機では試していない。
+- **未対応**: `bdo trust` は確認なしで信頼を記録する。プロンプトの注入でエージェントが `bdo trust` を
+  打てば、そのまま信頼される（ホストの許可の確認は受ける）。
+
 ## 次の作業候補（リリースはペンディング）
 
 1. レビュー・ドッグフーディング継続、必要な改善の実装。

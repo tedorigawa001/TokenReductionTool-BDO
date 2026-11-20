@@ -189,8 +189,12 @@ pub fn run_trust(list: bool) -> Result<()> {
         println!("{}", "═".repeat(60));
         for (path, entry) in &trusted {
             let date = entry.trusted_at.get(..10).unwrap_or(&entry.trusted_at);
-            println!("  {} (trusted {})", path, date);
-            println!("    sha256:{}", entry.sha256);
+            println!(
+                "  {} (trusted {})",
+                terminal_text(path, false),
+                terminal_text(date, false)
+            );
+            println!("    sha256:{}", terminal_text(&entry.sha256, false));
         }
         return Ok(());
     }
@@ -205,12 +209,17 @@ pub fn run_trust(list: bool) -> Result<()> {
     let content = String::from_utf8_lossy(&content_bytes);
 
     println!("=== .bdo/filters.toml ===");
-    println!("{}", content);
+    println!("{}", terminal_text(&content, true));
     println!("=========================");
     println!();
 
     // Risk summary
-    print_risk_summary(&content);
+    if let Ok(text) = std::str::from_utf8(&content_bytes) {
+        print_risk_summary(text);
+    } else {
+        println!("Risk summary:");
+        println!("  The file is not valid UTF-8, so no filters will apply.");
+    }
 
     // Hash the in-memory buffer (not a second file read)
     let hash = crate::core::utils::sha256_hex(&content_bytes);
@@ -222,7 +231,7 @@ pub fn run_trust(list: bool) -> Result<()> {
         "Trusted .bdo/filters.toml (sha256:{})",
         hash.get(..16).unwrap_or(&hash)
     );
-    println!("Project-local filters will now be applied.");
+    println!("Valid project-local filters may now be applied.");
 
     Ok(())
 }
@@ -246,25 +255,57 @@ pub fn run_untrust() -> Result<()> {
 // Risk analysis
 // ---------------------------------------------------------------------------
 
+/// Keep terminal controls visible rather than executing them. Only the source
+/// preview keeps its physical line breaks; decoded fields stay on one line.
+fn terminal_text(text: &str, multiline: bool) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c == '\n' && multiline {
+            escaped.push(c);
+        } else if c.is_control()
+            || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}'
+                | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            escaped.extend(c.escape_default());
+        } else {
+            escaped.push(c);
+        }
+    }
+    escaped
+}
+
+/// Built from the parsed filters, the way they will be loaded: matching the
+/// text missed `"\u0072eplace"` keys and `[ filters . x ]` headers.
 fn print_risk_summary(content: &str) {
-    let filter_count = content.matches("[filters.").count();
-    let has_replace = content.contains("replace");
-    let has_match_output = content.contains("match_output");
-    let has_dot_pattern = content.contains("pattern = \".\"") || content.contains("pattern = '.'");
-
     println!("Risk summary:");
-    println!("  Filters: {}", filter_count);
-
-    if has_replace {
-        println!("  [!] Contains 'replace' rules (can rewrite output)");
+    let filters = match crate::core::toml_filter::describe_filters(content) {
+        Ok(filters) => filters,
+        Err(e) => {
+            println!(
+                "  The file does not parse, so no filters will apply: {}",
+                terminal_text(&e, false)
+            );
+            return;
+        }
+    };
+    println!("  Filters: {}", filters.len());
+    let mut any_risk = false;
+    for filter in &filters {
+        println!(
+            "  - {} (match_command {:?})",
+            terminal_text(&filter.name, false),
+            filter.match_command
+        );
+        if let Some(e) = &filter.invalid {
+            println!("      will not apply: {}", terminal_text(e, false));
+            continue;
+        }
+        for risk in &filter.risks {
+            any_risk = true;
+            println!("      [!] {risk}");
+        }
     }
-    if has_match_output {
-        println!("  [!] Contains 'match_output' rules (can replace entire output)");
-    }
-    if has_dot_pattern {
-        println!("  [!] Contains catch-all pattern '.' (matches everything)");
-    }
-    if !has_replace && !has_match_output && !has_dot_pattern {
+    if !any_risk {
         println!("  No high-risk patterns detected.");
     }
 }

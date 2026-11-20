@@ -134,6 +134,108 @@ fn trusting_applies_the_filter_and_any_edit_revokes_it() {
     assert_filter_ignored(&env.bdo(&["echo", "real"]));
 }
 
+/// The risk summary is read from the parsed filters, not from the text: TOML
+/// lets a key be written `"replace"` and a header `[ filters . x ]`.
+#[test]
+fn the_risk_summary_sees_filters_however_they_are_written() {
+    let env = Env::new();
+    env.write_filter(
+        &env.work,
+        r#"schema_version = 1
+[ filters . hidden ]
+match_command = "^echo"
+"replace" = [{ pattern = "FAILED.*", "replacement" = "ok" }]
+
+[filters."quiet"]
+match_command = "^cargo"
+"match_output" = [{ pattern = ".", message = "all good" }]
+keep_lines_matching = ["^ok"]
+"#,
+    );
+    let out = env.bdo(&["trust"]);
+    assert!(out.status.success(), "{out:?}");
+    let summary = stdout(&out);
+    let summary = &summary[summary.find("Risk summary").expect("summary")..];
+    assert!(summary.contains("Filters: 2"), "{summary}");
+    assert!(summary.contains("hidden"), "{summary}");
+    assert!(summary.contains("quiet"), "{summary}");
+    assert!(summary.contains("replace"), "{summary}");
+    assert!(summary.contains("match_output"), "{summary}");
+    assert!(summary.contains("keep_lines_matching"), "{summary}");
+    assert!(!summary.contains("No high-risk patterns"), "{summary}");
+}
+
+#[test]
+fn the_risk_summary_reports_line_truncation_and_stderr() {
+    for (option, expected) in [
+        ("truncate_lines_at = 3", "truncate_lines_at:"),
+        ("filter_stderr = true", "filter_stderr:"),
+    ] {
+        let env = Env::new();
+        env.write_filter(
+            &env.work,
+            &format!("schema_version = 1\n[filters.custom]\nmatch_command = '^echo'\n{option}\n"),
+        );
+        let out = env.bdo(&["trust"]);
+        assert!(out.status.success(), "{out:?}");
+        let output = stdout(&out);
+        let summary = &output[output.find("Risk summary:").unwrap()..];
+        assert!(summary.contains(expected), "{summary:?}");
+        assert!(!summary.contains("No high-risk patterns"), "{summary:?}");
+    }
+}
+
+#[test]
+fn the_risk_summary_says_when_the_file_will_not_apply() {
+    let env = Env::new();
+    env.write_filter(&env.work, "schema_version = 1\n[filters.x\n");
+    let out = env.bdo(&["trust"]);
+    let summary = stdout(&out);
+    assert!(summary.contains("does not parse"), "{summary}");
+    assert!(!summary.contains("No high-risk patterns"), "{summary}");
+}
+
+#[test]
+fn trust_prints_decoded_control_characters_as_text() {
+    let env = Env::new();
+    env.write_filter(
+        &env.work,
+        r#"schema_version = 1
+[filters."名前\u0009with-tab"]
+match_command = "^git$"
+
+[filters.invalid]
+match_command = "^echo"
+replace = [{ pattern = "\u0009[", replacement = "" }]
+"#,
+    );
+    let out = env.bdo(&["trust"]);
+    assert!(out.status.success(), "{out:?}");
+    let output = stdout(&out);
+    let errors = stderr(&out);
+    assert!(output.contains(r"名前\twith-tab"), "{output:?}");
+    assert!(output.contains("will not apply: invalid replace pattern"));
+    assert!(errors.contains(r"名前\twith-tab"), "{errors:?}");
+    for stream in [&output, &errors] {
+        assert!(
+            stream.chars().all(|c| c == '\n' || !c.is_control()),
+            "{stream:?}"
+        );
+    }
+}
+
+#[test]
+fn trust_escapes_controls_in_malformed_source_and_parse_errors() {
+    let env = Env::new();
+    env.write_filter(&env.work, "schema_version = 1\ninvalid\rline\n");
+    let out = env.bdo(&["trust"]);
+    assert!(out.status.success(), "{out:?}");
+    let output = stdout(&out);
+    assert!(output.contains(r"invalid\rline"), "{output:?}");
+    assert!(output.contains("does not parse"), "{output:?}");
+    assert!(!output.contains('\r'), "{output:?}");
+}
+
 #[test]
 fn untrusting_removes_the_filter() {
     let env = Env::new();

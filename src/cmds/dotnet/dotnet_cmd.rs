@@ -13,12 +13,10 @@ use quick_xml::Reader;
 use serde_json::Value;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 const DOTNET_CLI_UI_LANGUAGE: &str = "DOTNET_CLI_UI_LANGUAGE";
 const DOTNET_CLI_UI_LANGUAGE_VALUE: &str = "en-US";
-static TEMP_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn run_build(args: &[String], verbose: u8) -> Result<i32> {
     run_dotnet_with_binlog("build", args, verbose)
@@ -34,7 +32,8 @@ pub fn run_restore(args: &[String], verbose: u8) -> Result<i32> {
 
 pub fn run_format(args: &[String], verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
-    let (report_path, cleanup_report_path) = resolve_format_report_path(args);
+    let work = private_work_dir()?;
+    let (report_path, cleanup_report_path) = resolve_format_report_path(args, work.path());
     let mut cmd = resolved_command("dotnet");
     cmd.env(DOTNET_CLI_UI_LANGUAGE, DOTNET_CLI_UI_LANGUAGE_VALUE);
     cmd.arg("format");
@@ -54,7 +53,12 @@ pub fn run_format(args: &[String], verbose: u8) -> Result<i32> {
     let check_mode = !has_write_mode_override(args);
     let filtered =
         format_report_summary_or_raw(report_path.as_deref(), check_mode, &raw, command_started_at);
-    let filtered = crate::core::runner::with_failure_evidence(filtered, &result.stdout, &result.stderr, result.exit_code);
+    let filtered = crate::core::runner::with_failure_evidence(
+        filtered,
+        &result.stdout,
+        &result.stderr,
+        result.exit_code,
+    );
     println!("{}", filtered);
 
     timer.track(
@@ -112,11 +116,13 @@ pub fn run_passthrough(args: &[OsString], verbose: u8) -> Result<i32> {
 
 fn run_dotnet_with_binlog(subcommand: &str, args: &[String], verbose: u8) -> Result<i32> {
     let timer = tracking::TimedExecution::start();
-    let binlog_path = build_binlog_path(subcommand);
+    let work = private_work_dir()?;
+    let binlog_path = build_binlog_path(work.path(), subcommand);
     let should_expect_binlog = subcommand != "test" || has_binlog_arg(args);
 
     // For test commands, prefer user-provided results directory; otherwise create isolated one.
-    let (trx_results_dir, cleanup_trx_results_dir) = resolve_trx_results_dir(subcommand, args);
+    let (trx_results_dir, cleanup_trx_results_dir) =
+        resolve_trx_results_dir(subcommand, args, work.path());
 
     let mut cmd = resolved_command("dotnet");
     cmd.env(DOTNET_CLI_UI_LANGUAGE, DOTNET_CLI_UI_LANGUAGE_VALUE);
@@ -252,31 +258,40 @@ fn run_dotnet_with_binlog(subcommand: &str, args: &[String], verbose: u8) -> Res
     Ok(result.exit_code)
 }
 
-fn build_binlog_path(subcommand: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "rtk_dotnet_{}_{}.binlog",
-        subcommand,
-        unique_temp_suffix()
-    ))
+/// A directory only this user can enter, removed when the run ends. The
+/// binlog, test results and format report bdo asks dotnet to write go here.
+/// Names in the shared temp directory were predictable (time, PID, counter),
+/// so another local user could create them first: forged `.trx` results
+/// would be merged into the summary, and a planted binlog file would receive
+/// MSBuild's log, environment variables included.
+/// The directory is 0700: tempfile's default follows the umask (0755), and
+/// the binlog holds environment variables.
+fn private_work_dir() -> Result<tempfile::TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("bdo_dotnet_");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    builder
+        .tempdir()
+        .context("Failed to create a private temporary directory for dotnet")
 }
 
-fn build_trx_results_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("rtk_dotnet_testresults_{}", unique_temp_suffix()))
+fn build_binlog_path(work: &Path, subcommand: &str) -> PathBuf {
+    work.join(format!("{subcommand}.binlog"))
 }
 
-fn unique_temp_suffix() -> String {
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let pid = std::process::id();
-    let seq = TEMP_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
-
-    // Keep suffix compact to avoid long temp paths while preserving practical uniqueness.
-    format!("{:x}{:x}{:x}", ts, pid, seq)
+fn build_trx_results_dir(work: &Path) -> PathBuf {
+    work.join("testresults")
 }
 
-fn resolve_trx_results_dir(subcommand: &str, args: &[String]) -> (Option<PathBuf>, bool) {
+fn resolve_trx_results_dir(
+    subcommand: &str,
+    args: &[String],
+    work: &Path,
+) -> (Option<PathBuf>, bool) {
     if subcommand != "test" {
         return (None, false);
     }
@@ -285,19 +300,19 @@ fn resolve_trx_results_dir(subcommand: &str, args: &[String]) -> (Option<PathBuf
         return (Some(user_dir), false);
     }
 
-    (Some(build_trx_results_dir()), true)
+    (Some(build_trx_results_dir(work)), true)
 }
 
-fn build_format_report_path() -> PathBuf {
-    std::env::temp_dir().join(format!("rtk_dotnet_format_{}.json", unique_temp_suffix()))
+fn build_format_report_path(work: &Path) -> PathBuf {
+    work.join("format-report.json")
 }
 
-fn resolve_format_report_path(args: &[String]) -> (Option<PathBuf>, bool) {
+fn resolve_format_report_path(args: &[String], work: &Path) -> (Option<PathBuf>, bool) {
     if let Some(user_report_path) = extract_report_arg(args) {
         return (Some(user_report_path), false);
     }
 
-    (Some(build_format_report_path()), true)
+    (Some(build_format_report_path(work)), true)
 }
 
 fn build_effective_dotnet_format_args(args: &[String], report_path: Option<&Path>) -> Vec<String> {
@@ -400,7 +415,10 @@ fn format_dotnet_format_output(
     }
 
     if changed_count > MAX_FORMAT_FILES {
-        output.push_str(&format!("\n… +{} more files", changed_count - MAX_FORMAT_FILES));
+        output.push_str(&format!(
+            "\n… +{} more files",
+            changed_count - MAX_FORMAT_FILES
+        ));
         let all_files = summary
             .files_with_changes
             .iter()
@@ -1232,7 +1250,12 @@ fn format_test_output(
 
     // Status line emitted last; see format_build_output (issue #1574).
     // Warnings before errors: errors survive `| tail -N` immediately above the verdict.
-    [failed_tests_section, warnings_section, errors_section, header]
+    [
+        failed_tests_section,
+        warnings_section,
+        errors_section,
+        header,
+    ]
     .into_iter()
     .filter(|s| !s.is_empty())
     .collect::<Vec<_>>()
@@ -1328,6 +1351,7 @@ mod tests {
     use crate::dotnet_format_report;
     use std::fs;
     use std::time::Duration;
+    use std::time::UNIX_EPOCH;
 
     fn build_dotnet_args_for_test(
         subcommand: &str,
@@ -2469,7 +2493,7 @@ mod tests {
             "/custom/results".to_string(),
         ];
 
-        let (dir, cleanup) = resolve_trx_results_dir("test", &args);
+        let (dir, cleanup) = resolve_trx_results_dir("test", &args, Path::new("/work"));
         assert_eq!(dir, Some(PathBuf::from("/custom/results")));
         assert!(!cleanup);
     }
@@ -2478,9 +2502,37 @@ mod tests {
     fn test_resolve_trx_results_dir_generated_directory_is_marked_for_cleanup() {
         let args = Vec::<String>::new();
 
-        let (dir, cleanup) = resolve_trx_results_dir("test", &args);
-        assert!(dir.is_some());
+        let (dir, cleanup) = resolve_trx_results_dir("test", &args, Path::new("/work"));
+        assert_eq!(dir, Some(Path::new("/work").join("testresults")));
         assert!(cleanup);
+    }
+
+    /// Generated paths must not be guessable names in the shared temp
+    /// directory: they live in a fresh directory only this user can enter.
+    #[test]
+    fn test_generated_paths_live_in_a_private_directory() {
+        let work = private_work_dir().unwrap();
+        let shared = std::env::temp_dir().canonicalize().unwrap();
+        assert_ne!(work.path().canonicalize().unwrap(), shared);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(work.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        let paths = [
+            build_binlog_path(work.path(), "build"),
+            resolve_trx_results_dir("test", &[], work.path()).0.unwrap(),
+            resolve_format_report_path(&[], work.path()).0.unwrap(),
+        ];
+        for path in &paths {
+            assert_eq!(path.parent(), Some(work.path()), "{path:?}");
+        }
+        let other = private_work_dir().unwrap();
+        assert_ne!(work.path(), other.path());
+        let kept = work.path().to_path_buf();
+        drop(work);
+        assert!(!kept.exists());
     }
 
     #[test]
@@ -2508,7 +2560,8 @@ mod tests {
     #[test]
     fn test_format_temp_file_cleanup() {
         let args = Vec::<String>::new();
-        let (report_path, cleanup) = resolve_format_report_path(&args);
+        let work = private_work_dir().unwrap();
+        let (report_path, cleanup) = resolve_format_report_path(&args, work.path());
         let report_path = report_path.expect("report path");
 
         assert!(cleanup);
@@ -2524,7 +2577,7 @@ mod tests {
             "/tmp/user-format-report.json".to_string(),
         ];
 
-        let (report_path, cleanup) = resolve_format_report_path(&args);
+        let (report_path, cleanup) = resolve_format_report_path(&args, Path::new("/work"));
         assert_eq!(
             report_path,
             Some(PathBuf::from("/tmp/user-format-report.json"))

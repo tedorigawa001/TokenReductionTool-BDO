@@ -136,11 +136,19 @@ fn hook_rewrite_is_unchanged_under_bdo_raw() {
     // printed to stderr.
     use std::io::Write;
     let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap();
+    std::fs::create_dir(project.join(".claude")).unwrap();
+    std::fs::write(
+        project.join(".claude/settings.json"),
+        r#"{"permissions":{"allow":["Bash(git status)"]}}"#,
+    )
+    .unwrap();
     let input = br#"{"tool_name":"Bash","tool_input":{"command":"git status"}}"#;
     let run = |raw_env: bool| {
         let mut c = Command::new(env!("CARGO_BIN_EXE_bdo"));
         c.current_dir(dir.path())
             .args(["hook", "claude"])
+            .env("CLAUDE_PROJECT_DIR", &project)
             .env("BDO_DB_PATH", dir.path().join("track.db"))
             .env("BDO_TELEMETRY_DISABLED", "1")
             .env_remove("BDO_RAW")
@@ -156,6 +164,11 @@ fn hook_rewrite_is_unchanged_under_bdo_raw() {
     };
     let normal = run(false);
     let raw = run(true);
+    let response: serde_json::Value = serde_json::from_slice(&normal.stdout).unwrap();
+    assert_eq!(
+        response["hookSpecificOutput"]["updatedInput"]["command"],
+        "bdo git status"
+    );
     assert_eq!(raw.stdout, normal.stdout);
     assert!(
         raw.stderr.is_empty(),

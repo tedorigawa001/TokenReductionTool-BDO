@@ -209,22 +209,30 @@ fn an_ask_rule_is_not_auto_approved() {
 }
 
 #[test]
-fn hosts_without_an_allow_value_rewrite_without_approving() {
+fn hosts_without_a_matching_rule_leave_the_original_input_to_the_host() {
     let env = Env::new();
     for host in ["gemini", "copilot"] {
-        let answer = env.answer(host, "git status");
-        assert!(!auto_allowed(&answer), "{host}: {answer:?}");
-        assert_eq!(
-            rewritten(host, &answer).unwrap(),
-            format!("BDO_AGENT={host} bdo git status")
-        );
+        for command in ["git status", "bdo git status"] {
+            let answer = env.answer(host, command);
+            let expected = if host == "gemini" {
+                Some(json!({}))
+            } else {
+                None
+            };
+            assert_eq!(answer, expected, "{host} {command}: {answer:?}");
+        }
     }
 }
 
 #[test]
-fn copilot_keeps_the_arguments_it_does_not_rewrite() {
-    let answer = Env::new().answer("copilot", "git status");
-    assert_eq!(answer.unwrap()["modifiedArgs"]["description"], "kept");
+fn vscode_copilot_leaves_the_original_input_to_the_host() {
+    let input = json!({
+        "tool_name": "runTerminalCommand",
+        "tool_input": { "command": "git status", "description": "kept" }
+    });
+    let output = Env::new().hook("copilot", input.to_string().as_bytes());
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
 }
 
 #[test]
@@ -241,7 +249,7 @@ fn gemini_refuses_what_its_blocklist_excludes() {
         assert_eq!(answer["decision"], "deny", "{settings}");
         // Everything else is untouched by the rule.
         let other = env.answer("gemini", "git status");
-        assert!(rewritten("gemini", &other).is_some(), "{settings}");
+        assert_eq!(other, Some(json!({})), "{settings}");
     }
 }
 
@@ -262,7 +270,10 @@ fn gemini_ignores_a_project_config_in_an_untrusted_folder() {
     let env = Env::new();
     env.config(
         ".gemini/settings.json",
-        &json!({ "security": { "folderTrust": { "enabled": true } } }),
+        &json!({
+            "security": { "folderTrust": { "enabled": true } },
+            "tools": { "allowed": ["run_shell_command(git status)"] }
+        }),
     );
     write_json(
         &env.work.join(".gemini/settings.json"),

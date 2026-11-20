@@ -112,7 +112,11 @@ impl Fixture {
         let output = self.bdo(&["hook", "claude"], payload.to_string().as_bytes());
         assert!(output.status.success(), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Null)
+        if stdout.trim().is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(stdout.trim()).expect("hook must return valid JSON")
+        }
     }
 }
 
@@ -132,13 +136,7 @@ fn hook_settings_that_are_fifos_do_not_stall_the_hook() {
         let fixture = Fixture::new();
         fixture.fifo(&format!(".claude/{name}"));
         let answer = fixture.hook("git status");
-        assert_eq!(
-            answer
-                .pointer("/hookSpecificOutput/updatedInput/command")
-                .and_then(|v| v.as_str()),
-            Some("bdo git status"),
-            "{name}: {answer}"
-        );
+        assert_eq!(answer, serde_json::Value::Null, "{name}: {answer}");
     }
 }
 
@@ -163,7 +161,7 @@ fn oversized_hook_settings_are_skipped_in_full() {
         allow.to_string(),
     )
     .unwrap();
-    assert_ne!(decision(&fixture.hook("git status")), Some("allow"));
+    assert_eq!(fixture.hook("git status"), serde_json::Value::Null);
 }
 
 #[test]

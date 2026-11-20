@@ -506,9 +506,11 @@ test utils::test_format ... ok              test_overflow: panic at utils.rs:18
 
 ## Auto-Rewrite Hook
 
-The most effective way to use Bushido. The hook transparently intercepts Bash commands and rewrites them to bdo equivalents before execution.
+The most effective way to use Bushido. The hook intercepts Bash commands and rewrites them to bdo equivalents before execution.
 
-**Result**: 100% bdo adoption across all conversations and subagents, zero token overhead.
+**Which commands are rewritten**: the hook never gives a command a weaker permission than your own rules would. It rewrites a command only when your permission rules decide it: an allow rule (the rewrite runs without a prompt) or an ask rule (you are still asked). A command that no rule covers is left unchanged for the agent to evaluate. To have a command filtered automatically, allow it, e.g. `Bash(git status:*)`.
+
+**Result**: every command your rules cover runs through bdo, across all conversations and subagents, with zero token overhead.
 
 **Scope note:** this only applies to Bash tool calls. Claude Code built-in tools such as `Read`, `Grep`, and `Glob` bypass the hook, so use shell commands or explicit `bdo` commands when you want Bushido filtering there.
 
@@ -568,8 +570,8 @@ Bushido supports 14 AI coding tools. Each integration rewrites shell commands to
 | Tool | Install | Method |
 |------|---------|--------|
 | **Claude Code** | `bdo init -g` | PreToolUse hook (bash) |
-| **GitHub Copilot (VS Code)** | `bdo init -g --copilot` | PreToolUse hook — transparent rewrite |
-| **GitHub Copilot CLI** | `bdo init -g --copilot` | PreToolUse deny-with-suggestion (CLI limitation) |
+| **GitHub Copilot (VS Code)** | `bdo init -g --copilot` | Instructions; the hook leaves commands unchanged (no permission rules to check) |
+| **GitHub Copilot CLI** | `bdo init -g --copilot` | Instructions; the hook leaves commands unchanged (no permission rules to check) |
 | **Cursor** | `bdo init -g --agent cursor` | preToolUse hook (hooks.json) |
 | **Gemini CLI** | `bdo init -g --gemini` | BeforeTool hook |
 | **Codex** | `bdo init -g --codex` | AGENTS.md + Bushido.md instructions |

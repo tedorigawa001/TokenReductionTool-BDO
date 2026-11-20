@@ -14,6 +14,12 @@ use std::process::Command;
 /// Feed a Bash tool call through the Claude hook and return the command it
 /// wants run — the rewrite if it produced one, else the original.
 fn hooked_command(dir: &Path, cmd: &str) -> String {
+    fs::create_dir_all(dir.join(".claude")).unwrap();
+    fs::write(
+        dir.join(".claude/settings.json"),
+        r#"{"permissions":{"allow":["Bash(*)"]}}"#,
+    )
+    .unwrap();
     let input = format!(
         r#"{{"tool_name":"Bash","tool_input":{{"command":{}}}}}"#,
         json_str(cmd)
@@ -21,6 +27,7 @@ fn hooked_command(dir: &Path, cmd: &str) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_bdo"))
         .current_dir(dir)
         .args(["hook", "claude"])
+        .env("CLAUDE_PROJECT_DIR", dir)
         .env("BDO_DB_PATH", dir.join("track.db"))
         .env("BDO_TELEMETRY_DISABLED", "1")
         .stdin(std::process::Stdio::piped())

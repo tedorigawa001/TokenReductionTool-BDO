@@ -5,6 +5,63 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.1] (2026-11-20)
+
+Fixes from a second security review of 0.51.0: a way around deny rules in the hook,
+git failures that looked like success, files bdo deleted or wrote that it should not
+have, and the release workflow.
+
+### Changed
+
+- **`bdo git add` with no arguments stages nothing, as git does.** Before, it ran
+  `git add .` and staged every untracked file, `.env` included. Use `git add -A` to
+  stage everything.
+
+### Security
+
+- **A prefix hid a command from deny and ask rules.** With `Bash(*)` allowed and
+  `Bash(git push --force:*)` denied, `FOO=1 git push --force`, `env git push --force`
+  and `sudo git push --force` were rewritten and allowed. The rules now also see the
+  command without the prefix.
+- **git failures looked like success.** `bdo git status` printed "Clean working tree"
+  and exited 0 when git failed for any reason other than "not a git repository", such
+  as a broken index. `git stash list`, `git stash show` and `git worktree list` did the
+  same. They now show git's error and exit with its code. `git worktree repair` and
+  `git worktree list --porcelain` ran a plain `list`; they now run as given.
+- **`bdo test --changed` passed file names as options.** A changed file named
+  `--deselect=a_test.py` or `--config=evil.ts` reached pytest, vitest or jest as an
+  option. Such paths now get a `./`.
+- **Tee rotation deleted the user's own logs.** With `BDO_TEE_DIR` pointing at a
+  directory of other `.log` files, the oldest by name were deleted. Only bdo's own tee
+  files are rotated now.
+- **`bdo learn --write-rules` could add lines to the rules file.** A recorded command
+  with a newline wrote lines of its own into `.claude/rules/cli-corrections.md`, which
+  every later session loads. Such rules are left out, and each command is fenced so a
+  backtick cannot end it.
+- **Secret variables without a prefix were not masked.** `SECRET_KEY=`, `TOKEN=`,
+  `PASSWORD=`, `API_KEY=` and `ACCESS_KEY=` were stored as they were in the history and
+  tee files.
+- **`bdo gain --history` printed escape sequences.** Control and text-direction
+  characters in stored commands are now shown escaped.
+- **Telemetry could include a user name.** For a program run by path, the passthrough
+  summary sent the full path. Only the file name is sent now. Telemetry is off unless
+  you opted in.
+- **Project filters were read twice.** The trust check hashed `.bdo/filters.toml`, then
+  the loader read it again, so a file swapped in between was loaded without being
+  trusted. The loader now uses the bytes that were hashed.
+- **The release workflow installed dist from an unverified script** in the jobs that
+  sign build attestations. It is now built from crates.io at a pinned version. The
+  workflow-wide token is read-only, the Homebrew tap token is no longer left on disk,
+  and tag names reach scripts through env.
+
+### Fixed
+
+- **`bdo go tool golangci-lint`** added a second `run` (`run ./...` became
+  `run --out-format=json run ./...`), linted when asked to `fmt`, and turned exit 1
+  (issues found) into 0. It now keeps the subcommand and the exit code, as
+  `bdo golangci-lint` does.
+- Links to the old repository name now point at `TokenReductionTool-BDO`.
+
 ## [0.51.0] (2026-11-20)
 
 The hook now rewrites a command only when your permission rules decide it, so that a

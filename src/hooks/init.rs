@@ -35,7 +35,7 @@ const BDO_SLIM_CODEX: &str = include_str!("../../hooks/codex/bdo-awareness.md");
 /// Template written by `bdo init` when no filters.toml exists yet.
 const FILTERS_TEMPLATE: &str = r#"# Project-local Bushido filters — commit this file with your repo.
 # Filters here override user-global and built-in filters.
-# Docs: https://github.com/tedorigawa001/TokenReductionTool#custom-filters
+# Docs: https://github.com/tedorigawa001/TokenReductionTool-BDO#custom-filters
 schema_version = 1
 
 # Example: suppress build noise from a custom tool
@@ -51,7 +51,7 @@ schema_version = 1
 /// Template for user-global filters (~/.config/bdo/filters.toml).
 const FILTERS_GLOBAL_TEMPLATE: &str = r#"# User-global Bushido filters — apply to all your projects.
 # Project-local .bdo/filters.toml takes precedence over these.
-# Docs: https://github.com/tedorigawa001/TokenReductionTool#custom-filters
+# Docs: https://github.com/tedorigawa001/TokenReductionTool-BDO#custom-filters
 schema_version = 1
 
 # Example: suppress noise from a tool you use everywhere
@@ -606,10 +606,10 @@ fn prompt_telemetry_consent() -> Result<()> {
     eprintln!();
     eprintln!("  What:    command names (not arguments), token savings, OS, version");
     eprintln!("  Why:     prioritize filter development for the most-used commands");
-    eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool)");
+    eprintln!("  Who:     Bushido (github.com/tedorigawa001/TokenReductionTool-BDO)");
     eprintln!("  Rights:  disable anytime with `bdo telemetry disable`,");
     eprintln!("           request erasure with `bdo telemetry forget`");
-    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool/blob/main/docs/TELEMETRY.md");
+    eprintln!("  Details: https://github.com/tedorigawa001/TokenReductionTool-BDO/blob/main/docs/TELEMETRY.md");
     eprintln!();
     eprint!("Enable anonymous telemetry? [y/N] ");
 
@@ -3751,7 +3751,7 @@ fn patch_gemini_settings(
     if patch_mode == PatchMode::Skip {
         println!(
             "\nManual setup needed: add Bushido hook to {}\n\
-             See: https://github.com/tedorigawa001/TokenReductionTool#gemini-cli",
+             See: https://github.com/tedorigawa001/TokenReductionTool-BDO#gemini-cli",
             settings_path.display()
         );
         return Ok(());

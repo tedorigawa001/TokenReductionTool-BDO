@@ -36,12 +36,12 @@ so without the `brew trust` line `brew upgrade` never sees new versions.
 ## Cargo
 
 ```bash
-cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 ```
 
 ## Pre-built binaries (Windows, Linux, macOS)
 
-Download from [GitHub releases](https://github.com/tedorigawa001/TokenReductionTool/releases):
+Download from [GitHub releases](https://github.com/tedorigawa001/TokenReductionTool-BDO/releases):
 
 - macOS: `bdo-x86_64-apple-darwin.tar.gz` / `bdo-aarch64-apple-darwin.tar.gz`
 - Linux: `bdo-x86_64-unknown-linux-musl.tar.gz` / `bdo-aarch64-unknown-linux-gnu.tar.gz`

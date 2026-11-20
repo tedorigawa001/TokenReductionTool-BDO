@@ -36,7 +36,7 @@ bdo gain  # Must show token savings stats (not "command not found")
 
 ```bash
 # From the Bushido fork repository
-cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 
 # OR from crates.io (if published; crate name is "bushido", binary is "bdo")
 cargo install bushido
@@ -157,7 +157,7 @@ bdo init --show
 ### First-Time User (Recommended)
 ```bash
 # 1. Install Bushido
-cargo install --git https://github.com/tedorigawa001/TokenReductionTool
+cargo install --git https://github.com/tedorigawa001/TokenReductionTool-BDO
 bdo gain  # Verify (must show token stats)
 
 # 2. Setup with prompts
@@ -354,11 +354,11 @@ cargo install --path . --force
 
 ## Support and Contributing
 
-- **Website**: https://github.com/tedorigawa001/TokenReductionTool
-- **Contact**: https://github.com/tedorigawa001/TokenReductionTool/issues
+- **Website**: https://github.com/tedorigawa001/TokenReductionTool-BDO
+- **Contact**: https://github.com/tedorigawa001/TokenReductionTool-BDO/issues
 - **Troubleshooting**: See [docs/guide/resources/troubleshooting.md](docs/guide/resources/troubleshooting.md) for common issues
-- **GitHub issues**: https://github.com/tedorigawa001/TokenReductionTool/issues
-- **Pull Requests**: https://github.com/tedorigawa001/TokenReductionTool/pulls
+- **GitHub issues**: https://github.com/tedorigawa001/TokenReductionTool-BDO/issues
+- **Pull Requests**: https://github.com/tedorigawa001/TokenReductionTool-BDO/pulls
 
 ## AI Assistant Checklist
 

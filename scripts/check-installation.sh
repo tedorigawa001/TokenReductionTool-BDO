@@ -24,7 +24,7 @@ else
     echo -e "   ${RED}❌ Bushido is NOT installed${NC}"
     echo ""
     echo "   Install from source (requires Rust):"
-    echo "   git clone https://github.com/tedorigawa001/TokenReductionTool"
+    echo "   git clone https://github.com/tedorigawa001/TokenReductionTool-BDO"
     echo "   cd TokenReductionTool && cargo install --path ."
     exit 1
 fi
@@ -45,7 +45,7 @@ else
     echo -e "   ${RED}❌ 'bdo gain' not available — wrong or broken binary on PATH${NC}"
     echo ""
     echo "   Reinstall Bushido from source:"
-    echo "   git clone https://github.com/tedorigawa001/TokenReductionTool"
+    echo "   git clone https://github.com/tedorigawa001/TokenReductionTool-BDO"
     echo "   cd TokenReductionTool && cargo install --path . --force"
     CORRECT_RTK=false
 fi
@@ -146,7 +146,7 @@ if [ ${#MISSING_FEATURES[@]} -gt 0 ]; then
     done
     echo ""
     echo "To get all features, rebuild from the latest source:"
-    echo "  git clone https://github.com/tedorigawa001/TokenReductionTool"
+    echo "  git clone https://github.com/tedorigawa001/TokenReductionTool-BDO"
     echo "  cd TokenReductionTool && cargo install --path . --force"
 else
     echo -e "${GREEN}✅ Full-featured Bushido installation detected${NC}"

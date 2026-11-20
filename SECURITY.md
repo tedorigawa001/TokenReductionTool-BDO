@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in Bushido, please report it to the maintainers privately:
 
-- **Email**: Open a private security advisory on GitHub: https://github.com/tedorigawa001/TokenReductionTool/security/advisories/new
+- **Email**: Open a private security advisory on GitHub: https://github.com/tedorigawa001/TokenReductionTool-BDO/security/advisories/new
 - **Response time**: We aim to acknowledge reports within 48 hours
 - **Disclosure**: We follow responsible disclosure practices (90-day embargo)
 
@@ -113,7 +113,7 @@ bash scripts/detect-dangerous-patterns.sh /tmp/pr.diff
 | `SystemTime::now() > ...` | Logic bombs | Delayed malicious behavior |
 | Base64/hex strings | Obfuscation | Hides malicious URLs/commands |
 
-See [Dangerous Patterns Reference](https://github.com/tedorigawa001/TokenReductionTool/wiki/Dangerous-Patterns) for exploitation examples.
+See [Dangerous Patterns Reference](https://github.com/tedorigawa001/TokenReductionTool-BDO/wiki/Dangerous-Patterns) for exploitation examples.
 
 ---
 

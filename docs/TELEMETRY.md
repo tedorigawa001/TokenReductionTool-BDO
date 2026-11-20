@@ -5,7 +5,7 @@ Bushido collects anonymous, aggregate usage metrics once per day to help improve
 ## Data Collector
 
 **Entity**: `Bushido AI Labs`
-**Contact**: https://github.com/tedorigawa001/TokenReductionTool/issues
+**Contact**: https://github.com/tedorigawa001/TokenReductionTool-BDO/issues
 
 ## Why we collect telemetry
 
@@ -144,7 +144,7 @@ Under the EU General Data Protection Regulation, you have the right to:
 
 - **Access** your data: `bdo telemetry status` shows your device hash; the telemetry payload is fully documented above.
 - **Rectification**: since data is anonymous and aggregate, rectification is not applicable.
-- **Erasure** (Art. 17): run `bdo telemetry forget` to delete local data and send an erasure request to the server. Alternatively, open an issue at https://github.com/tedorigawa001/TokenReductionTool/issues with your device hash.
+- **Erasure** (Art. 17): run `bdo telemetry forget` to delete local data and send an erasure request to the server. Alternatively, open an issue at https://github.com/tedorigawa001/TokenReductionTool-BDO/issues with your device hash.
 - **Restriction of processing**: `bdo telemetry disable` stops all data collection immediately.
 - **Portability**: the local SQLite database at `~/.local/share/bdo/history.db` contains all locally stored data.
 - **Objection**: `bdo telemetry disable` or `export BDO_TELEMETRY_DISABLED=1`.
@@ -152,8 +152,8 @@ Under the EU General Data Protection Regulation, you have the right to:
 ## Erasure Procedure
 
 1. Run `bdo telemetry forget` — this disables telemetry, deletes your device salt, ping marker, and local tracking database (`history.db`), then sends an erasure request to the server.
-2. If the server is unreachable, the CLI prints your full device hash and fallback instructions to open an issue at https://github.com/tedorigawa001/TokenReductionTool/issues for manual erasure.
-3. You can also open an issue at https://github.com/tedorigawa001/TokenReductionTool/issues directly to request manual erasure.
+2. If the server is unreachable, the CLI prints your full device hash and fallback instructions to open an issue at https://github.com/tedorigawa001/TokenReductionTool-BDO/issues for manual erasure.
+3. You can also open an issue at https://github.com/tedorigawa001/TokenReductionTool-BDO/issues directly to request manual erasure.
 
 ## Data Handling
 

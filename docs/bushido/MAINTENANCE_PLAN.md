@@ -1034,3 +1034,16 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
   結果に失敗が 1 件もないときは要約を出さず、その旨と出力を表示する。
 - **TOML フィルターが失敗した実行に「ok」と出した**: `on_empty` と `match_output` の決まった文言（`gcc: ok`、
   "already installed"）は成功した実行にだけ使う。表示が空になるときは、ツール自身のエラーを出す。
+
+### 2026-11-22 — ハードニングのチェックの見逃し
+
+#86 で足した `check-release-hardening.sh` のチェックの抜け。
+- **1 行の `run:` に埋め込まれた式を見逃した**: `- run: echo "${{ github.ref_name }}"` を普通の `KEY: 値` の行として
+  扱っていた。またタグ名とイベントの値しか見ていなかった。
+- **`permissions: write-all` や `{ contents: write }` を見逃した**。
+- 行の見た目で判定するのをやめ、`scripts/check-workflow-policy.rb` で YAML として読む。`run:` の値に `${{ }}` が
+  あれば書き方によらず失敗、全体の権限は読み取りだけと明示されていること（`read-all`・`{}`・`read`/`none` だけ）
+  を求める。重複キー・マージ・タグ・エイリアス・壊れた YAML も失敗にする。`test-check-release-hardening.sh` で
+  チェック自体を CI でテストする。チェックの実行には Ruby が要る。
+- release.yml の `${{ matrix.dist_args }}` は env 経由にし、何も実行していなかった「Install dependencies」の
+  ステップは削った。`DIST_ARGS` の受け渡しは次のリリースで初めて試される。

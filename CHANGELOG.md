@@ -5,6 +5,42 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.2] (2026-11-23)
+
+Fixes from a review of the 0.51.1 fixes and an audit of the output parsers: more prefixes
+that hid a command from deny rules, and summaries that showed a failed run as a pass.
+
+### Security
+
+- **Other prefixes still hid a command from deny and ask rules.** 0.51.1 covered
+  `VAR=value`, `env` and `sudo`. The hook also looked past several other prefixes and
+  still rewrote the command after them:
+  - `command`, `exec`, `builtin`, `noglob` and `nocorrect`;
+  - a configured `transparent_prefixes` entry;
+  - git's global options, such as `git -C dir` and `--no-pager`.
+
+  With `Bash(*)` allowed and `Bash(git push --force:*)` denied, `command git push --force`
+  and `git -C . push --force` were allowed. The rules now see the same command the hook
+  rewrites.
+- **A failed vitest or jest run could be summarised as a pass.** bdo read the first test
+  report in the output, so JSON or a ` Tests N passed` line printed by a test was used
+  instead of the real result. It now reads the last one. If the run failed but the report
+  shows no failed test, bdo does not summarise it: it says so and shows the output.
+- **Built-in filters said "ok" for failed runs.** Messages such as `gcc: ok` and
+  "already installed" were printed whatever the exit code. A failed run now keeps its own
+  output, and the tool's error is shown when nothing else is left.
+- **Tee rotation could still delete a user's file** named like `1234567890_app.log` in a
+  shared `BDO_TEE_DIR`. Only files with bdo's random suffix are rotated now.
+- **The release workflow checks** now parse the workflow as YAML. They fail on any
+  expression pasted into a `run:` script, however it is written, and on any workflow-wide
+  write permission.
+- `url` is updated to 2.5.9 (RUSTSEC-2026-0592).
+
+### Fixed
+
+- `bdo vitest` and `bdo jest` crashed (exit 101, no output) when a report that followed
+  other text contained a non-ASCII character, such as `café.test.ts`.
+
 ## [0.51.1] (2026-11-20)
 
 Fixes from a second security review of 0.51.0: a way around deny rules in the hook,

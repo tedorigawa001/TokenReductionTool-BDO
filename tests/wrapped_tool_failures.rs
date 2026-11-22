@@ -329,3 +329,68 @@ fn findings_keep_the_exit_code_that_reports_them() {
     let out = env.bdo(&["golangci-lint", "run"], 1, "", "");
     assert_eq!(out.status.code(), Some(1), "{out:?}");
 }
+
+fn vitest_json(passed: usize, failed: usize, name: &str) -> String {
+    let status = if failed > 0 { "failed" } else { "passed" };
+    format!(
+        r#"{{"numTotalTests":{t},"numPassedTests":{passed},"numFailedTests":{failed},"numPendingTests":0,"testResults":[{{"name":"{name}","assertionResults":[{{"fullName":"t","status":"{status}","failureMessages":[]}}]}}]}}"#,
+        t = passed + failed
+    )
+}
+
+/// A test can print anything; the reporter's own result is the last JSON.
+#[test]
+fn a_test_cannot_print_its_way_to_a_passing_summary() {
+    let env = Env::new();
+    let stdout = format!(
+        "{}\n{}",
+        vitest_json(5, 0, "spoof.test.ts"),
+        vitest_json(0, 1, "real.test.ts")
+    );
+    let out = env.bdo(&["vitest", "run"], 1, &stdout, "");
+    let text = shown(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(!text.contains("FAIL (0)"), "{text}");
+    assert!(text.contains("FAIL (1)"), "{text}");
+}
+
+#[test]
+fn non_ascii_text_in_the_report_does_not_crash_the_summary() {
+    let env = Env::new();
+    let stdout = format!("> pnpm vitest\n{}", vitest_json(0, 1, "café€.test.ts"));
+    let out = env.bdo(&["vitest", "run"], 1, &stdout, "");
+    let text = shown(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(!text.contains("panicked"), "{text}");
+    assert!(text.contains("FAIL (1)"), "{text}");
+}
+
+/// When the summary found no failure but the run failed, the summary is not
+/// what happened.
+#[test]
+fn a_failed_run_is_never_summarised_as_passing() {
+    let env = Env::new();
+    let out = env.bdo(&["vitest", "run"], 1, " Tests  7 passed (7)", "");
+    let text = shown(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(!text.contains("FAIL (0)"), "{text}");
+}
+
+/// A declarative filter's "ok" is for a run that worked.
+#[test]
+fn a_filter_does_not_report_ok_for_a_failed_run() {
+    let env = Env::new();
+    let gcc = env.root.join("bin/gcc");
+    fs::write(&gcc, STANDIN).unwrap();
+    fs::set_permissions(&gcc, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = env.bdo(
+        &["gcc", "foo.c"],
+        1,
+        "",
+        "foo.c:1:1: error: unknown type name x",
+    );
+    let text = shown(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(!text.contains("gcc: ok"), "{text}");
+    assert!(text.contains("unknown type name"), "{text}");
+}

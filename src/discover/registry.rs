@@ -44,14 +44,31 @@ pub fn category_avg_tokens(category: &str, subcmd: &str) -> usize {
     }
 }
 
-/// The command after any leading `VAR=value`, `env` and `sudo` words: the
-/// part the rewriter rewrites, so the part permission rules must judge.
-pub(crate) fn strip_env_prefix(segment: &str) -> &str {
-    let trimmed = segment.trim_start();
-    match ENV_PREFIX.find(trimmed) {
-        Some(m) => trimmed[m.end()..].trim_start(),
-        None => trimmed,
+/// The command the rewriter routes on: past every prefix it looks through
+/// (`VAR=value`, `env`, `sudo`, the shell builtins such as `command` and
+/// `exec`, and the user's `transparent_prefixes`), with git's global options
+/// (`git -C dir`, `--no-pager`) removed. Permission rules judge this command
+/// as well, so a prefix the rewriter ignores cannot hide it from them.
+pub(crate) fn routed_command(segment: &str, transparent_prefixes: &[String]) -> String {
+    let prefixes = normalize_transparent_prefixes(transparent_prefixes);
+    let mut cmd = segment.trim();
+    for _ in 0..MAX_PREFIX_DEPTH {
+        let (env, rest) = strip_disabled_prefix(cmd);
+        if !env.is_empty() {
+            cmd = rest;
+            continue;
+        }
+        let next = SHELL_PREFIX_BUILTINS
+            .iter()
+            .copied()
+            .chain(prefixes.iter().map(String::as_str))
+            .find_map(|prefix| strip_word_prefix(cmd, prefix));
+        match next {
+            Some(rest) if !rest.is_empty() => cmd = rest,
+            _ => break,
+        }
     }
+    strip_git_global_opts(cmd)
 }
 
 lazy_static! {

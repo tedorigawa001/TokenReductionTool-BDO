@@ -54,14 +54,17 @@ fn get_tee_dir(config: &Config) -> Option<(PathBuf, PathSource)> {
     dirs::data_local_dir().map(|d| (d.join(BDO_DATA_DIR).join("tee"), PathSource::Default))
 }
 
-/// A name bdo gives its tee files, `<epoch>_<slug>[_<nonce>].log`. The
-/// directory may hold the user's own logs (`BDO_TEE_DIR`), and rotation must
-/// never delete those.
+/// A name bdo gives its tee files: `<epoch ns>_<slug>_<16 hex digits>.log`.
+/// The random suffix is what tells them apart from the user's own logs in a
+/// shared `BDO_TEE_DIR`; rotation must never delete those.
 fn is_tee_file_name(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".log") else {
         return false;
     };
-    let Some((epoch, slug)) = stem.split_once('_') else {
+    let Some((epoch, rest)) = stem.split_once('_') else {
+        return false;
+    };
+    let Some((slug, nonce)) = rest.rsplit_once('_') else {
         return false;
     };
     epoch.len() >= 10
@@ -70,6 +73,10 @@ fn is_tee_file_name(name: &str) -> bool {
         && slug
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && nonce.len() == 16
+        && nonce
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// Rotate old tee files: keep only the last `max_files`, delete oldest.
@@ -648,7 +655,7 @@ mod tests {
 
         // Create 25 .log files
         for i in 0..25 {
-            let filename = format!("{:010}_{}.log", 1000000 + i, "test");
+            let filename = format!("{:010}_{}_{:016x}.log", 1000000 + i, "test", i);
             fs::write(dir.join(&filename), "content").unwrap();
         }
 
@@ -659,12 +666,12 @@ mod tests {
 
         // Oldest 5 should be removed
         for i in 0..5 {
-            let filename = format!("{:010}_{}.log", 1000000 + i, "test");
+            let filename = format!("{:010}_{}_{:016x}.log", 1000000 + i, "test", i);
             assert!(!dir.join(&filename).exists());
         }
         // Newest 20 should remain
         for i in 5..25 {
-            let filename = format!("{:010}_{}.log", 1000000 + i, "test");
+            let filename = format!("{:010}_{}_{:016x}.log", 1000000 + i, "test", i);
             assert!(dir.join(&filename).exists());
         }
     }
@@ -677,6 +684,9 @@ mod tests {
         for i in 0..25 {
             fs::write(dir.join(format!("{:03}-build.log", i)), "mine").unwrap();
         }
+        // Shaped like bdo's names, but without the random suffix bdo adds.
+        fs::write(dir.join("1234567890_app.log"), "mine").unwrap();
+        fs::write(dir.join("1000000000000000000_app.log"), "mine").unwrap();
         for i in 0..3 {
             let name = format!(
                 "{}_cargo_test_{:016x}.log",
@@ -689,6 +699,8 @@ mod tests {
         for i in 0..25 {
             assert!(dir.join(format!("{:03}-build.log", i)).exists(), "{i}");
         }
+        assert!(dir.join("1234567890_app.log").exists());
+        assert!(dir.join("1000000000000000000_app.log").exists());
         let tee_left = fs::read_dir(dir)
             .unwrap()
             .filter_map(|e| e.ok())

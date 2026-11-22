@@ -523,6 +523,13 @@ pub fn find_filter_in<'a>(
 ///   7. max_lines            — absolute line cap
 ///   8. on_empty             — message if result is empty
 pub fn apply_filter(filter: &CompiledFilter, stdout: &str) -> String {
+    apply_filter_for_run(filter, stdout, true)
+}
+
+/// [`apply_filter`] for a run that may have failed. `match_output` and
+/// `on_empty` messages (`gcc: ok`, `already installed`) describe a run that
+/// worked, so a failed run skips them and keeps its own lines.
+pub fn apply_filter_for_run(filter: &CompiledFilter, stdout: &str, succeeded: bool) -> String {
     let mut lines: Vec<String> = stdout.lines().map(String::from).collect();
 
     // 1. strip_ansi
@@ -551,7 +558,7 @@ pub fn apply_filter(filter: &CompiledFilter, stdout: &str) -> String {
 
     // 3. match_output — short-circuit on full blob match (first rule wins)
     //    If `unless` is set and also matches the blob, the rule is skipped.
-    if !filter.match_output.is_empty() {
+    if succeeded && !filter.match_output.is_empty() {
         let blob = lines.join("\n");
         for rule in &filter.match_output {
             if rule.pattern.is_match(&blob) {
@@ -613,7 +620,7 @@ pub fn apply_filter(filter: &CompiledFilter, stdout: &str) -> String {
 
     // 8. on_empty
     let result = lines.join("\n");
-    if result.trim().is_empty() {
+    if succeeded && result.trim().is_empty() {
         if let Some(ref msg) = filter.on_empty {
             return msg.clone();
         }

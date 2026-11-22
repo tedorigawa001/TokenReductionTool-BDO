@@ -1010,3 +1010,15 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
 - 古いリポジトリ名の URL を `-BDO` に置き換えた。
 - 次のリリースで初めて試されるもの: `plan` が読み取りの権限で `dist host --steps=create` を実行できるか、
   tap への push の新しい認証。
+
+### 2026-11-22 — `command`・`exec` や git のオプションでの deny のすり抜け、tee の名前の判定
+
+#84〜#86 の修正を見直す点検で見つかったもの。
+- **`command` や `exec` を前に付けると deny・ask ルールをすり抜けた**: #84 では `VAR=value`・`env`・`sudo` だけを
+  外して照合していたが、書き換えは `command`・`exec`・`builtin`・`noglob`・`nocorrect` と、設定の
+  `transparent_prefixes` も外してから書き換える。git のグローバルオプション（`git -C . push --force`、
+  `--no-pager`）も同じ。`Bash(*)` を許可し `Bash(git push --force:*)` を deny にしても `allow` で書き換えていた
+  （本物の bdo で再現）。書き換えが見るのと同じコマンド（`routed_command`）を deny・ask ルールでも照合する。
+- **tee の名前の判定がゆるかった**: `1234567890_app.log` のようなユーザーのファイルも bdo のものとして消えた。
+  bdo が付ける 16 桁の乱数の接尾辞があるものだけをローテーションする。接尾辞を付ける前の古い形式の tee
+  ファイルは消えずに残る。

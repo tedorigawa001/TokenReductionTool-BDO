@@ -250,3 +250,71 @@ fn a_prefix_before_the_command_does_not_hide_it_from_deny_or_ask_rules() {
         assert_ne!(decision(&answer), Some("allow"), "{command}: {answer}");
     }
 }
+
+#[test]
+fn shell_builtins_and_git_options_do_not_hide_a_command_from_deny_or_ask_rules() {
+    // The rewriter also looks past `command`, `exec`, `builtin`, `noglob`,
+    // `nocorrect` and git's global options, so the rules must too.
+    let commands = [
+        "command git push --force",
+        "exec git push --force",
+        "builtin git push --force",
+        "noglob git push --force",
+        "nocorrect git push --force",
+        "FOO=1 command git push --force",
+        "sudo exec git push --force",
+        "git -C . push --force",
+        "git --no-pager push --force",
+        "git -c core.pager=cat push --force",
+    ];
+    for command in commands {
+        let fixture = Fixture::new();
+        fixture.settings(
+            &fixture.project,
+            json!({ "allow": ["Bash(*)"], "deny": ["Bash(git push --force:*)"] }),
+        );
+        let answer = fixture.claude(command, &fixture.project, None);
+        assert_ne!(decision(&answer), Some("allow"), "{command}: {answer}");
+
+        let fixture = Fixture::new();
+        fixture.settings(
+            &fixture.project,
+            json!({ "allow": ["Bash(*)"], "ask": ["Bash(git push:*)"] }),
+        );
+        let answer = fixture.claude(command, &fixture.project, None);
+        assert_ne!(decision(&answer), Some("allow"), "{command}: {answer}");
+    }
+}
+
+// `dirs::config_dir()` ignores HOME on Windows.
+#[cfg(unix)]
+#[test]
+fn a_configured_transparent_prefix_does_not_hide_a_command_from_deny_rules() {
+    let fixture = Fixture::new();
+    fixture.settings(
+        &fixture.project,
+        json!({ "allow": ["Bash(*)"], "deny": ["Bash(git push --force:*)"] }),
+    );
+    let config = if cfg!(target_os = "macos") {
+        fixture
+            .home
+            .join("Library/Application Support/bdo/config.toml")
+    } else {
+        fixture.home.join(".config/bdo/config.toml")
+    };
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(
+        &config,
+        "[hooks]\ntransparent_prefixes = [\"direnv exec .\"]\n",
+    )
+    .unwrap();
+
+    let answer = fixture.claude("direnv exec . git status", &fixture.project, None);
+    assert_eq!(
+        rewritten(&answer),
+        Some("direnv exec . bdo git status"),
+        "the prefix must be in effect: {answer}"
+    );
+    let answer = fixture.claude("direnv exec . git push --force", &fixture.project, None);
+    assert_ne!(decision(&answer), Some("allow"), "{answer}");
+}

@@ -109,8 +109,13 @@ else
 fi
 
 # 7. The workflow-wide token is read-only; a job that needs to write says so.
-if grep -nE '^  "?contents"?:[[:space:]]*"?write' "$WORKFLOW" >/dev/null; then
-    fail "contents: write is granted to every job (set it per job)"
+#    Covers the block form (`contents: write` under a top-level
+#    `permissions:`), `permissions: write-all` and the flow form
+#    `permissions: { contents: write }`.
+if grep -nE '^  "?contents"?:[[:space:]]*"?write' "$WORKFLOW" >/dev/null ||
+    grep -nE '^"?permissions"?:[[:space:]]*("|'"'"')?write-all' "$WORKFLOW" >/dev/null ||
+    grep -nE '^"?permissions"?:[[:space:]]*\{[^}]*write' "$WORKFLOW" >/dev/null; then
+    fail "write access is granted to every job (set it per job)"
 else
     pass "no workflow-wide write token"
 fi
@@ -123,17 +128,33 @@ else
     pass "no checkout keeps its token on disk"
 fi
 
-# 9. Ref names and event text reach scripts through env, not `${{ }}` pasted
-#    into a script. Lines of the form `KEY: ${{ … }}` (env, outputs) are fine.
+# 9. No `${{ }}` inside a `run:` script, on its line or in its block: the
+#    value is pasted into the script before the shell reads it, so a ref name,
+#    an input or any output holding `$(...)` runs as code. Values go through
+#    `env:` and are read as variables. Other keys (`env:`, `with:`, `if:`)
+#    take expressions safely.
 INJECT=$(
-    grep -nE '\$\{\{[^}]*(ref_name|head_ref|outputs\.tag|github\.event\.)' "$WORKFLOW" |
-        grep -vE '^[0-9]+:[[:space:]]*(-[[:space:]]*)?"?[A-Za-z0-9_-]+"?:[[:space:]]' || true
+    awk '
+        function indent(s) { match(s, /^[ ]*/); return RLENGTH }
+        {
+            if (in_run && $0 !~ /^[ ]*$/ && indent($0) <= run_indent) in_run = 0
+            if (in_run && index($0, "${{")) print NR ": " $0
+            if ($0 ~ /^[ ]*(- )?run:/) {
+                run_indent = indent($0)
+                if ($0 ~ /^[ ]*- /) run_indent += 2
+                rest = $0
+                sub(/^[ ]*(- )?run:[ ]*/, "", rest)
+                if (rest ~ /^[|>][-+0-9]*[ ]*(#.*)?$/) in_run = 1
+                else if (index(rest, "${{")) print NR ": " $0
+            }
+        }
+    ' "$WORKFLOW"
 )
 if [ -n "$INJECT" ]; then
     echo "$INJECT" | sed 's/^/      /'
-    fail "a ref name or event field is pasted into a script (pass it through env)"
+    fail "an expression is pasted into a run: script (pass it through env)"
 else
-    pass "ref names and event fields reach scripts through env"
+    pass "no expressions pasted into run: scripts"
 fi
 
 echo ""

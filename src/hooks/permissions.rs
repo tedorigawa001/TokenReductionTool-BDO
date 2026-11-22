@@ -2,7 +2,7 @@ use super::constants::{CLAUDE_DIR, CURSOR_DIR, GEMINI_DIR, SETTINGS_JSON, SETTIN
 use crate::core::bounded_read::{read_text, Links};
 use crate::core::stream::exec_capture;
 use crate::discover::lexer::{canonicalize_segment, split_for_permissions, CanonicalSegment};
-use crate::discover::registry::strip_env_prefix;
+use crate::discover::registry::routed_command;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -48,7 +48,19 @@ pub fn check_command_for(cmd: &str, host: Host) -> PermissionVerdict {
         Host::Claude => AllowMatch::Exact,
         Host::Cursor | Host::Gemini => AllowMatch::Prefix,
     };
-    check_command_with_rules_matching(cmd, &deny_rules, &ask_rules, &allow_rules, allow_match)
+    // The rewriter looks past the user's transparent prefixes, so the rules
+    // must see past them too.
+    let transparent_prefixes = crate::core::config::Config::load()
+        .map(|c| c.hooks.transparent_prefixes)
+        .unwrap_or_default();
+    check_command_with_rules_matching(
+        cmd,
+        &deny_rules,
+        &ask_rules,
+        &allow_rules,
+        allow_match,
+        &transparent_prefixes,
+    )
 }
 
 /// How an allow rule without a wildcard matches.
@@ -68,7 +80,14 @@ pub(crate) fn check_command_with_rules(
     ask_rules: &[String],
     allow_rules: &[String],
 ) -> PermissionVerdict {
-    check_command_with_rules_matching(cmd, deny_rules, ask_rules, allow_rules, AllowMatch::Prefix)
+    check_command_with_rules_matching(
+        cmd,
+        deny_rules,
+        ask_rules,
+        allow_rules,
+        AllowMatch::Prefix,
+        &[],
+    )
 }
 
 /// Deny and ask rules without a wildcard always match as prefixes: reading
@@ -79,6 +98,7 @@ pub(crate) fn check_command_with_rules_matching(
     ask_rules: &[String],
     allow_rules: &[String],
     allow_match: AllowMatch,
+    transparent_prefixes: &[String],
 ) -> PermissionVerdict {
     // Judge what bash will run: `--for\<newline>ce` is `--force`.
     let cmd = &*crate::discover::lexer::remove_line_continuations(cmd);
@@ -88,26 +108,26 @@ pub(crate) fn check_command_with_rules_matching(
     // the shell will read it: `"--force"`, `--fo''rce`, `push  --force`.
     let canonical: Vec<CanonicalSegment> =
         segments.iter().map(|s| canonicalize_segment(s)).collect();
-    // `FOO=1 git push`, `env git push` and `sudo git push` run `git push`, and
-    // the rewriter rewrites them as `git push`, so deny and ask rules judge
+    // `FOO=1 git push`, `command git push` and `git -C . push` run `git push`,
+    // and the rewriter routes them as `git push`, so deny and ask rules judge
     // that command too.
-    let inner: Vec<CanonicalSegment> = segments
+    let routed: Vec<String> = segments
         .iter()
-        .map(|s| canonicalize_segment(strip_env_prefix(s)))
+        .map(|s| routed_command(s, transparent_prefixes))
         .collect();
-    let restricted_by =
-        |segment: &str, canon: &CanonicalSegment, inner: &CanonicalSegment, rules: &[String]| {
-            rules.iter().any(|pattern| {
-                command_matches_pattern(segment, pattern)
-                    || command_matches_pattern(&canon.text, pattern)
-                    || command_matches_pattern(strip_env_prefix(segment), pattern)
-                    || command_matches_pattern(&inner.text, pattern)
-            })
-        };
+    let inner: Vec<CanonicalSegment> = routed.iter().map(|s| canonicalize_segment(s)).collect();
+    let restricted_by = |i: usize, rules: &[String]| {
+        rules.iter().any(|pattern| {
+            command_matches_pattern(&segments[i], pattern)
+                || command_matches_pattern(&canonical[i].text, pattern)
+                || command_matches_pattern(&routed[i], pattern)
+                || command_matches_pattern(&inner[i].text, pattern)
+        })
+    };
 
     // Deny takes highest priority and pre-empts every other construct.
-    for ((segment, canon), inner) in segments.iter().zip(&canonical).zip(&inner) {
-        if restricted_by(segment, canon, inner, deny_rules) {
+    for i in 0..segments.len() {
+        if restricted_by(i, deny_rules) {
             return PermissionVerdict::Deny;
         }
     }
@@ -124,14 +144,14 @@ pub(crate) fn check_command_with_rules_matching(
     let mut all_segments_allowed = true;
     let mut saw_segment = false;
 
-    for ((segment, canon), inner) in segments.iter().zip(&canonical).zip(&inner) {
+    for (i, ((segment, canon), inner)) in segments.iter().zip(&canonical).zip(&inner).enumerate() {
         if segment.is_empty() {
             continue;
         }
         saw_segment = true;
 
         // Ask — if any segment matches an ask rule, the final verdict is Ask.
-        if !any_ask && restricted_by(segment, canon, inner, ask_rules) {
+        if !any_ask && restricted_by(i, ask_rules) {
             any_ask = true;
         }
 

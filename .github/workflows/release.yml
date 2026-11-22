@@ -177,16 +177,16 @@ jobs:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
-      - name: Install dependencies
-        run: |
-          ${{ matrix.packages_install }}
       - name: Build artifacts
         shell: bash
         env:
           TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
+          # Several flags in one string, split by the shell below.
+          DIST_ARGS: ${{ matrix.dist_args }}
         run: |
           # Actually do builds and make zips and whatnot
-          dist build ${TAG_FLAG:+"$TAG_FLAG"} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
+          # shellcheck disable=SC2086
+          dist build ${TAG_FLAG:+"$TAG_FLAG"} --print=linkage --output-format=json $DIST_ARGS > dist-manifest.json
           echo "dist ran successfully"
       - name: Attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

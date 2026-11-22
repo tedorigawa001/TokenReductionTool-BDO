@@ -7,6 +7,7 @@
 # this check that regression is invisible: the workflow keeps working, just
 # without the hardening. If this script fails after a legitimate regeneration,
 # re-apply the hardening rather than relaxing the check.
+# Requires Ruby with its Psych YAML parser.
 
 set -eu
 
@@ -108,14 +109,7 @@ else
     pass "dist is not installed by an installer script"
 fi
 
-# 7. The workflow-wide token is read-only; a job that needs to write says so.
-if grep -nE '^  "?contents"?:[[:space:]]*"?write' "$WORKFLOW" >/dev/null; then
-    fail "contents: write is granted to every job (set it per job)"
-else
-    pass "no workflow-wide write token"
-fi
-
-# 8. Checkout must not leave a token in .git/config for later steps.
+# 7. Checkout must not leave a token in .git/config for later steps.
 if grep -nE 'persist-credentials:[[:space:]]*true' "$WORKFLOW" >/dev/null; then
     grep -nE 'persist-credentials:[[:space:]]*true' "$WORKFLOW" | sed 's/^/      /'
     fail "a checkout keeps its token on disk"
@@ -123,17 +117,10 @@ else
     pass "no checkout keeps its token on disk"
 fi
 
-# 9. Ref names and event text reach scripts through env, not `${{ }}` pasted
-#    into a script. Lines of the form `KEY: ${{ … }}` (env, outputs) are fine.
-INJECT=$(
-    grep -nE '\$\{\{[^}]*(ref_name|head_ref|outputs\.tag|github\.event\.)' "$WORKFLOW" |
-        grep -vE '^[0-9]+:[[:space:]]*(-[[:space:]]*)?"?[A-Za-z0-9_-]+"?:[[:space:]]' || true
-)
-if [ -n "$INJECT" ]; then
-    echo "$INJECT" | sed 's/^/      /'
-    fail "a ref name or event field is pasted into a script (pass it through env)"
-else
-    pass "ref names and event fields reach scripts through env"
+# 8–9. Inspect the parsed run scripts and require explicit read-only (or no)
+#      workflow-wide permissions. Jobs that need to write grant it per job.
+if ! ruby "$(dirname "$0")/check-workflow-policy.rb" "$WORKFLOW"; then
+    FAIL=1
 fi
 
 echo ""

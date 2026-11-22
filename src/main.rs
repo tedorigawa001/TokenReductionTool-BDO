@@ -1438,7 +1438,19 @@ fn run_fallback(parse_error: clap::Error) -> Result<i32> {
                     None
                 };
 
-                let filtered = core::toml_filter::apply_filter(filter, &combined_raw);
+                let filtered = core::toml_filter::apply_filter_for_run(
+                    filter,
+                    &combined_raw,
+                    output.status.success(),
+                );
+                // A failed run whose filtered text says nothing gets the
+                // tool's own words (its stderr) or its exit code.
+                let filtered = core::runner::with_failure_evidence(
+                    filtered,
+                    &stdout_raw,
+                    &stderr_raw,
+                    exit_code,
+                );
                 println!("{}", filtered);
                 if let Some(hint) = tee_hint {
                     println!("{}", hint);

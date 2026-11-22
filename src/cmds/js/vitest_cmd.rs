@@ -133,8 +133,9 @@ fn extract_stats_regex(output: &str) -> Option<TestResult> {
     let mut failed = 0;
     let mut total = 0;
 
-    // Parse test counts
-    if let Some(caps) = TESTS_RE.captures(&clean_output) {
+    // Parse test counts. The runner prints its summary last; an earlier line
+    // with the same shape was printed by a test.
+    if let Some(caps) = TESTS_RE.captures_iter(&clean_output).last() {
         if let Some(fail_str) = caps.get(1) {
             failed = fail_str.as_str().parse().unwrap_or(0);
         }
@@ -255,7 +256,19 @@ pub fn run_test(command: &Commands, args: &[String], verbose: u8) -> Result<i32>
     let parse_result = VitestParser::parse(&result.stdout);
     let mode = FormatMode::from_verbosity(verbose);
 
+    // A failed run whose report shows no failed test: the report is not what
+    // happened (a test printed it, or the run broke before reporting), so it
+    // is not summarised as a pass.
+    let contradicts_exit = |data: &TestResult| !result.success() && data.failed == 0;
     let filtered = match parse_result {
+        ParseResult::Full(data) | ParseResult::Degraded(data, _) if contradicts_exit(&data) => {
+            format!(
+                "{} exited with code {}, but its report shows no failed test; the summary is left out.\n{}",
+                framework,
+                result.exit_code,
+                truncate_passthrough(&result.stdout)
+            )
+        }
         ParseResult::Full(data) => {
             if verbose > 0 {
                 eprintln!("{} run (Tier 1: Full JSON parse)", framework);

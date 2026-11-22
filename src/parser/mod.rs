@@ -143,37 +143,35 @@ pub fn emit_passthrough_warning(tool: &str, reason: &str) {
 ///
 /// Returns `None` if no valid JSON object found.
 pub fn extract_json_object(input: &str) -> Option<&str> {
-    // Try vitest-specific marker first (most reliable)
-    let start_pos = if let Some(pos) = input.find("\"numTotalTests\"") {
+    // The reporter writes its result last; a test may print JSON of its own
+    // before it, so the last marker is the reporter's. A key inside a JSON
+    // string has its quotes escaped and cannot match.
+    let start_pos = if let Some(pos) = input.rfind("\"numTotalTests\"") {
         // Walk backward to find opening brace of this object
         input[..pos].rfind('{').unwrap_or(0)
     } else {
-        // Fallback: find first `{` on its own line or after whitespace
+        // Fallback: the first line that starts with `{` (byte offsets, so
+        // CRLF and multibyte text before it are counted correctly).
+        let mut offset = 0;
         let mut found_start = None;
-        for (idx, line) in input.lines().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('{') {
-                // Calculate byte offset
-                found_start = Some(
-                    input[..]
-                        .lines()
-                        .take(idx)
-                        .map(|l| l.len() + 1)
-                        .sum::<usize>(),
-                );
+        for line in input.split_inclusive('\n') {
+            let indent = line.len() - line.trim_start().len();
+            if line.trim_start().starts_with('{') {
+                found_start = Some(offset + indent);
                 break;
             }
+            offset += line.len();
         }
         found_start?
     };
 
-    // Brace-balance forward from start_pos
+    // Brace-balance forward from start_pos. Byte indices: slicing by a
+    // character count would cut inside a multibyte character.
     let mut depth = 0;
     let mut in_string = false;
     let mut escape_next = false;
-    let chars: Vec<char> = input[start_pos..].chars().collect();
 
-    for (i, &ch) in chars.iter().enumerate() {
+    for (i, ch) in input[start_pos..].char_indices() {
         if escape_next {
             escape_next = false;
             continue;
@@ -187,7 +185,7 @@ pub fn extract_json_object(input: &str) -> Option<&str> {
                 depth -= 1;
                 if depth == 0 {
                     // Found matching closing brace
-                    let end_pos = start_pos + i + 1; // +1 to include the `}`
+                    let end_pos = start_pos + i + 1; // `}` is one byte
                     return Some(&input[start_pos..end_pos]);
                 }
             }
@@ -303,6 +301,22 @@ Scope: all 6 workspace projects
         assert!(extracted.contains("\"nested\": true"));
         assert!(extracted.starts_with('{'));
         assert!(extracted.ends_with('}'));
+    }
+
+    #[test]
+    fn test_extract_json_object_multibyte_and_last_report() {
+        // Multibyte text must not shift the end of the object.
+        let input = "banner\n{\"numTotalTests\":1,\"x\":\"caf\u{e9}\u{20ac}\"}";
+        assert_eq!(
+            extract_json_object(input),
+            Some("{\"numTotalTests\":1,\"x\":\"caf\u{e9}\u{20ac}\"}")
+        );
+        // A test's own JSON before the reporter's is not the result.
+        let input = "{\"numTotalTests\":5}\n{\"numTotalTests\":1}";
+        assert_eq!(extract_json_object(input), Some("{\"numTotalTests\":1}"));
+        // Fallback branch: CRLF lines and multibyte text before the object.
+        let input = "\u{e9}\u{e9}\r\n\u{20ac}\r\n  {\"a\":\"\u{e9}\"}\r\n";
+        assert_eq!(extract_json_object(input), Some("{\"a\":\"\u{e9}\"}"));
     }
 
     #[test]

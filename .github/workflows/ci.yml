@@ -86,10 +86,11 @@ jobs:
       - name: Check release workflow hardening
         run: sh scripts/check-release-hardening.sh
 
-      # Same SHA-pin rule for this file: CI jobs run on every PR, so a moved
-      # tag here executes in the same repository context as release.yml.
-      - name: Check CI workflow pinning
+      - name: Check CI workflow hardening
         run: sh scripts/check-release-hardening.sh .github/workflows/ci.yml
+
+      - name: Test workflow hardening checks
+        run: sh scripts/test-check-release-hardening.sh
 
       - name: Check installer hardening
         run: sh scripts/test-install.sh

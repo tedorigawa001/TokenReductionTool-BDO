@@ -284,49 +284,128 @@ fn run_show(
         .map(|r| r.stdout)
         .unwrap_or_default();
 
+    let pathspec_start = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
+    let (options, pathspecs) = args.split_at(pathspec_start);
+    // The summary and stat runs put their own options first: Git rejects an
+    // option after a path given without `--`. Options that turn the patch
+    // back on after `--no-patch` (checked against git 2.5x) are left out.
+    let summary_options: Vec<&String> = options
+        .iter()
+        .filter(|arg| {
+            !(arg.starts_with("-U")
+                || arg.starts_with("--unified")
+                || matches!(
+                    arg.as_str(),
+                    "-p" | "-u" | "--patch" | "--patch-with-stat" | "--patch-with-raw"
+                ))
+        })
+        .collect();
+    let no_patch = options.iter().any(|arg| arg == "-s" || arg == "--no-patch");
+    let custom_stats = options.iter().any(|arg| {
+        arg.starts_with("--stat")
+            || arg.starts_with("--dirstat")
+            || matches!(arg.as_str(), "--compact-summary" | "--summary" | "--cumulative")
+    });
+
     // Step 1: one-line commit summary
     let mut summary_cmd = git_cmd(global_args);
-    summary_cmd.args(["show", "--no-patch", "--pretty=format:%h %s (%ar) <%an>"]);
-    for arg in args {
-        summary_cmd.arg(arg);
-    }
+    summary_cmd
+        .args(["show", "--no-patch", "--pretty=format:%H%x00%h %s (%ar) <%an>"])
+        .args(&summary_options)
+        .args(pathspecs);
     let summary_result = exec_capture(&mut summary_cmd).context("Failed to run git show")?;
     if !summary_result.success() {
         eprintln!("{}", summary_result.stderr);
         return Ok(summary_result.exit_code);
     }
-    println!("{}", summary_result.stdout.trim());
-
-    // Step 2: --stat summary
-    let mut stat_cmd = git_cmd(global_args);
-    stat_cmd.args(["show", "--stat", "--pretty=format:"]);
-    for arg in args {
-        stat_cmd.arg(arg);
-    }
-    let stat_result = exec_capture(&mut stat_cmd).context("Failed to run git show --stat")?;
-    let stat_text = stat_result.stdout.trim();
-    if !stat_text.is_empty() {
-        println!("{}", stat_text);
-    }
-
-    // Step 3: compacted diff
+    // Match Git's exact per-file statistics against the patch headers before
+    // suppressing any of the human-readable stat rows.
     let mut diff_cmd = git_cmd(global_args);
     diff_cmd.args(["show", "--pretty=format:"]);
     for arg in args {
         diff_cmd.arg(arg);
     }
     let diff_result = exec_capture(&mut diff_cmd).context("Failed to run git show (diff)")?;
-    let diff_text = diff_result.stdout.trim();
+    let diff_text = diff_result.stdout.as_str();
 
-    let mut final_output = summary_result.stdout.clone();
+    let stat = |formats: &[&str]| {
+        let mut cmd = git_cmd(global_args);
+        cmd.args(["show", "--no-patch"])
+            .args(formats)
+            .arg("--pretty=format:")
+            .args(&summary_options)
+            .args(pathspecs);
+        exec_capture(&mut cmd)
+    };
+    let mut commit_ids = Vec::new();
+    let mut final_output = String::new();
+    for line in summary_result.stdout.trim().lines() {
+        let displayed = match line.split_once('\0') {
+            Some((id, displayed)) if matches!(id.len(), 40 | 64)
+                && id.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+            {
+                commit_ids.push(id);
+                displayed
+            }
+            _ => line,
+        };
+        final_output.push_str(displayed);
+        final_output.push('\n');
+    }
+    let mut file_headers = None;
+    if !no_patch {
+        let merged = if !custom_stats && !diff_text.is_empty() && diff_result.success() {
+            stat(&["--numstat", "--shortstat", "-z"])
+                .ok()
+                .filter(|result| result.success())
+                .and_then(|result| merge_show_stats(&result.stdout, diff_text))
+        } else {
+            None
+        };
+        if let Some((totals, headers)) = merged {
+            final_output.push_str(&totals);
+            final_output.push('\n');
+            file_headers = Some(headers);
+        } else {
+            let stat_result = stat(&["--stat"]).context("Failed to run git show --stat")?;
+            let stat_text = stat_result.stdout.trim();
+            if !stat_text.is_empty() {
+                final_output.push_str(stat_text);
+                final_output.push('\n');
+            }
+        }
+    }
     if !diff_text.is_empty() {
         if verbose > 0 {
-            println!("\nChanges:");
+            final_output.push_str("\nChanges:\n");
         }
-        let compacted = compact_diff(diff_text, max_lines.unwrap_or(500));
-        println!("{}", compacted);
-        final_output.push_str(&format!("\n{}", compacted));
+        let full_command = full_show_command(global_args, args, options, pathspecs, &commit_ids);
+        let show = ShowDiff {
+            full_command: &full_command,
+            shorten_context: !diff_text.contains('\u{1b}')
+                && !options.iter().any(|arg| {
+                    arg.starts_with("--output-indicator-")
+                        || arg.starts_with("--word-diff")
+                        || arg.starts_with("--color-words")
+                        || arg.starts_with("--ext-diff")
+                }),
+            trim_hunk_edges: !options.iter().any(|arg| {
+                arg.starts_with("-U")
+                    || arg == "--unified"
+                    || arg.starts_with("--unified=")
+                    || matches!(arg.as_str(), "-W" | "--function-context")
+            }),
+        };
+        let compacted = compact_diff_with_headers(
+            diff_text,
+            max_lines.unwrap_or(500),
+            file_headers.as_deref(),
+            Some(&show),
+        );
+        final_output.push_str(&compacted);
+        final_output.push('\n');
     }
+    print!("{final_output}");
 
     timer.track(
         &format!("git show {}", args.join(" ")),
@@ -338,12 +417,118 @@ fn run_show(
     Ok(0)
 }
 
+fn full_show_command(
+    global_args: &[String],
+    args: &[String],
+    options: &[String],
+    pathspecs: &[String],
+    commit_ids: &[&str],
+) -> String {
+    fn quote(arg: &str) -> String {
+        if !arg.is_empty()
+            && arg.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_./:=+".contains(&c))
+        {
+            arg.to_owned()
+        } else if cfg!(windows) {
+            format!("'{}'", arg.replace('\'', "''"))
+        } else {
+            format!("'{}'", arg.replace('\'', "'\\''"))
+        }
+    }
+
+    // Every option stays, so the hint shows the same diff (`-w`, `-M`,
+    // `--diff-filter` change it). Only output redirection is not replayed.
+    let replayed = |arg: &&String| !(arg.as_str() == "--output" || arg.starts_with("--output="));
+    let mut command = vec!["bdo".to_owned(), "--raw".to_owned(), "git".to_owned()];
+    command.extend(global_args.iter().map(|arg| quote(arg)));
+    command.push("show".to_owned());
+    // Pin the commits, unless an argument before `--` might be a path: with
+    // more of them than commits shown, bdo cannot tell which ones are.
+    let revisions = options.iter().filter(|arg| !arg.starts_with('-')).count();
+    if commit_ids.is_empty() || revisions > commit_ids.len() {
+        command.extend(args.iter().filter(replayed).map(|arg| quote(arg)));
+    } else {
+        command.extend(
+            options
+                .iter()
+                .filter(|arg| arg.starts_with('-'))
+                .filter(replayed)
+                .map(|arg| quote(arg)),
+        );
+        command.extend(commit_ids.iter().map(|id| (*id).to_owned()));
+        command.extend(pathspecs.iter().map(|arg| quote(arg)));
+    }
+    command.join(" ")
+}
+
+/// Git's NUL-delimited numstat gives exact totals even for truncated hunks.
+/// A rename/copy has an empty path field followed by its old and new paths.
+fn merge_show_stats(stats: &str, diff: &str) -> Option<(String, Vec<String>)> {
+    let (records, totals) = stats.rsplit_once('\0')?;
+    let totals = totals.trim();
+    if totals.is_empty() || totals.contains('\n') {
+        return None;
+    }
+
+    let mut records = records.split('\0');
+    let mut patch_headers = diff.lines().filter(|line| line.starts_with("diff --git "));
+    let mut headers = Vec::new();
+    while let Some(record) = records.next() {
+        let mut fields = record.splitn(3, '\t');
+        // Binary files have "-" counts. Fall back to the original stat
+        // display rather than dropping their size information.
+        let added = fields.next()?.parse::<usize>().ok()?;
+        let removed = fields.next()?.parse::<usize>().ok()?;
+        let path = fields.next()?;
+        let (old, new) = if path.is_empty() {
+            (records.next()?, records.next()?)
+        } else {
+            (path, path)
+        };
+        // Verify both the order and the names. Unknown prefixes, escaped
+        // paths and incompatible patch modes keep the standalone stats.
+        if old.is_empty()
+            || new.is_empty()
+            || old.contains('\u{fffd}')
+            || new.contains('\u{fffd}')
+            || patch_headers.next()? != format!("diff --git a/{old} b/{new}")
+        {
+            return None;
+        }
+        headers.push(if old == new {
+            format!("{new}  +{added} -{removed}")
+        } else {
+            format!("{old} => {new}  +{added} -{removed}")
+        });
+    }
+    if headers.is_empty() || patch_headers.next().is_some() {
+        return None;
+    }
+    Some((totals.to_owned(), headers))
+}
+
 fn is_blob_show_arg(arg: &str) -> bool {
     // Detect `rev:path` style arguments while ignoring flags like `--pretty=format:...`.
     !arg.starts_with('-') && arg.contains(':')
 }
 
 pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
+    compact_diff_with_headers(diff, max_lines, None, None)
+}
+
+struct ShowDiff<'a> {
+    full_command: &'a str,
+    shorten_context: bool,
+    trim_hunk_edges: bool,
+}
+
+fn compact_diff_with_headers(
+    diff: &str,
+    max_lines: usize,
+    headers: Option<&[String]>,
+    show: Option<&ShowDiff<'_>>,
+) -> String {
+    let mut headers = headers.map(<[String]>::iter);
     let mut result = Vec::new();
     let mut current_file = String::new();
     let mut added = 0;
@@ -353,8 +538,13 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
     let mut hunk_skipped = 0usize;
     let max_hunk_lines = 100;
     let mut was_truncated = false;
+    let mut context_was_shortened = false;
+    let mut omitted_hunk_edges = 0;
+    let mut show_hunk = false;
+    let mut saw_change = false;
 
-    for line in diff.lines() {
+    let mut lines = diff.lines().peekable();
+    while let Some(line) = lines.next() {
         if line.starts_with("diff --git") {
             // Flush hunk truncation before starting a new file
             if hunk_skipped > 0 {
@@ -362,11 +552,15 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
                 was_truncated = true;
                 hunk_skipped = 0;
             }
-            if !current_file.is_empty() && (added > 0 || removed > 0) {
+            if headers.is_none() && !current_file.is_empty() && (added > 0 || removed > 0) {
                 result.push(format!("  +{} -{}", added, removed));
             }
             current_file = line.split(" b/").nth(1).unwrap_or("unknown").to_string();
-            result.push(format!("\n{}", current_file));
+            let header = headers
+                .as_mut()
+                .and_then(Iterator::next)
+                .map_or(current_file.as_str(), String::as_str);
+            result.push(format!("\n{header}"));
             added = 0;
             removed = 0;
             in_hunk = false;
@@ -379,12 +573,54 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
                 hunk_skipped = 0;
             }
             in_hunk = true;
+            show_hunk = show.is_some_and(|show| show.shorten_context) && line.starts_with("@@ -");
+            saw_change = false;
             hunk_shown = 0;
             // Preserve the full unified diff hunk header, including trailing
             // function / symbol context after the second @@ marker.
             result.push(format!("  {}", line));
         } else if in_hunk {
-            if line.starts_with('+') && !line.starts_with("+++") {
+            if show_hunk && line.starts_with(' ') {
+                let rest = lines.clone();
+                let mut count = 1usize;
+                let mut last = line;
+                while let Some(next) = lines.next_if(|next| next.starts_with(' ')) {
+                    count += 1;
+                    last = next;
+                }
+                // At each end of a long run, keep the line nearest a change.
+                let keep_last = lines.peek().is_some_and(|next| next.starts_with(['+', '-']));
+                let kept_edges = usize::from(saw_change) + usize::from(keep_last);
+                let omitted = count.saturating_sub(kept_edges);
+                if hunk_shown < max_hunk_lines {
+                    let trim_hunk_edge = kept_edges == 1
+                        && omitted > 0
+                        && show.is_some_and(|show| show.trim_hunk_edges);
+                    if kept_edges > 0 && (omitted >= 3 || trim_hunk_edge) {
+                        if saw_change {
+                            result.push(format!("  {line}"));
+                        }
+                        if trim_hunk_edge {
+                            // The hunk boundary is already visible. Report
+                            // short edge omissions together, not one per run.
+                            omitted_hunk_edges += omitted;
+                        } else {
+                            result.push(format!("  ... ({omitted} unchanged lines omitted)"));
+                        }
+                        if keep_last {
+                            result.push(format!("  {last}"));
+                        }
+                        context_was_shortened = true;
+                    } else {
+                        result.extend(
+                            std::iter::once(line)
+                                .chain(rest.take(count - 1))
+                                .map(|line| format!("  {line}")),
+                        );
+                    }
+                }
+            } else if line.starts_with('+') && (show_hunk || !line.starts_with("+++")) {
+                saw_change = true;
                 added += 1;
                 if hunk_shown < max_hunk_lines {
                     result.push(format!("  {}", line));
@@ -392,7 +628,8 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
                 } else {
                     hunk_skipped += 1;
                 }
-            } else if line.starts_with('-') && !line.starts_with("---") {
+            } else if line.starts_with('-') && (show_hunk || !line.starts_with("---")) {
+                saw_change = true;
                 removed += 1;
                 if hunk_shown < max_hunk_lines {
                     result.push(format!("  {}", line));
@@ -400,6 +637,8 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
                 } else {
                     hunk_skipped += 1;
                 }
+            } else if show_hunk && line.starts_with("\\ ") && hunk_shown < max_hunk_lines {
+                result.push(format!("  {line}"));
             } else if hunk_shown < max_hunk_lines && !line.starts_with("\\") {
                 // Context line
                 if hunk_shown > 0 {
@@ -422,12 +661,24 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
         was_truncated = true;
     }
 
-    if !current_file.is_empty() && (added > 0 || removed > 0) {
+    if headers.is_none() && !current_file.is_empty() && (added > 0 || removed > 0) {
         result.push(format!("  +{} -{}", added, removed));
     }
+    if let Some(remaining) = headers {
+        // A global patch cap must not hide the counts for later files.
+        result.extend(remaining.map(|header| format!("\n{header}")));
+    }
 
-    if was_truncated {
-        result.push("[full diff: bdo git diff --no-compact]".to_string());
+    if omitted_hunk_edges > 0 {
+        result.push(format!(
+            "... ({omitted_hunk_edges} unchanged lines omitted at hunk edges)"
+        ));
+    }
+    if was_truncated || context_was_shortened {
+        match show {
+            Some(show) => result.push(format!("[full diff: {}]", show.full_command)),
+            None => result.push("[full diff: bdo git diff --no-compact]".to_string()),
+        }
     }
 
     result.join("\n")

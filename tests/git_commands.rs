@@ -309,6 +309,306 @@ fn show_gives_the_commit_and_its_change() {
     assert!(s.contains("+two"), "{s}");
 }
 
+#[test]
+fn show_combines_file_statistics_and_patch_headers() {
+    let repo = Repo::new();
+    repo.commit_file("changes with spaces.txt", "old\nstays\n", "add fixture");
+    repo.commit_file(
+        "changes with spaces.txt",
+        "new\nstays\nextra\n",
+        "edit fixture",
+    );
+
+    let output = repo.ok(&["show"]);
+    assert_eq!(
+        output.matches("changes with spaces.txt").count(),
+        1,
+        "{output}"
+    );
+    assert!(
+        output.contains("changes with spaces.txt  +2 -1"),
+        "{output}"
+    );
+    assert!(output.contains("1 file changed"), "{output}");
+    assert!(output.contains("+new"), "{output}");
+    assert!(output.contains("-old"), "{output}");
+}
+
+#[test]
+fn show_keeps_rename_paths_and_their_exact_counts_in_one_header() {
+    let repo = Repo::new();
+    repo.git(&["config", "diff.renames", "true"]);
+    let original = "unchanged content\n".repeat(20);
+    repo.write("old name.txt", &format!("{original}old value\n"));
+    repo.write("before.txt", "same content\n");
+    repo.git(&["add", "--", "old name.txt", "before.txt"]);
+    repo.git(&["commit", "-q", "-m", "add original files"]);
+    repo.git(&["mv", "old name.txt", "new name.txt"]);
+    repo.git(&["mv", "before.txt", "after.txt"]);
+    repo.write("new name.txt", &format!("{original}new value\n"));
+    repo.git(&["add", "--", "new name.txt"]);
+    repo.git(&["commit", "-q", "-m", "rename files"]);
+
+    let output = repo.ok(&["show", "-M"]);
+    assert!(
+        output.contains("old name.txt => new name.txt  +1 -1"),
+        "{output}"
+    );
+    assert!(
+        output.contains("before.txt => after.txt  +0 -0"),
+        "{output}"
+    );
+    for path in ["old name.txt", "new name.txt", "before.txt", "after.txt"] {
+        assert_eq!(output.matches(path).count(), 1, "{output}");
+    }
+}
+
+#[test]
+fn show_keeps_exact_counts_for_files_beyond_patch_limits() {
+    let repo = Repo::new();
+    for index in 0..7 {
+        let name = format!("part-{index}.txt");
+        repo.write(&name, &"old line\n".repeat(140));
+        repo.git(&["add", "--", &name]);
+    }
+    repo.git(&["commit", "-q", "-m", "add files"]);
+    for index in 0..7 {
+        let name = format!("part-{index}.txt");
+        repo.write(
+            &name,
+            &format!("last marker {index}\n{}", "new line\n".repeat(159)),
+        );
+        repo.git(&["add", "--", &name]);
+    }
+    repo.git(&["commit", "-q", "-m", "rewrite files"]);
+
+    let output = repo.ok(&["show"]);
+    assert!(output.contains("more changes truncated"), "{output}");
+    assert!(!output.contains("last marker 6"), "{output}");
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+    assert!(
+        output.contains(&format!("[full diff: bdo --raw git show {commit}]")),
+        "{output}"
+    );
+    for index in 0..7 {
+        let name = format!("part-{index}.txt");
+        assert!(output.contains(&format!("{name}  +160 -140")), "{output}");
+        assert_eq!(output.matches(&name).count(), 1, "{output}");
+    }
+}
+
+#[test]
+fn show_keeps_git_statistics_when_patch_headers_cannot_be_matched() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "two\n", "edit fixture");
+    let output = repo.ok(&["show", "--no-prefix"]);
+    assert!(output.contains("f.txt | 2 +-"), "{output}");
+    assert!(output.contains("1 file changed"), "{output}");
+    assert!(output.contains("+two"), "{output}");
+}
+
+#[test]
+fn show_with_unified_context_renders_each_change_once() {
+    let repo = Repo::new();
+    repo.commit_file(
+        "f.txt",
+        "far before\nnear before\nold value\nnear after\nfar after\n",
+        "set context",
+    );
+    repo.write(
+        "f.txt",
+        "far before\nnear before\nnew value\nnear after\nfar after\n",
+    );
+    repo.write("other.txt", "not selected\n");
+    repo.git(&["add", "--", "f.txt", "other.txt"]);
+    repo.git(&["commit", "-q", "-m", "change one value"]);
+
+    for context in ["-U1", "--unified=1"] {
+        let output = repo.ok(&["show", context, "HEAD", "--", "f.txt"]);
+        assert_eq!(output.matches("+new value").count(), 1, "{output}");
+        assert_eq!(output.matches("-old value").count(), 1, "{output}");
+        assert!(output.contains("@@ -2,3 +2,3 @@"), "{output}");
+        assert!(
+            output.lines().any(|line| line.trim() == "near before"),
+            "{output}"
+        );
+        assert!(output.contains("near after"), "{output}");
+        assert!(output.contains("change one value"), "{output}");
+        assert!(output.contains("1 file changed"), "{output}");
+        assert!(!output.contains("far after"), "{output}");
+        assert!(!output.contains("other.txt"), "{output}");
+        assert!(!output.contains("unchanged lines omitted"), "{output}");
+    }
+}
+
+#[test]
+fn show_default_keeps_only_context_next_to_hunk_edges() {
+    let repo = Repo::new();
+    repo.git(&["config", "diff.context", "3"]);
+    let name = "f.txt";
+    repo.commit_file(
+        name,
+        "before 0\nbefore 1\nbefore 2\nold value\nafter 0\nafter 1\nafter 2\n",
+        "setup",
+    );
+    repo.commit_file(
+        name,
+        "before 0\nbefore 1\nbefore 2\nnew value\nafter 0\nafter 1\nafter 2\n",
+        "edit",
+    );
+    let output = repo.ok(&["show"]);
+    let lines: Vec<_> = output.lines().map(str::trim).collect();
+    for line in ["before 2", "-old value", "+new value", "after 0"] {
+        assert!(lines.contains(&line), "{line}: {output}");
+    }
+    for line in ["before 0", "before 1", "after 1", "after 2"] {
+        assert!(!lines.contains(&line), "{line}: {output}");
+    }
+    assert!(
+        output.contains("4 unchanged lines omitted at hunk edges"),
+        "{output}"
+    );
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+    assert!(
+        output.contains(&format!("[full diff: bdo --raw git show {commit}]")),
+        "{output}"
+    );
+
+    let explicit = repo.ok(&["show", "-U3"]);
+    for line in ["before 0", "before 1", "after 1", "after 2"] {
+        assert!(
+            explicit.lines().any(|item| item.trim() == line),
+            "{explicit}"
+        );
+    }
+}
+
+#[test]
+fn show_omits_long_context_but_keeps_changes_and_a_pinned_full_diff_hint() {
+    let repo = Repo::new();
+    let name = "file with spaces.txt";
+    let shared: String = (0..10).map(|n| format!("context {n}\n")).collect();
+    repo.commit_file(
+        name,
+        &format!("old start\n{shared}old end\n"),
+        "add context fixture",
+    );
+    repo.commit_file(
+        name,
+        &format!("new start\n{shared}new end\n"),
+        "change both ends",
+    );
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+    let output = repo.ok(&["show", "-U12", "HEAD", "--", name]);
+    for line in [
+        "-old start",
+        "+new start",
+        "-old end",
+        "+new end",
+        "context 0",
+        "context 9",
+    ] {
+        assert!(output.contains(line), "{line}: {output}");
+    }
+    assert!(!output.contains("context 5"), "{output}");
+    assert!(output.contains("8 unchanged lines omitted"), "{output}");
+    assert!(
+        output.contains(&format!("bdo --raw git show -U12 {commit} -- '{name}'")),
+        "{output}"
+    );
+    let full = repo.git(&["show", "-U12", &commit, "--", name]);
+    assert!(full.contains("context 5"), "{full}");
+}
+
+#[test]
+fn show_keeps_nearest_context_and_sign_prefixed_changes() {
+    let repo = Repo::new();
+    let before: String = (0..7).map(|n| format!("before {n}\n")).collect();
+    let after: String = (0..7).map(|n| format!("after {n}\n")).collect();
+    repo.commit_file("f.txt", &format!("{before}--old marker\n{after}"), "setup");
+    repo.commit_file("f.txt", &format!("{before}++new marker\n{after}"), "edit");
+    let output = repo.ok(&["show", "--unified=8"]);
+    for line in ["before 6", "---old marker", "+++new marker", "after 0"] {
+        assert!(
+            output.lines().any(|item| item.trim() == line),
+            "{line}: {output}"
+        );
+    }
+    assert_eq!(
+        output.matches("6 unchanged lines omitted").count(),
+        2,
+        "{output}"
+    );
+    for line in ["before 0", "after 6"] {
+        assert!(
+            !output.lines().any(|item| item.trim() == line),
+            "{line}: {output}"
+        );
+    }
+}
+
+#[test]
+fn show_accepts_a_path_without_a_double_dash() {
+    let repo = Repo::new();
+    repo.write("f.txt", "two\n");
+    repo.write("other.txt", "not selected\n");
+    repo.git(&["add", "--", "f.txt", "other.txt"]);
+    repo.git(&["commit", "-q", "-m", "edit two files"]);
+
+    // Git rejects an option after a path, so bdo's own options must come first.
+    for args in [
+        &["show", "HEAD", "f.txt"][..],
+        &["show", "-U1", "HEAD", "f.txt"],
+    ] {
+        let output = repo.ok(args);
+        assert!(output.contains("edit two files"), "{args:?}: {output}");
+        assert!(output.contains("+two"), "{args:?}: {output}");
+        assert!(output.contains("1 file changed"), "{args:?}: {output}");
+        assert!(!output.contains("other.txt"), "{args:?}: {output}");
+    }
+}
+
+#[test]
+fn show_full_diff_hint_repeats_the_options_and_paths_given() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "a\nb\nc\nold\nd\ne\nf\n", "setup");
+    repo.write("f.txt", "a\nb\nc\nnew\nd\ne\nf\n");
+    repo.write("other.txt", "not selected\n");
+    repo.git(&["add", "--", "f.txt", "other.txt"]);
+    repo.git(&["commit", "-q", "-m", "edit"]);
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+
+    // An option that changes the diff stays in the hint, or the hint would
+    // show a different diff from the one that was shortened.
+    let output = repo.ok(&["show", "-w", "HEAD", "--", "f.txt"]);
+    assert!(
+        output.contains(&format!(
+            "[full diff: bdo --raw git show -w {commit} -- f.txt]"
+        )),
+        "{output}"
+    );
+    // Without `--`, bdo cannot tell a path from a revision, so the hint repeats
+    // the arguments as given rather than drop the path.
+    let output = repo.ok(&["show", "-w", "HEAD", "f.txt"]);
+    assert!(
+        output.contains("[full diff: bdo --raw git show -w HEAD f.txt]"),
+        "{output}"
+    );
+}
+
+#[test]
+fn show_no_patch_still_omits_both_patch_and_stats() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "two\n", "second commit");
+
+    for no_patch in ["-s", "--no-patch"] {
+        let output = repo.ok(&["show", no_patch, "HEAD", "--", "f.txt"]);
+        assert!(output.contains("second commit"), "{output}");
+        assert!(!output.contains("+two"), "{output}");
+        assert!(!output.contains("file changed"), "{output}");
+    }
+}
+
 /// `git show REV:path` is how a file is read from history, so it is the bytes.
 #[test]
 fn show_of_a_file_at_a_revision_is_exact() {

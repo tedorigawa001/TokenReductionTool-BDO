@@ -173,6 +173,10 @@ pub struct GainSummary {
     pub total_saved: usize,
     /// Average savings percentage across all commands
     pub avg_savings_pct: f64,
+    /// Commands run with `bdo proxy`, which never filters
+    pub proxy_commands: usize,
+    /// Input tokens of those commands (their output is the same)
+    pub proxy_input: usize,
     /// Total execution time across all commands (milliseconds)
     pub total_time_ms: u64,
     /// Average execution time per command (milliseconds)
@@ -181,6 +185,19 @@ pub struct GainSummary {
     pub by_command: Vec<(String, usize, usize, f64, u64)>,
     /// Last 30 days of activity: (date, saved_tokens)
     pub by_day: Vec<(String, usize)>,
+}
+
+impl GainSummary {
+    /// Savings across the commands bdo filtered, leaving out `bdo proxy`,
+    /// which an agent uses when it wants output unfiltered.
+    pub fn filtered_savings_pct(&self) -> f64 {
+        let input = self.total_input.saturating_sub(self.proxy_input);
+        if input > 0 {
+            (self.total_saved as f64 / input as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
 }
 
 /// Daily statistics for token savings and execution metrics.
@@ -681,10 +698,13 @@ impl Tracker {
         let mut total_time_ms = 0u64;
 
         let mut stmt = self.conn.prepare(
-            "SELECT input_tokens, output_tokens, saved_tokens, exec_time_ms
+            "SELECT input_tokens, output_tokens, saved_tokens, exec_time_ms,
+                    rtk_cmd LIKE 'bdo proxy %'
              FROM commands
              WHERE (?1 IS NULL OR project_path = ?1 OR project_path GLOB ?2)", // added: project filter
         )?;
+        let mut proxy_commands = 0usize;
+        let mut proxy_input = 0usize;
 
         let rows = stmt.query_map(params![project_exact, project_glob], |row| {
             // added: params
@@ -693,11 +713,16 @@ impl Tracker {
                 row.get::<_, i64>(1)? as usize,
                 row.get::<_, i64>(2)? as usize,
                 row.get::<_, i64>(3)? as u64,
+                row.get::<_, bool>(4)?,
             ))
         })?;
 
         for row in rows {
-            let (input, output, saved, time_ms) = row?;
+            let (input, output, saved, time_ms, is_proxy) = row?;
+            if is_proxy {
+                proxy_commands += 1;
+                proxy_input += input;
+            }
             total_commands += 1;
             total_input += input;
             total_output += output;
@@ -726,6 +751,8 @@ impl Tracker {
             total_output,
             total_saved,
             avg_savings_pct,
+            proxy_commands,
+            proxy_input,
             total_time_ms,
             avg_time_ms,
             by_command,

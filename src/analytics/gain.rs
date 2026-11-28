@@ -111,6 +111,17 @@ pub fn run(
                 summary.avg_savings_pct
             ),
         );
+        if summary.proxy_commands > 0 {
+            print_kpi(
+                "Without proxy",
+                format!(
+                    "{:.1}% ({} bdo proxy commands, {} tokens, not filtered)",
+                    summary.filtered_savings_pct(),
+                    summary.proxy_commands,
+                    format_tokens(summary.proxy_input)
+                ),
+            );
+        }
         print_kpi(
             "Total exec time",
             format!(
@@ -535,6 +546,10 @@ struct ExportSummary {
     total_output: usize,
     total_saved: usize,
     avg_savings_pct: f64,
+    /// `avg_savings_pct` leaving out `bdo proxy` commands.
+    filtered_savings_pct: f64,
+    proxy_commands: usize,
+    proxy_input: usize,
     total_time_ms: u64,
     avg_time_ms: u64,
 }
@@ -558,6 +573,9 @@ fn export_json(
             total_output: summary.total_output,
             total_saved: summary.total_saved,
             avg_savings_pct: summary.avg_savings_pct,
+            filtered_savings_pct: summary.filtered_savings_pct(),
+            proxy_commands: summary.proxy_commands,
+            proxy_input: summary.proxy_input,
             total_time_ms: summary.total_time_ms,
             avg_time_ms: summary.avg_time_ms,
         },

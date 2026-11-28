@@ -108,6 +108,8 @@ pub struct GainSummary {
     pub total_output: usize,                // Total output tokens
     pub total_saved: usize,                 // Total tokens saved
     pub avg_savings_pct: f64,               // Average savings percentage
+    pub proxy_commands: usize,              // Commands run with `bdo proxy`
+    pub proxy_input: usize,                 // Their input tokens (never filtered)
     pub total_time_ms: u64,                 // Total execution time (ms)
     pub avg_time_ms: u64,                   // Average execution time (ms)
     pub by_command: Vec<(String, usize, usize, f64, u64)>, // Top 10 commands

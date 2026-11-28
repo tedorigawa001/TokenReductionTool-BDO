@@ -88,8 +88,9 @@ fn run_filtered(name: &str, args: &[String], verbose: u8, skip_env: bool) -> Res
             name,
             &args_display,
             |output, exit_code| {
+                // Not a recognised Vitest run: filter it as any other script.
                 vitest_coverage_filter::compact(output, exit_code)
-                    .unwrap_or_else(|| output.to_owned())
+                    .unwrap_or_else(|| filter_npm_output_for_run(output, exit_code))
             },
             runner::RunOptions::default().no_trailing_newline(),
         );

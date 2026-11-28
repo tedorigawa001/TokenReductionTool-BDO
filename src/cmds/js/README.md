@@ -9,7 +9,7 @@
 - `vitest_cmd.rs` uses the `parser/` module for structured output parsing
 - `playwright_cmd.rs` uses the `parser/` module for test result extraction
 - `node_test_filter.rs` hides passing lines of Node's built-in test runner (`node --test`, spec reporter); `npm_cmd.rs` applies it to every npm script's output. It changes nothing unless the output has the runner's `ℹ tests N` summary, and shows a failed run whole if no test failure explains it
-- `vitest_coverage_filter.rs` is specific to `npm run test:coverage`: on a successful, recognized Vitest coverage run it hides only all-passing file rows, leaving the coverage table, test summary, and diagnostics intact. Failed or unrecognized output stays intact
+- `vitest_coverage_filter.rs` is specific to `npm run test:coverage`: on a successful, recognized Vitest coverage run it hides only all-passing file rows, leaving the coverage table, test summary, and diagnostics intact. Failed or unrecognized output gets the same npm filter as any other script
 
 ## Cross-command
 

@@ -146,6 +146,22 @@ fn shown(out: &Output) -> String {
     )
 }
 
+/// `output` has every line of `text` that the npm filter keeps, in order. The
+/// filter drops blank lines and npm's own lines (`npm WARN`, `npm notice`).
+fn assert_npm_filter_kept(output: &str, text: &str) {
+    let mut rest = output;
+    for line in text.lines() {
+        if line.trim().is_empty() || line.trim_start().starts_with("npm WARN") {
+            continue;
+        }
+        let at = rest
+            .find(line)
+            .unwrap_or_else(|| panic!("missing or out of order: {line:?}\n{output}"));
+        rest = &rest[at + line.len()..];
+    }
+    assert!(!output.contains("npm WARN"), "{output}");
+}
+
 const VITEST_COVERAGE: &str = "\
  RUN  v4.1.12 /work
       Coverage enabled with custom
@@ -197,7 +213,8 @@ fn npm_coverage_keeps_pass_rows_and_diagnostics_when_the_runner_fails() {
         );
         assert_eq!(out.status.code(), Some(1), "{out:?}");
         let output = shown(&out);
-        assert!(output.contains(VITEST_COVERAGE), "{output}");
+        // A failed run gets the ordinary npm filter, which keeps the pass rows.
+        assert_npm_filter_kept(&output, VITEST_COVERAGE);
         assert!(output.contains(diagnostic), "{output}");
     }
 }
@@ -212,12 +229,36 @@ fn npm_coverage_keeps_ambiguous_results_and_leaves_other_scripts_alone() {
     let out = env.bdo(&["npm", "run", "test:coverage"], 0, &ambiguous, "");
     assert!(out.status.success(), "{out:?}");
     let output = shown(&out);
-    assert!(output.contains(&ambiguous), "{output}");
+    assert_npm_filter_kept(&output, &ambiguous);
 
     let out = env.bdo(&["npm", "run", "test:unit"], 0, VITEST_COVERAGE, "");
     assert!(out.status.success(), "{out:?}");
     let output = shown(&out);
     assert!(output.contains("all-pass.test.js"), "{output}");
+}
+
+#[test]
+fn npm_coverage_that_is_not_vitest_still_gets_the_npm_filter() {
+    // `node --test --experimental-test-coverage`, as some projects name it.
+    let node_coverage = "\
+> app@1.0.0 test:coverage
+> node --test --experimental-test-coverage
+
+✔ adds (0.3ms)
+✔ subtracts (0.2ms)
+ℹ tests 2
+ℹ pass 2
+ℹ fail 0
+ℹ start of coverage report
+ℹ all files | 100.00 | 100.00 | 100.00
+ℹ end of coverage report";
+    let out = Env::new().bdo(&["npm", "run", "test:coverage"], 0, node_coverage, "");
+    assert!(out.status.success(), "{out:?}");
+    let output = shown(&out);
+    assert!(!output.contains("✔ adds"), "{output}");
+    assert!(!output.contains("> app@1.0.0"), "{output}");
+    assert!(output.contains("2 passing test lines hidden"), "{output}");
+    assert!(output.contains("ℹ all files | 100.00"), "{output}");
 }
 
 #[test]

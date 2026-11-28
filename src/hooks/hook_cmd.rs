@@ -310,6 +310,25 @@ fn process_claude_payload(v: &Value, decide: impl FnOnce(&str) -> HookDecision) 
 }
 
 /// Run the Claude Code PreToolUse hook natively.
+/// Grok Build runs the hooks in `~/.claude/settings.json` and
+/// `~/.cursor/hooks.json` too. It then matches its own permission rules
+/// (`~/.grok/config.toml`, `--deny` on its command line) against the command
+/// the hook returns, and a rule for `git push --force` does not cover
+/// `bdo git push --force`. The hook cannot see all of those rules, so under
+/// Grok it rewrites nothing.
+///
+/// Grok sets `GROK_HOOK_EVENT` for its hooks, and its payload carries its own
+/// event name, `pre_tool_use`, under `hookEventName`; Claude Code and Cursor
+/// send neither.
+fn is_grok_payload(v: &Value, grok_hook_event: Option<&str>) -> bool {
+    grok_hook_event.is_some_and(|e| !e.is_empty())
+        || v.get("hookEventName").and_then(Value::as_str) == Some("pre_tool_use")
+}
+
+fn from_grok(v: &Value) -> bool {
+    is_grok_payload(v, std::env::var("GROK_HOOK_EVENT").ok().as_deref())
+}
+
 pub fn run_claude() -> Result<()> {
     let input = read_stdin_limited()?;
 
@@ -325,6 +344,10 @@ pub fn run_claude() -> Result<()> {
             return Ok(());
         }
     };
+
+    if from_grok(&v) {
+        return Ok(());
+    }
 
     match process_claude_payload(&v, |cmd| decide_hook_action(cmd, permissions::Host::Claude)) {
         PayloadAction::Rewrite {
@@ -390,8 +413,8 @@ pub fn run_cursor() -> Result<()> {
         .and_then(|c| c.as_str())
         .filter(|c| !c.is_empty())
     {
-        Some(c) => c.to_string(),
-        None => {
+        Some(c) if !from_grok(&v) => c.to_string(),
+        _ => {
             let _ = writeln!(io::stdout(), "{{}}");
             return Ok(());
         }
@@ -459,6 +482,16 @@ fn run_cursor_inner_with_rules(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_grok_is_recognised_by_its_event_name_or_variable() {
+        let grok = json!({ "hookEventName": "pre_tool_use", "tool_input": { "command": "ls" } });
+        let claude = json!({ "hook_event_name": "PreToolUse", "tool_input": { "command": "ls" } });
+        assert!(is_grok_payload(&grok, None));
+        assert!(!is_grok_payload(&claude, None));
+        assert!(!is_grok_payload(&claude, Some("")));
+        assert!(is_grok_payload(&claude, Some("pre_tool_use")));
+    }
 
     fn rewrite_command_no_prefixes(cmd: &str, excluded: &[String]) -> Option<String> {
         crate::discover::registry::rewrite_command(cmd, excluded, &[])

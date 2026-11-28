@@ -40,6 +40,7 @@ Agent runs "cargo test"
 | Cline / Roo Code | Rules file (prompt-level) | N/A |
 | Windsurf | Rules file (prompt-level) | N/A |
 | Codex CLI | AGENTS.md instructions | N/A |
+| Grok Build | Instructions only (hooks leave commands unchanged) | No |
 | Kilo Code | Rules file (prompt-level) | N/A |
 | Google Antigravity | Rules file (prompt-level) | N/A |
 | Mistral Vibe | Planned ([#800](https://github.com/tedorigawa001/TokenReductionTool-BDO/issues/800)) | Pending upstream |
@@ -163,6 +164,20 @@ bdo init --global --agent windsurf    # creates .windsurfrules in current projec
 bdo init --codex           # project-scoped (AGENTS.md)
 bdo init --global --codex  # user-global (~/.codex/AGENTS.md)
 ```
+
+### Grok Build
+
+Grok Build runs the Claude Code and Cursor hooks it finds in `~/.claude/settings.json`
+and `~/.cursor/hooks.json`. Under Grok, `bdo hook claude` and `bdo hook cursor` leave
+the command as written. Grok matches its own permission rules (`~/.grok/config.toml`,
+`--deny`) against the command a hook returns, and a rule for `git push --force` does not
+cover `bdo git push --force`. The hook cannot see all of those rules, so it does not
+rewrite.
+
+Grok also reads `~/.claude/CLAUDE.md`, so instructions there that say to use `bdo` still
+apply. A command the model writes as `bdo …` is not covered by a Grok rule written for
+the plain command either. Write Grok deny rules for both forms, e.g.
+`Bash(git push --force:*)` and `Bash(bdo git push --force:*)`.
 
 ### Kilo Code
 

@@ -1047,3 +1047,13 @@ GNU Wget 1.25 とローカルサーバーで 46 + 13 パターンを実物と比
   チェック自体を CI でテストする。チェックの実行には Ruby が要る。
 - release.yml の `${{ matrix.dist_args }}` は env 経由にし、何も実行していなかった「Install dependencies」の
   ステップは削った。`DIST_ARGS` の受け渡しは次のリリースで初めて試される。
+
+### 2026-11-28 — Grok Build では書き換えない
+
+Grok Build（xAI の CLI、1.0.92 で確認）は `~/.claude/settings.json` と `~/.cursor/hooks.json` のフックも実行する。
+`bdo init -g` で入れた `bdo hook claude` が Grok から呼ばれ、`git status` を `bdo git status` に書き換えていた
+（Grok のログ `hook allowed … updated_input=true` で確認）。Grok は自分の権限ルール（`~/.grok/config.toml`、
+`--deny`）を書き換えたあとのコマンドに当てはめるので、`--deny "Bash(git status:*)"` が `bdo git status` に当たらず、
+拒否ではなく承認待ちになった。`--deny` はフックから見えないので、Grok からの呼び出し（`GROK_HOOK_EVENT`、または
+`hookEventName` が `pre_tool_use`）では Claude・Cursor のフックとも書き換えない。Grok の対応は指示ファイルだけになる。
+モデルが自分で `bdo …` と書いた場合も Grok の deny ルールは当たらないので、ドキュメントに両方の形で書くよう記した。

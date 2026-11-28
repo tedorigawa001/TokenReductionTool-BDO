@@ -5,6 +5,25 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.3] (2026-11-28)
+
+### Security
+
+- **Under Grok Build, the hook no longer rewrites commands.** Grok Build runs the hooks in
+  `~/.claude/settings.json` and `~/.cursor/hooks.json`, so the hook from `bdo init -g`
+  rewrote commands there too. Grok then matched its own permission rules
+  (`~/.grok/config.toml`, `--deny`) against the rewritten `bdo …`, which they did not
+  cover. With `--deny "Bash(git status:*)"`, `git status` became `bdo git status` and
+  waited for approval instead of being denied. The hook cannot see `--deny`, so under
+  Grok it now leaves the command as written. Checked with Grok Build 1.0.92: the deny
+  rule applies again.
+
+### Changed
+
+- **Grok Build is listed as instructions-only.** Grok also reads `~/.claude/CLAUDE.md`, so
+  a model told to use bdo may write `bdo …` itself. Write Grok deny rules for both forms,
+  e.g. `Bash(git push --force:*)` and `Bash(bdo git push --force:*)`.
+
 ## [0.51.2] (2026-11-23)
 
 Fixes from a review of the 0.51.1 fixes and an audit of the output parsers: more prefixes

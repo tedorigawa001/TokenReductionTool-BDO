@@ -5,6 +5,28 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.5] (2026-11-28)
+
+### Fixed
+
+- **`git show` output is smaller and says what it leaves out.**
+  - Each file is named once, as `path  +A -R` (or `old => new  +A -R`), with Git's exact
+    counts. Before, it was named in a separate stat block and again in the patch. Files cut
+    by the patch limits keep their counts. If the names cannot be matched, for example with
+    `--no-prefix`, a binary file or several commits, Git's own `--stat` is shown instead.
+  - A run of five or more unchanged lines between changes is shortened to the line nearest
+    each change and `... (N unchanged lines omitted)`. By default, a hunk edge keeps only the
+    line next to the change. An explicit `-U`, `--unified` or `-W` keeps the edges you asked
+    for.
+  - With `-U1` and similar options, each change was shown twice. It is now shown once.
+  - The `[full diff: …]` hint names the commits by full id and keeps every option but
+    `--output`, so it shows the same diff.
+- **`npm run test:coverage` hides passing file rows of a Vitest coverage run.** On a
+  successful run that bdo recognises, it hides the file rows whose tests all passed. The
+  coverage table, the summary, rows with skipped or todo tests, test output and diagnostics
+  all stay. A failed run, or output bdo does not recognise, gets the same npm filter as any
+  other script.
+
 ## [0.51.4] (2026-11-28)
 
 ### Fixed

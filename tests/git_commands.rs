@@ -310,6 +310,99 @@ fn show_gives_the_commit_and_its_change() {
 }
 
 #[test]
+fn show_combines_file_statistics_and_patch_headers() {
+    let repo = Repo::new();
+    repo.commit_file("changes with spaces.txt", "old\nstays\n", "add fixture");
+    repo.commit_file(
+        "changes with spaces.txt",
+        "new\nstays\nextra\n",
+        "edit fixture",
+    );
+
+    let output = repo.ok(&["show"]);
+    assert_eq!(
+        output.matches("changes with spaces.txt").count(),
+        1,
+        "{output}"
+    );
+    assert!(
+        output.contains("changes with spaces.txt  +2 -1"),
+        "{output}"
+    );
+    assert!(output.contains("1 file changed"), "{output}");
+    assert!(output.contains("+new"), "{output}");
+    assert!(output.contains("-old"), "{output}");
+}
+
+#[test]
+fn show_keeps_rename_paths_and_their_exact_counts_in_one_header() {
+    let repo = Repo::new();
+    repo.git(&["config", "diff.renames", "true"]);
+    let original = "unchanged content\n".repeat(20);
+    repo.write("old name.txt", &format!("{original}old value\n"));
+    repo.write("before.txt", "same content\n");
+    repo.git(&["add", "--", "old name.txt", "before.txt"]);
+    repo.git(&["commit", "-q", "-m", "add original files"]);
+    repo.git(&["mv", "old name.txt", "new name.txt"]);
+    repo.git(&["mv", "before.txt", "after.txt"]);
+    repo.write("new name.txt", &format!("{original}new value\n"));
+    repo.git(&["add", "--", "new name.txt"]);
+    repo.git(&["commit", "-q", "-m", "rename files"]);
+
+    let output = repo.ok(&["show", "-M"]);
+    assert!(
+        output.contains("old name.txt => new name.txt  +1 -1"),
+        "{output}"
+    );
+    assert!(
+        output.contains("before.txt => after.txt  +0 -0"),
+        "{output}"
+    );
+    for path in ["old name.txt", "new name.txt", "before.txt", "after.txt"] {
+        assert_eq!(output.matches(path).count(), 1, "{output}");
+    }
+}
+
+#[test]
+fn show_keeps_exact_counts_for_files_beyond_patch_limits() {
+    let repo = Repo::new();
+    for index in 0..7 {
+        let name = format!("part-{index}.txt");
+        repo.write(&name, &"old line\n".repeat(140));
+        repo.git(&["add", "--", &name]);
+    }
+    repo.git(&["commit", "-q", "-m", "add files"]);
+    for index in 0..7 {
+        let name = format!("part-{index}.txt");
+        repo.write(
+            &name,
+            &format!("last marker {index}\n{}", "new line\n".repeat(159)),
+        );
+        repo.git(&["add", "--", &name]);
+    }
+    repo.git(&["commit", "-q", "-m", "rewrite files"]);
+
+    let output = repo.ok(&["show"]);
+    assert!(output.contains("more changes truncated"), "{output}");
+    assert!(!output.contains("last marker 6"), "{output}");
+    for index in 0..7 {
+        let name = format!("part-{index}.txt");
+        assert!(output.contains(&format!("{name}  +160 -140")), "{output}");
+        assert_eq!(output.matches(&name).count(), 1, "{output}");
+    }
+}
+
+#[test]
+fn show_keeps_git_statistics_when_patch_headers_cannot_be_matched() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "two\n", "edit fixture");
+    let output = repo.ok(&["show", "--no-prefix"]);
+    assert!(output.contains("f.txt | 2 +-"), "{output}");
+    assert!(output.contains("1 file changed"), "{output}");
+    assert!(output.contains("+two"), "{output}");
+}
+
+#[test]
 fn show_with_unified_context_renders_each_change_once() {
     let repo = Repo::new();
     repo.commit_file(

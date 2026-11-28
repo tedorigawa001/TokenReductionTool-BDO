@@ -289,6 +289,11 @@ fn run_show(
     let pathspec_start = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
     let (options, pathspecs) = args.split_at(pathspec_start);
     let no_patch = options.iter().any(|arg| arg == "-s" || arg == "--no-patch");
+    let custom_stats = options.iter().any(|arg| {
+        arg.starts_with("--stat")
+            || arg.starts_with("--dirstat")
+            || matches!(arg.as_str(), "--compact-summary" | "--summary" | "--cumulative")
+    });
 
     // Step 1: one-line commit summary
     let mut summary_cmd = git_cmd(global_args);
@@ -302,22 +307,8 @@ fn run_show(
         eprintln!("{}", summary_result.stderr);
         return Ok(summary_result.exit_code);
     }
-    println!("{}", summary_result.stdout.trim());
-
-    // Step 2: --stat summary
-    let mut stat_cmd = git_cmd(global_args);
-    stat_cmd.arg("show").args(options).arg("--no-patch");
-    if !no_patch {
-        stat_cmd.arg("--stat");
-    }
-    stat_cmd.arg("--pretty=format:").args(pathspecs);
-    let stat_result = exec_capture(&mut stat_cmd).context("Failed to run git show --stat")?;
-    let stat_text = stat_result.stdout.trim();
-    if !stat_text.is_empty() {
-        println!("{}", stat_text);
-    }
-
-    // Step 3: compacted diff
+    // Match Git's exact per-file statistics against the patch headers before
+    // suppressing any of the human-readable stat rows.
     let mut diff_cmd = git_cmd(global_args);
     diff_cmd.args(["show", "--pretty=format:"]);
     for arg in args {
@@ -326,15 +317,50 @@ fn run_show(
     let diff_result = exec_capture(&mut diff_cmd).context("Failed to run git show (diff)")?;
     let diff_text = diff_result.stdout.trim();
 
-    let mut final_output = summary_result.stdout.clone();
+    let stat = |formats: &[&str]| {
+        let mut cmd = git_cmd(global_args);
+        cmd.arg("show")
+            .args(options)
+            .arg("--no-patch")
+            .args(formats)
+            .arg("--pretty=format:")
+            .args(pathspecs);
+        exec_capture(&mut cmd)
+    };
+    let mut final_output = format!("{}\n", summary_result.stdout.trim());
+    let mut file_headers = None;
+    if !no_patch {
+        let merged = if !custom_stats && !diff_text.is_empty() && diff_result.success() {
+            stat(&["--numstat", "--shortstat", "-z"])
+                .ok()
+                .filter(|result| result.success())
+                .and_then(|result| merge_show_stats(&result.stdout, diff_text))
+        } else {
+            None
+        };
+        if let Some((totals, headers)) = merged {
+            final_output.push_str(&totals);
+            final_output.push('\n');
+            file_headers = Some(headers);
+        } else {
+            let stat_result = stat(&["--stat"]).context("Failed to run git show --stat")?;
+            let stat_text = stat_result.stdout.trim();
+            if !stat_text.is_empty() {
+                final_output.push_str(stat_text);
+                final_output.push('\n');
+            }
+        }
+    }
     if !diff_text.is_empty() {
         if verbose > 0 {
-            println!("\nChanges:");
+            final_output.push_str("\nChanges:\n");
         }
-        let compacted = compact_diff(diff_text, max_lines.unwrap_or(500));
-        println!("{}", compacted);
-        final_output.push_str(&format!("\n{}", compacted));
+        let compacted =
+            compact_diff_with_headers(diff_text, max_lines.unwrap_or(500), file_headers.as_deref());
+        final_output.push_str(&compacted);
+        final_output.push('\n');
     }
+    print!("{final_output}");
 
     timer.track(
         &format!("git show {}", args.join(" ")),
@@ -346,12 +372,63 @@ fn run_show(
     Ok(0)
 }
 
+/// Git's NUL-delimited numstat gives exact totals even for truncated hunks.
+/// A rename/copy has an empty path field followed by its old and new paths.
+fn merge_show_stats(stats: &str, diff: &str) -> Option<(String, Vec<String>)> {
+    let (records, totals) = stats.rsplit_once('\0')?;
+    let totals = totals.trim();
+    if totals.is_empty() || totals.contains('\n') {
+        return None;
+    }
+
+    let mut records = records.split('\0');
+    let mut patch_headers = diff.lines().filter(|line| line.starts_with("diff --git "));
+    let mut headers = Vec::new();
+    while let Some(record) = records.next() {
+        let mut fields = record.splitn(3, '\t');
+        // Binary files have "-" counts. Fall back to the original stat
+        // display rather than dropping their size information.
+        let added = fields.next()?.parse::<usize>().ok()?;
+        let removed = fields.next()?.parse::<usize>().ok()?;
+        let path = fields.next()?;
+        let (old, new) = if path.is_empty() {
+            (records.next()?, records.next()?)
+        } else {
+            (path, path)
+        };
+        // Verify both the order and the names. Unknown prefixes, escaped
+        // paths and incompatible patch modes keep the standalone stats.
+        if old.is_empty()
+            || new.is_empty()
+            || old.contains('\u{fffd}')
+            || new.contains('\u{fffd}')
+            || patch_headers.next()? != format!("diff --git a/{old} b/{new}")
+        {
+            return None;
+        }
+        headers.push(if old == new {
+            format!("{new}  +{added} -{removed}")
+        } else {
+            format!("{old} => {new}  +{added} -{removed}")
+        });
+    }
+    if headers.is_empty() || patch_headers.next().is_some() {
+        return None;
+    }
+    Some((totals.to_owned(), headers))
+}
+
 fn is_blob_show_arg(arg: &str) -> bool {
     // Detect `rev:path` style arguments while ignoring flags like `--pretty=format:...`.
     !arg.starts_with('-') && arg.contains(':')
 }
 
 pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
+    compact_diff_with_headers(diff, max_lines, None)
+}
+
+fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[String]>) -> String {
+    let mut headers = headers.map(<[String]>::iter);
     let mut result = Vec::new();
     let mut current_file = String::new();
     let mut added = 0;
@@ -370,11 +447,15 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
                 was_truncated = true;
                 hunk_skipped = 0;
             }
-            if !current_file.is_empty() && (added > 0 || removed > 0) {
+            if headers.is_none() && !current_file.is_empty() && (added > 0 || removed > 0) {
                 result.push(format!("  +{} -{}", added, removed));
             }
             current_file = line.split(" b/").nth(1).unwrap_or("unknown").to_string();
-            result.push(format!("\n{}", current_file));
+            let header = headers
+                .as_mut()
+                .and_then(Iterator::next)
+                .map_or(current_file.as_str(), String::as_str);
+            result.push(format!("\n{header}"));
             added = 0;
             removed = 0;
             in_hunk = false;
@@ -430,8 +511,12 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
         was_truncated = true;
     }
 
-    if !current_file.is_empty() && (added > 0 || removed > 0) {
+    if headers.is_none() && !current_file.is_empty() && (added > 0 || removed > 0) {
         result.push(format!("  +{} -{}", added, removed));
+    }
+    if let Some(remaining) = headers {
+        // A global patch cap must not hide the counts for later files.
+        result.extend(remaining.map(|header| format!("\n{header}")));
     }
 
     if was_truncated {

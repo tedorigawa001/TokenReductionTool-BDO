@@ -385,6 +385,11 @@ fn show_keeps_exact_counts_for_files_beyond_patch_limits() {
     let output = repo.ok(&["show"]);
     assert!(output.contains("more changes truncated"), "{output}");
     assert!(!output.contains("last marker 6"), "{output}");
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+    assert!(
+        output.contains(&format!("[full diff: bdo --raw git show {commit}]")),
+        "{output}"
+    );
     for index in 0..7 {
         let name = format!("part-{index}.txt");
         assert!(output.contains(&format!("{name}  +160 -140")), "{output}");
@@ -423,11 +428,80 @@ fn show_with_unified_context_renders_each_change_once() {
         assert_eq!(output.matches("+new value").count(), 1, "{output}");
         assert_eq!(output.matches("-old value").count(), 1, "{output}");
         assert!(output.contains("@@ -2,3 +2,3 @@"), "{output}");
+        assert!(
+            output.lines().any(|line| line.trim() == "near before"),
+            "{output}"
+        );
         assert!(output.contains("near after"), "{output}");
         assert!(output.contains("change one value"), "{output}");
         assert!(output.contains("1 file changed"), "{output}");
         assert!(!output.contains("far after"), "{output}");
         assert!(!output.contains("other.txt"), "{output}");
+        assert!(!output.contains("unchanged lines omitted"), "{output}");
+    }
+}
+
+#[test]
+fn show_omits_long_context_but_keeps_changes_and_a_pinned_full_diff_hint() {
+    let repo = Repo::new();
+    let name = "file with spaces.txt";
+    let shared: String = (0..10).map(|n| format!("context {n}\n")).collect();
+    repo.commit_file(
+        name,
+        &format!("old start\n{shared}old end\n"),
+        "add context fixture",
+    );
+    repo.commit_file(
+        name,
+        &format!("new start\n{shared}new end\n"),
+        "change both ends",
+    );
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+    let output = repo.ok(&["show", "-U12", "HEAD", "--", name]);
+    for line in [
+        "-old start",
+        "+new start",
+        "-old end",
+        "+new end",
+        "context 0",
+        "context 9",
+    ] {
+        assert!(output.contains(line), "{line}: {output}");
+    }
+    assert!(!output.contains("context 5"), "{output}");
+    assert!(output.contains("8 unchanged lines omitted"), "{output}");
+    assert!(
+        output.contains(&format!("bdo --raw git show -U12 {commit} -- '{name}'")),
+        "{output}"
+    );
+    let full = repo.git(&["show", "-U12", &commit, "--", name]);
+    assert!(full.contains("context 5"), "{full}");
+}
+
+#[test]
+fn show_keeps_nearest_context_and_sign_prefixed_changes() {
+    let repo = Repo::new();
+    let before: String = (0..7).map(|n| format!("before {n}\n")).collect();
+    let after: String = (0..7).map(|n| format!("after {n}\n")).collect();
+    repo.commit_file("f.txt", &format!("{before}--old marker\n{after}"), "setup");
+    repo.commit_file("f.txt", &format!("{before}++new marker\n{after}"), "edit");
+    let output = repo.ok(&["show", "--unified=8"]);
+    for line in ["before 6", "---old marker", "+++new marker", "after 0"] {
+        assert!(
+            output.lines().any(|item| item.trim() == line),
+            "{line}: {output}"
+        );
+    }
+    assert_eq!(
+        output.matches("6 unchanged lines omitted").count(),
+        2,
+        "{output}"
+    );
+    for line in ["before 0", "after 6"] {
+        assert!(
+            !output.lines().any(|item| item.trim() == line),
+            "{line}: {output}"
+        );
     }
 }
 

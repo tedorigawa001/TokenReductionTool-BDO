@@ -300,7 +300,7 @@ fn run_show(
     summary_cmd
         .arg("show")
         .args(options)
-        .args(["--no-patch", "--pretty=format:%h %s (%ar) <%an>"])
+        .args(["--no-patch", "--pretty=format:%H%x00%h %s (%ar) <%an>"])
         .args(pathspecs);
     let summary_result = exec_capture(&mut summary_cmd).context("Failed to run git show")?;
     if !summary_result.success() {
@@ -315,7 +315,7 @@ fn run_show(
         diff_cmd.arg(arg);
     }
     let diff_result = exec_capture(&mut diff_cmd).context("Failed to run git show (diff)")?;
-    let diff_text = diff_result.stdout.trim();
+    let diff_text = diff_result.stdout.as_str();
 
     let stat = |formats: &[&str]| {
         let mut cmd = git_cmd(global_args);
@@ -327,7 +327,21 @@ fn run_show(
             .args(pathspecs);
         exec_capture(&mut cmd)
     };
-    let mut final_output = format!("{}\n", summary_result.stdout.trim());
+    let mut commit_ids = Vec::new();
+    let mut final_output = String::new();
+    for line in summary_result.stdout.trim().lines() {
+        let displayed = match line.split_once('\0') {
+            Some((id, displayed)) if matches!(id.len(), 40 | 64)
+                && id.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+            {
+                commit_ids.push(id);
+                displayed
+            }
+            _ => line,
+        };
+        final_output.push_str(displayed);
+        final_output.push('\n');
+    }
     let mut file_headers = None;
     if !no_patch {
         let merged = if !custom_stats && !diff_text.is_empty() && diff_result.success() {
@@ -355,8 +369,23 @@ fn run_show(
         if verbose > 0 {
             final_output.push_str("\nChanges:\n");
         }
-        let compacted =
-            compact_diff_with_headers(diff_text, max_lines.unwrap_or(500), file_headers.as_deref());
+        let full_command = full_show_command(global_args, args, options, pathspecs, &commit_ids);
+        let show = ShowDiff {
+            full_command: &full_command,
+            shorten_context: !diff_text.contains('\u{1b}')
+                && !options.iter().any(|arg| {
+                    arg.starts_with("--output-indicator-")
+                        || arg.starts_with("--word-diff")
+                        || arg.starts_with("--color-words")
+                        || arg.starts_with("--ext-diff")
+                }),
+        };
+        let compacted = compact_diff_with_headers(
+            diff_text,
+            max_lines.unwrap_or(500),
+            file_headers.as_deref(),
+            Some(&show),
+        );
         final_output.push_str(&compacted);
         final_output.push('\n');
     }
@@ -370,6 +399,49 @@ fn run_show(
     );
 
     Ok(0)
+}
+
+fn full_show_command(
+    global_args: &[String],
+    args: &[String],
+    options: &[String],
+    pathspecs: &[String],
+    commit_ids: &[&str],
+) -> String {
+    fn quote(arg: &str) -> String {
+        if !arg.is_empty()
+            && arg.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_./:=+".contains(&c))
+        {
+            arg.to_owned()
+        } else if cfg!(windows) {
+            format!("'{}'", arg.replace('\'', "''"))
+        } else {
+            format!("'{}'", arg.replace('\'', "'\\''"))
+        }
+    }
+
+    let mut command = vec!["bdo".to_owned(), "--raw".to_owned(), "git".to_owned()];
+    command.extend(global_args.iter().map(|arg| quote(arg)));
+    command.push("show".to_owned());
+    if commit_ids.is_empty() {
+        command.extend(args.iter().map(|arg| quote(arg)));
+    } else {
+        // Pin the commits, but keep options that select the kind of patch and
+        // the requested surrounding lines. Don't replay output redirection.
+        command.extend(options.iter().filter(|arg| {
+            arg.starts_with("-U")
+                || arg.starts_with("--unified=")
+                || arg.starts_with("--diff-merges=")
+                || matches!(
+                    arg.as_str(),
+                    "--unified" | "-W" | "--function-context" | "-m" | "-c" | "--cc"
+                        | "--remerge-diff" | "--first-parent"
+                )
+        }).map(|arg| quote(arg)));
+        command.extend(commit_ids.iter().map(|id| (*id).to_owned()));
+        command.extend(pathspecs.iter().map(|arg| quote(arg)));
+    }
+    command.join(" ")
 }
 
 /// Git's NUL-delimited numstat gives exact totals even for truncated hunks.
@@ -424,10 +496,20 @@ fn is_blob_show_arg(arg: &str) -> bool {
 }
 
 pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
-    compact_diff_with_headers(diff, max_lines, None)
+    compact_diff_with_headers(diff, max_lines, None, None)
 }
 
-fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[String]>) -> String {
+struct ShowDiff<'a> {
+    full_command: &'a str,
+    shorten_context: bool,
+}
+
+fn compact_diff_with_headers(
+    diff: &str,
+    max_lines: usize,
+    headers: Option<&[String]>,
+    show: Option<&ShowDiff<'_>>,
+) -> String {
     let mut headers = headers.map(<[String]>::iter);
     let mut result = Vec::new();
     let mut current_file = String::new();
@@ -438,8 +520,12 @@ fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[Str
     let mut hunk_skipped = 0usize;
     let max_hunk_lines = 100;
     let mut was_truncated = false;
+    let mut context_was_shortened = false;
+    let mut show_hunk = false;
+    let mut saw_change = false;
 
-    for line in diff.lines() {
+    let mut lines = diff.lines().peekable();
+    while let Some(line) = lines.next() {
         if line.starts_with("diff --git") {
             // Flush hunk truncation before starting a new file
             if hunk_skipped > 0 {
@@ -468,12 +554,45 @@ fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[Str
                 hunk_skipped = 0;
             }
             in_hunk = true;
+            show_hunk = show.is_some_and(|show| show.shorten_context) && line.starts_with("@@ -");
+            saw_change = false;
             hunk_shown = 0;
             // Preserve the full unified diff hunk header, including trailing
             // function / symbol context after the second @@ marker.
             result.push(format!("  {}", line));
         } else if in_hunk {
-            if line.starts_with('+') && !line.starts_with("+++") {
+            if show_hunk && line.starts_with(' ') {
+                let rest = lines.clone();
+                let mut count = 1usize;
+                let mut last = line;
+                while let Some(next) = lines.next_if(|next| next.starts_with(' ')) {
+                    count += 1;
+                    last = next;
+                }
+                // At each end of a long run, keep the line nearest a change.
+                let keep_last = lines.peek().is_some_and(|next| next.starts_with(['+', '-']));
+                let kept_edges = usize::from(saw_change) + usize::from(keep_last);
+                let omitted = count.saturating_sub(kept_edges);
+                if hunk_shown < max_hunk_lines {
+                    if kept_edges > 0 && omitted >= 3 {
+                        if saw_change {
+                            result.push(format!("  {line}"));
+                        }
+                        result.push(format!("  ... ({omitted} unchanged lines omitted)"));
+                        if keep_last {
+                            result.push(format!("  {last}"));
+                        }
+                        context_was_shortened = true;
+                    } else {
+                        result.extend(
+                            std::iter::once(line)
+                                .chain(rest.take(count - 1))
+                                .map(|line| format!("  {line}")),
+                        );
+                    }
+                }
+            } else if line.starts_with('+') && (show_hunk || !line.starts_with("+++")) {
+                saw_change = true;
                 added += 1;
                 if hunk_shown < max_hunk_lines {
                     result.push(format!("  {}", line));
@@ -481,7 +600,8 @@ fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[Str
                 } else {
                     hunk_skipped += 1;
                 }
-            } else if line.starts_with('-') && !line.starts_with("---") {
+            } else if line.starts_with('-') && (show_hunk || !line.starts_with("---")) {
+                saw_change = true;
                 removed += 1;
                 if hunk_shown < max_hunk_lines {
                     result.push(format!("  {}", line));
@@ -489,6 +609,8 @@ fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[Str
                 } else {
                     hunk_skipped += 1;
                 }
+            } else if show_hunk && line.starts_with("\\ ") && hunk_shown < max_hunk_lines {
+                result.push(format!("  {line}"));
             } else if hunk_shown < max_hunk_lines && !line.starts_with("\\") {
                 // Context line
                 if hunk_shown > 0 {
@@ -519,8 +641,11 @@ fn compact_diff_with_headers(diff: &str, max_lines: usize, headers: Option<&[Str
         result.extend(remaining.map(|header| format!("\n{header}")));
     }
 
-    if was_truncated {
-        result.push("[full diff: bdo git diff --no-compact]".to_string());
+    if was_truncated || context_was_shortened {
+        match show {
+            Some(show) => result.push(format!("[full diff: {}]", show.full_command)),
+            None => result.push("[full diff: bdo git diff --no-compact]".to_string()),
+        }
     }
 
     result.join("\n")

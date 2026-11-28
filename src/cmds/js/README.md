@@ -8,6 +8,7 @@
 - `lint_cmd.rs` is a cross-ecosystem router: detects Python projects and delegates to `mypy_cmd` or `ruff_cmd`
 - `vitest_cmd.rs` uses the `parser/` module for structured output parsing
 - `playwright_cmd.rs` uses the `parser/` module for test result extraction
+- `node_test_filter.rs` hides passing lines of Node's built-in test runner (`node --test`, spec reporter); `npm_cmd.rs` applies it to every npm script's output. It changes nothing unless the output has the runner's `ℹ tests N` summary, and shows a failed run whole if no test failure explains it
 
 ## Cross-command
 

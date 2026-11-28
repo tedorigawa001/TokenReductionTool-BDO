@@ -1,5 +1,6 @@
 //! Filters npm output and auto-injects the "run" subcommand when appropriate.
 
+use super::node_test_filter;
 use crate::core::runner;
 use crate::core::utils::resolved_command;
 use anyhow::Result;
@@ -79,13 +80,20 @@ fn run_filtered(name: &str, args: &[String], verbose: u8, skip_env: bool) -> Res
         eprintln!("Running: {} {}", name, args_display);
     }
 
-    runner::run_filtered(
+    runner::run_filtered_with_exit(
         cmd,
         name,
         &args_display,
-        filter_npm_output,
+        filter_npm_output_for_run,
         runner::RunOptions::default(),
     )
+}
+
+/// [`filter_npm_output`], then, for a script that runs `node --test`, its
+/// passing tests hidden (see [`node_test_filter::compact`]).
+fn filter_npm_output_for_run(output: &str, exit_code: i32) -> String {
+    let filtered = filter_npm_output(output);
+    node_test_filter::compact(&filtered, exit_code).unwrap_or(filtered)
 }
 
 /// Filter npm run output - strip boilerplate, progress bars, npm WARN
@@ -182,6 +190,27 @@ npm notice
 
         // Explicit "run" should NOT inject another "run"
         assert!(!needs_run_injection(&["run", "build"]));
+    }
+
+    #[test]
+    fn test_npm_test_hides_passing_node_test_lines() {
+        let output = "\n> app@1.0.0 test\n> node --test\n\n\
+✔ adds (0.3ms)\n✔ subtracts (0.2ms)\nℹ tests 2\nℹ pass 2\nℹ fail 0\n";
+        let result = filter_npm_output_for_run(output, 0);
+        assert!(!result.contains("✔ adds"), "{result}");
+        assert!(!result.contains("> app@"), "{result}");
+        assert!(result.contains("ℹ tests 2"), "{result}");
+        assert!(result.contains("2 passing test lines hidden"), "{result}");
+    }
+
+    #[test]
+    fn test_npm_test_failure_keeps_node_test_details() {
+        let output = "✔ adds (0.3ms)\n✖ breaks (0.4ms)\nℹ tests 2\nℹ fail 1\n\
+\n✖ failing tests:\n\ntest at a.test.mjs:3:1\n✖ breaks (0.4ms)\n  AssertionError: 1 == 2\n";
+        let result = filter_npm_output_for_run(output, 1);
+        assert!(!result.contains("✔ adds"), "{result}");
+        assert!(result.contains("✖ breaks"), "{result}");
+        assert!(result.contains("AssertionError: 1 == 2"), "{result}");
     }
 
     #[test]

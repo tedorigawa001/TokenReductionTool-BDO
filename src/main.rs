@@ -2837,13 +2837,17 @@ fn run_cli() -> Result<i32> {
             let stderr = String::from_utf8_lossy(&stderr_bytes);
             let full_output = format!("{}{}", stdout, stderr);
 
-            // Track usage (input = output since no filtering)
-            timer.track(
-                &format!("{} {}", cmd_name, cmd_args.join(" ")),
-                &format!("bdo proxy {} {}", cmd_name, cmd_args.join(" ")),
-                &full_output,
-                &full_output,
-            );
+            let original = format!("{} {}", cmd_name, cmd_args.join(" "));
+            let tracked = format!("bdo proxy {} {}", cmd_name, cmd_args.join(" "));
+            if stdout_bytes.contains(&0) {
+                // Binary output, such as `git archive`, is almost always piped
+                // into another program rather than read, so it is not counted
+                // as tokens. The run is still recorded.
+                timer.track_passthrough(&original, &tracked);
+            } else {
+                // Track usage (input = output since no filtering)
+                timer.track(&original, &tracked, &full_output, &full_output);
+            }
 
             core::utils::exit_code_from_status(&status, &cmd_name)
         }

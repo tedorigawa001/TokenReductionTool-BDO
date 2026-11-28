@@ -32,6 +32,21 @@ bdo gain --all --format json > savings.json
 bdo gain --all --format csv  > savings.csv
 ```
 
+## Commands run with `bdo proxy`
+
+`bdo proxy <cmd>` runs a command without filtering, for when an agent wants the
+full output. Those runs count in the totals with 0% savings, so when there are
+any, the summary also shows the savings of the commands bdo filtered:
+
+```
+Tokens saved:      26.7M (32.3%)
+Without proxy:     58.7% (19344 bdo proxy commands, 37.0M tokens, not filtered)
+```
+
+Binary output from `bdo proxy`, such as `git archive`, is passed on unchanged
+but not counted as tokens: it is almost always piped into another program
+rather than read. The run is still recorded.
+
 ## Daily breakdown
 
 ```bash
@@ -81,7 +96,10 @@ Same columns as daily, aggregated by Monday-Sunday week or calendar month.
     "total_input": 1276098,
     "total_output": 59244,
     "total_saved": 1220217,
-    "avg_savings_pct": 95.62
+    "avg_savings_pct": 95.62,
+    "filtered_savings_pct": 95.62,
+    "proxy_commands": 0,
+    "proxy_input": 0
   },
   "daily": [...],
   "weekly": [...],

@@ -69,8 +69,7 @@ pub fn compact(output: &str, exit_code: i32) -> Option<String> {
             while open_suites.last().is_some_and(|suite| suite.indent > indent) {
                 open_suites.pop();
             }
-            if open_suites.last().is_some_and(|suite| suite.indent == indent) {
-                let suite = open_suites.pop().unwrap();
+            if let Some(suite) = open_suites.pop_if(|suite| suite.indent == indent) {
                 // Preserve the heading if any detail is still visible inside
                 // it, including a nested suite, a failure, a SKIP/TODO or a log.
                 if mark == "✔" && suite.name == name && suite.kept_after_header == kept_count {

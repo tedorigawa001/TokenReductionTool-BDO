@@ -318,3 +318,31 @@ fn a_configured_transparent_prefix_does_not_hide_a_command_from_deny_rules() {
     let answer = fixture.claude("direnv exec . git push --force", &fixture.project, None);
     assert_ne!(decision(&answer), Some("allow"), "{answer}");
 }
+
+/// Grok Build runs the Claude Code and Cursor hooks it finds in
+/// `~/.claude/settings.json` and `~/.cursor/hooks.json`, then matches its own
+/// permission rules (`~/.grok/config.toml`, `--deny`) against the rewritten
+/// `bdo …`, which they no longer cover. The hook cannot see all of them, so
+/// under Grok it leaves the command as written.
+#[test]
+fn grok_build_gets_no_rewrite_from_the_claude_or_cursor_hook() {
+    let fixture = Fixture::new();
+    fixture.settings(&fixture.project, json!({ "allow": ["Bash(*)"] }));
+    let payload = json!({
+        "hookEventName": "pre_tool_use",
+        "hook_event_name": "PreToolUse",
+        "toolName": "run_terminal_command",
+        "tool_name": "run_terminal_command",
+        "toolInput": { "command": "git status" },
+        "tool_input": { "command": "git status" },
+        "cwd": fixture.project,
+    });
+    // The same rules rewrite the command for Claude Code.
+    let claude = fixture.claude("git status", &fixture.project, None);
+    assert_eq!(rewritten(&claude), Some("bdo git status"), "{claude}");
+
+    let answer = fixture.run(&["hook", "claude"], &fixture.project, None, payload.clone());
+    assert_eq!(answer, Value::Null, "{answer}");
+    let answer = fixture.run(&["hook", "cursor"], &fixture.project, None, payload);
+    assert_eq!(answer, json!({}), "{answer}");
+}

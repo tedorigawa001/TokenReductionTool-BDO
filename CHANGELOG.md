@@ -5,6 +5,28 @@ All notable changes to Bushido (bdo) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.4] (2026-11-28)
+
+### Fixed
+
+- **`npm test` hides the passing lines of Node's built-in test runner.** npm scripts that
+  run `node --test` printed one line per passing test, and the npm filter only removed
+  npm's own lines, so `npm test` saved about 1% of its tokens. When the output has the
+  runner's `ℹ tests N` summary, passing result lines and the headers of suites with
+  nothing left inside are now hidden, and counted in `[bdo] N passing test lines hidden`.
+  Failed tests and their suites, the failure details, the summary, SKIP and TODO lines,
+  and all other output stay. A failed run with no failed test is shown whole. `node --test`
+  run directly is not covered.
+- **`bdo gain` shows the savings without `bdo proxy`.** Proxy runs, which an agent uses to
+  get output unfiltered, count at 0% and pulled the total down: 32.3% overall against
+  58.7% for the commands bdo filtered. The summary now adds a `Without proxy:` line when
+  there are proxy runs, and the JSON summary adds `filtered_savings_pct`,
+  `proxy_commands` and `proxy_input`. The total is unchanged.
+- **`bdo proxy` does not count binary output as tokens.** Each stream is checked on its
+  own: one with a NUL byte or invalid UTF-8, such as `git archive`'s tar output, is left
+  out, while text on the other stream still counts. Output is still passed on byte for
+  byte, and the run is still recorded. Seven `git archive` runs had counted 1.76M tokens.
+
 ## [0.51.3] (2026-11-28)
 
 ### Security

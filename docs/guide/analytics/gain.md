@@ -43,9 +43,12 @@ Tokens saved:      26.7M (32.3%)
 Without proxy:     58.7% (19344 bdo proxy commands, 37.0M tokens, not filtered)
 ```
 
-Binary output from `bdo proxy`, such as `git archive`, is passed on unchanged
-but not counted as tokens: it is almost always piped into another program
-rather than read. The run is still recorded.
+`bdo proxy` forwards stdout and stderr unchanged. For token estimates it
+checks each stream separately: one containing a NUL byte or invalid UTF-8
+is excluded, while text on the other stream still counts. For example,
+`git archive` bytes are excluded, but a text diagnostic on stderr is
+counted. The estimate samples at most 1 MiB of text per stream, and the run
+is recorded even if neither stream contributes tokens.
 
 ## Daily breakdown
 

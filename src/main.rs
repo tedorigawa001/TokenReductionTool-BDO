@@ -2773,50 +2773,71 @@ fn run_cli() -> Result<i32> {
                 .take()
                 .context("Failed to capture child stderr")?;
 
-            const CAP: usize = 1_048_576;
-
-            let stdout_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
-                let mut reader = stdout_pipe;
+            // Forward bytes verbatim and keep a bounded sample for accounting
+            // only if the complete stream is NUL-free UTF-8.
+            fn forward(
+                mut reader: impl Read,
+                mut write_chunk: impl FnMut(&[u8]) -> std::io::Result<()>,
+            ) -> std::io::Result<Vec<u8>> {
+                const CAP: usize = 1_048_576;
                 let mut captured = Vec::new();
-                let mut buf = [0u8; 8192];
+                let mut binary = false;
+                let mut pending = 0;
+                // Reserve room to carry up to three bytes of an unfinished
+                // UTF-8 character over to the next read.
+                let mut buf = [0u8; 8192 + 3];
 
                 loop {
-                    let count = reader.read(&mut buf)?;
+                    let count = reader.read(&mut buf[pending..])?;
                     if count == 0 {
                         break;
                     }
-                    if captured.len() < CAP {
-                        let take = count.min(CAP - captured.len());
-                        captured.extend_from_slice(&buf[..take]);
+                    let end = pending + count;
+                    let chunk = &buf[pending..end];
+                    write_chunk(chunk)?;
+                    if binary {
+                        continue;
                     }
-                    let mut out = std::io::stdout().lock();
-                    out.write_all(&buf[..count])?;
-                    out.flush()?;
+                    let take = count.min(CAP - captured.len());
+                    captured.extend_from_slice(&chunk[..take]);
+                    pending = 0;
+                    if chunk.contains(&0) {
+                        binary = true;
+                    } else if let Err(error) = std::str::from_utf8(&buf[..end]) {
+                        if error.error_len().is_some() {
+                            binary = true;
+                        } else {
+                            let start = error.valid_up_to();
+                            pending = end - start;
+                            buf.copy_within(start..end, 0);
+                        }
+                    }
                 }
 
+                if binary || pending != 0 {
+                    return Ok(Vec::new());
+                }
+                // The stream was valid, but the sample cap can split a character.
+                if let Err(error) = std::str::from_utf8(&captured) {
+                    captured.truncate(error.valid_up_to());
+                }
                 Ok(captured)
+            }
+
+            let stdout_handle = thread::spawn(move || {
+                forward(stdout_pipe, |chunk| {
+                    let mut out = std::io::stdout().lock();
+                    out.write_all(chunk)?;
+                    out.flush()
+                })
             });
 
-            let stderr_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
-                let mut reader = stderr_pipe;
-                let mut captured = Vec::new();
-                let mut buf = [0u8; 8192];
-
-                loop {
-                    let count = reader.read(&mut buf)?;
-                    if count == 0 {
-                        break;
-                    }
-                    if captured.len() < CAP {
-                        let take = count.min(CAP - captured.len());
-                        captured.extend_from_slice(&buf[..take]);
-                    }
+            let stderr_handle = thread::spawn(move || {
+                forward(stderr_pipe, |chunk| {
                     let mut err = std::io::stderr().lock();
-                    err.write_all(&buf[..count])?;
-                    err.flush()?;
-                }
-
-                Ok(captured)
+                    err.write_all(chunk)?;
+                    err.flush()
+                })
             });
 
             let status = child
@@ -2826,28 +2847,18 @@ fn run_cli() -> Result<i32> {
                 .wait()
                 .context(format!("Failed waiting for command: {}", cmd_name))?;
 
-            let stdout_bytes = stdout_handle
+            let mut text_sample = stdout_handle
                 .join()
                 .map_err(|_| anyhow::anyhow!("stdout streaming thread panicked"))??;
-            let stderr_bytes = stderr_handle
-                .join()
-                .map_err(|_| anyhow::anyhow!("stderr streaming thread panicked"))??;
-
-            let stdout = String::from_utf8_lossy(&stdout_bytes);
-            let stderr = String::from_utf8_lossy(&stderr_bytes);
-            let full_output = format!("{}{}", stdout, stderr);
-
+            text_sample.extend(
+                stderr_handle
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("stderr streaming thread panicked"))??,
+            );
+            let text_sample = String::from_utf8_lossy(&text_sample);
             let original = format!("{} {}", cmd_name, cmd_args.join(" "));
             let tracked = format!("bdo proxy {} {}", cmd_name, cmd_args.join(" "));
-            if stdout_bytes.contains(&0) {
-                // Binary output, such as `git archive`, is almost always piped
-                // into another program rather than read, so it is not counted
-                // as tokens. The run is still recorded.
-                timer.track_passthrough(&original, &tracked);
-            } else {
-                // Track usage (input = output since no filtering)
-                timer.track(&original, &tracked, &full_output, &full_output);
-            }
+            timer.track(&original, &tracked, &text_sample, &text_sample);
 
             core::utils::exit_code_from_status(&status, &cmd_name)
         }

@@ -379,6 +379,12 @@ fn run_show(
                         || arg.starts_with("--color-words")
                         || arg.starts_with("--ext-diff")
                 }),
+            trim_hunk_edges: !options.iter().any(|arg| {
+                arg.starts_with("-U")
+                    || arg == "--unified"
+                    || arg.starts_with("--unified=")
+                    || matches!(arg.as_str(), "-W" | "--function-context")
+            }),
         };
         let compacted = compact_diff_with_headers(
             diff_text,
@@ -502,6 +508,7 @@ pub(crate) fn compact_diff(diff: &str, max_lines: usize) -> String {
 struct ShowDiff<'a> {
     full_command: &'a str,
     shorten_context: bool,
+    trim_hunk_edges: bool,
 }
 
 fn compact_diff_with_headers(
@@ -521,6 +528,7 @@ fn compact_diff_with_headers(
     let max_hunk_lines = 100;
     let mut was_truncated = false;
     let mut context_was_shortened = false;
+    let mut omitted_hunk_edges = 0;
     let mut show_hunk = false;
     let mut saw_change = false;
 
@@ -574,11 +582,20 @@ fn compact_diff_with_headers(
                 let kept_edges = usize::from(saw_change) + usize::from(keep_last);
                 let omitted = count.saturating_sub(kept_edges);
                 if hunk_shown < max_hunk_lines {
-                    if kept_edges > 0 && omitted >= 3 {
+                    let trim_hunk_edge = kept_edges == 1
+                        && omitted > 0
+                        && show.is_some_and(|show| show.trim_hunk_edges);
+                    if kept_edges > 0 && (omitted >= 3 || trim_hunk_edge) {
                         if saw_change {
                             result.push(format!("  {line}"));
                         }
-                        result.push(format!("  ... ({omitted} unchanged lines omitted)"));
+                        if trim_hunk_edge {
+                            // The hunk boundary is already visible. Report
+                            // short edge omissions together, not one per run.
+                            omitted_hunk_edges += omitted;
+                        } else {
+                            result.push(format!("  ... ({omitted} unchanged lines omitted)"));
+                        }
                         if keep_last {
                             result.push(format!("  {last}"));
                         }
@@ -641,6 +658,11 @@ fn compact_diff_with_headers(
         result.extend(remaining.map(|header| format!("\n{header}")));
     }
 
+    if omitted_hunk_edges > 0 {
+        result.push(format!(
+            "... ({omitted_hunk_edges} unchanged lines omitted at hunk edges)"
+        ));
+    }
     if was_truncated || context_was_shortened {
         match show {
             Some(show) => result.push(format!("[full diff: {}]", show.full_command)),

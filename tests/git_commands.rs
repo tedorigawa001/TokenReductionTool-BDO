@@ -442,6 +442,48 @@ fn show_with_unified_context_renders_each_change_once() {
 }
 
 #[test]
+fn show_default_keeps_only_context_next_to_hunk_edges() {
+    let repo = Repo::new();
+    repo.git(&["config", "diff.context", "3"]);
+    let name = "f.txt";
+    repo.commit_file(
+        name,
+        "before 0\nbefore 1\nbefore 2\nold value\nafter 0\nafter 1\nafter 2\n",
+        "setup",
+    );
+    repo.commit_file(
+        name,
+        "before 0\nbefore 1\nbefore 2\nnew value\nafter 0\nafter 1\nafter 2\n",
+        "edit",
+    );
+    let output = repo.ok(&["show"]);
+    let lines: Vec<_> = output.lines().map(str::trim).collect();
+    for line in ["before 2", "-old value", "+new value", "after 0"] {
+        assert!(lines.contains(&line), "{line}: {output}");
+    }
+    for line in ["before 0", "before 1", "after 1", "after 2"] {
+        assert!(!lines.contains(&line), "{line}: {output}");
+    }
+    assert!(
+        output.contains("4 unchanged lines omitted at hunk edges"),
+        "{output}"
+    );
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+    assert!(
+        output.contains(&format!("[full diff: bdo --raw git show {commit}]")),
+        "{output}"
+    );
+
+    let explicit = repo.ok(&["show", "-U3"]);
+    for line in ["before 0", "before 1", "after 1", "after 2"] {
+        assert!(
+            explicit.lines().any(|item| item.trim() == line),
+            "{explicit}"
+        );
+    }
+}
+
+#[test]
 fn show_omits_long_context_but_keeps_changes_and_a_pinned_full_diff_hint() {
     let repo = Repo::new();
     let name = "file with spaces.txt";

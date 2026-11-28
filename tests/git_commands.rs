@@ -548,6 +548,55 @@ fn show_keeps_nearest_context_and_sign_prefixed_changes() {
 }
 
 #[test]
+fn show_accepts_a_path_without_a_double_dash() {
+    let repo = Repo::new();
+    repo.write("f.txt", "two\n");
+    repo.write("other.txt", "not selected\n");
+    repo.git(&["add", "--", "f.txt", "other.txt"]);
+    repo.git(&["commit", "-q", "-m", "edit two files"]);
+
+    // Git rejects an option after a path, so bdo's own options must come first.
+    for args in [
+        &["show", "HEAD", "f.txt"][..],
+        &["show", "-U1", "HEAD", "f.txt"],
+    ] {
+        let output = repo.ok(args);
+        assert!(output.contains("edit two files"), "{args:?}: {output}");
+        assert!(output.contains("+two"), "{args:?}: {output}");
+        assert!(output.contains("1 file changed"), "{args:?}: {output}");
+        assert!(!output.contains("other.txt"), "{args:?}: {output}");
+    }
+}
+
+#[test]
+fn show_full_diff_hint_repeats_the_options_and_paths_given() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "a\nb\nc\nold\nd\ne\nf\n", "setup");
+    repo.write("f.txt", "a\nb\nc\nnew\nd\ne\nf\n");
+    repo.write("other.txt", "not selected\n");
+    repo.git(&["add", "--", "f.txt", "other.txt"]);
+    repo.git(&["commit", "-q", "-m", "edit"]);
+    let commit = repo.git(&["rev-parse", "HEAD"]);
+
+    // An option that changes the diff stays in the hint, or the hint would
+    // show a different diff from the one that was shortened.
+    let output = repo.ok(&["show", "-w", "HEAD", "--", "f.txt"]);
+    assert!(
+        output.contains(&format!(
+            "[full diff: bdo --raw git show -w {commit} -- f.txt]"
+        )),
+        "{output}"
+    );
+    // Without `--`, bdo cannot tell a path from a revision, so the hint repeats
+    // the arguments as given rather than drop the path.
+    let output = repo.ok(&["show", "-w", "HEAD", "f.txt"]);
+    assert!(
+        output.contains("[full diff: bdo --raw git show -w HEAD f.txt]"),
+        "{output}"
+    );
+}
+
+#[test]
 fn show_no_patch_still_omits_both_patch_and_stats() {
     let repo = Repo::new();
     repo.commit_file("f.txt", "two\n", "second commit");

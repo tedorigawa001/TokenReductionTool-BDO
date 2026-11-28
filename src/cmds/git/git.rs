@@ -284,10 +284,22 @@ fn run_show(
         .map(|r| r.stdout)
         .unwrap_or_default();
 
-    // Patch-enabling options such as -U1 override --no-patch if they come
-    // later. Set the auxiliary output modes last, but before pathspecs.
     let pathspec_start = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
     let (options, pathspecs) = args.split_at(pathspec_start);
+    // The summary and stat runs put their own options first: Git rejects an
+    // option after a path given without `--`. Options that turn the patch
+    // back on after `--no-patch` (checked against git 2.5x) are left out.
+    let summary_options: Vec<&String> = options
+        .iter()
+        .filter(|arg| {
+            !(arg.starts_with("-U")
+                || arg.starts_with("--unified")
+                || matches!(
+                    arg.as_str(),
+                    "-p" | "-u" | "--patch" | "--patch-with-stat" | "--patch-with-raw"
+                ))
+        })
+        .collect();
     let no_patch = options.iter().any(|arg| arg == "-s" || arg == "--no-patch");
     let custom_stats = options.iter().any(|arg| {
         arg.starts_with("--stat")
@@ -298,9 +310,8 @@ fn run_show(
     // Step 1: one-line commit summary
     let mut summary_cmd = git_cmd(global_args);
     summary_cmd
-        .arg("show")
-        .args(options)
-        .args(["--no-patch", "--pretty=format:%H%x00%h %s (%ar) <%an>"])
+        .args(["show", "--no-patch", "--pretty=format:%H%x00%h %s (%ar) <%an>"])
+        .args(&summary_options)
         .args(pathspecs);
     let summary_result = exec_capture(&mut summary_cmd).context("Failed to run git show")?;
     if !summary_result.success() {
@@ -319,11 +330,10 @@ fn run_show(
 
     let stat = |formats: &[&str]| {
         let mut cmd = git_cmd(global_args);
-        cmd.arg("show")
-            .args(options)
-            .arg("--no-patch")
+        cmd.args(["show", "--no-patch"])
             .args(formats)
             .arg("--pretty=format:")
+            .args(&summary_options)
             .args(pathspecs);
         exec_capture(&mut cmd)
     };
@@ -426,24 +436,25 @@ fn full_show_command(
         }
     }
 
+    // Every option stays, so the hint shows the same diff (`-w`, `-M`,
+    // `--diff-filter` change it). Only output redirection is not replayed.
+    let replayed = |arg: &&String| !(arg.as_str() == "--output" || arg.starts_with("--output="));
     let mut command = vec!["bdo".to_owned(), "--raw".to_owned(), "git".to_owned()];
     command.extend(global_args.iter().map(|arg| quote(arg)));
     command.push("show".to_owned());
-    if commit_ids.is_empty() {
-        command.extend(args.iter().map(|arg| quote(arg)));
+    // Pin the commits, unless an argument before `--` might be a path: with
+    // more of them than commits shown, bdo cannot tell which ones are.
+    let revisions = options.iter().filter(|arg| !arg.starts_with('-')).count();
+    if commit_ids.is_empty() || revisions > commit_ids.len() {
+        command.extend(args.iter().filter(replayed).map(|arg| quote(arg)));
     } else {
-        // Pin the commits, but keep options that select the kind of patch and
-        // the requested surrounding lines. Don't replay output redirection.
-        command.extend(options.iter().filter(|arg| {
-            arg.starts_with("-U")
-                || arg.starts_with("--unified=")
-                || arg.starts_with("--diff-merges=")
-                || matches!(
-                    arg.as_str(),
-                    "--unified" | "-W" | "--function-context" | "-m" | "-c" | "--cc"
-                        | "--remerge-diff" | "--first-parent"
-                )
-        }).map(|arg| quote(arg)));
+        command.extend(
+            options
+                .iter()
+                .filter(|arg| arg.starts_with('-'))
+                .filter(replayed)
+                .map(|arg| quote(arg)),
+        );
         command.extend(commit_ids.iter().map(|id| (*id).to_owned()));
         command.extend(pathspecs.iter().map(|arg| quote(arg)));
     }

@@ -309,6 +309,48 @@ fn show_gives_the_commit_and_its_change() {
     assert!(s.contains("+two"), "{s}");
 }
 
+#[test]
+fn show_with_unified_context_renders_each_change_once() {
+    let repo = Repo::new();
+    repo.commit_file(
+        "f.txt",
+        "far before\nnear before\nold value\nnear after\nfar after\n",
+        "set context",
+    );
+    repo.write(
+        "f.txt",
+        "far before\nnear before\nnew value\nnear after\nfar after\n",
+    );
+    repo.write("other.txt", "not selected\n");
+    repo.git(&["add", "--", "f.txt", "other.txt"]);
+    repo.git(&["commit", "-q", "-m", "change one value"]);
+
+    for context in ["-U1", "--unified=1"] {
+        let output = repo.ok(&["show", context, "HEAD", "--", "f.txt"]);
+        assert_eq!(output.matches("+new value").count(), 1, "{output}");
+        assert_eq!(output.matches("-old value").count(), 1, "{output}");
+        assert!(output.contains("@@ -2,3 +2,3 @@"), "{output}");
+        assert!(output.contains("near after"), "{output}");
+        assert!(output.contains("change one value"), "{output}");
+        assert!(output.contains("1 file changed"), "{output}");
+        assert!(!output.contains("far after"), "{output}");
+        assert!(!output.contains("other.txt"), "{output}");
+    }
+}
+
+#[test]
+fn show_no_patch_still_omits_both_patch_and_stats() {
+    let repo = Repo::new();
+    repo.commit_file("f.txt", "two\n", "second commit");
+
+    for no_patch in ["-s", "--no-patch"] {
+        let output = repo.ok(&["show", no_patch, "HEAD", "--", "f.txt"]);
+        assert!(output.contains("second commit"), "{output}");
+        assert!(!output.contains("+two"), "{output}");
+        assert!(!output.contains("file changed"), "{output}");
+    }
+}
+
 /// `git show REV:path` is how a file is read from history, so it is the bytes.
 #[test]
 fn show_of_a_file_at_a_revision_is_exact() {

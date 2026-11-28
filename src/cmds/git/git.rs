@@ -284,12 +284,19 @@ fn run_show(
         .map(|r| r.stdout)
         .unwrap_or_default();
 
+    // Patch-enabling options such as -U1 override --no-patch if they come
+    // later. Set the auxiliary output modes last, but before pathspecs.
+    let pathspec_start = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
+    let (options, pathspecs) = args.split_at(pathspec_start);
+    let no_patch = options.iter().any(|arg| arg == "-s" || arg == "--no-patch");
+
     // Step 1: one-line commit summary
     let mut summary_cmd = git_cmd(global_args);
-    summary_cmd.args(["show", "--no-patch", "--pretty=format:%h %s (%ar) <%an>"]);
-    for arg in args {
-        summary_cmd.arg(arg);
-    }
+    summary_cmd
+        .arg("show")
+        .args(options)
+        .args(["--no-patch", "--pretty=format:%h %s (%ar) <%an>"])
+        .args(pathspecs);
     let summary_result = exec_capture(&mut summary_cmd).context("Failed to run git show")?;
     if !summary_result.success() {
         eprintln!("{}", summary_result.stderr);
@@ -299,10 +306,11 @@ fn run_show(
 
     // Step 2: --stat summary
     let mut stat_cmd = git_cmd(global_args);
-    stat_cmd.args(["show", "--stat", "--pretty=format:"]);
-    for arg in args {
-        stat_cmd.arg(arg);
+    stat_cmd.arg("show").args(options).arg("--no-patch");
+    if !no_patch {
+        stat_cmd.arg("--stat");
     }
+    stat_cmd.arg("--pretty=format:").args(pathspecs);
     let stat_result = exec_capture(&mut stat_cmd).context("Failed to run git show --stat")?;
     let stat_text = stat_result.stdout.trim();
     if !stat_text.is_empty() {

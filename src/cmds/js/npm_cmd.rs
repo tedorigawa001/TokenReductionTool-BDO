@@ -1,6 +1,6 @@
 //! Filters npm output and auto-injects the "run" subcommand when appropriate.
 
-use super::node_test_filter;
+use super::{node_test_filter, vitest_coverage_filter};
 use crate::core::runner;
 use crate::core::utils::resolved_command;
 use anyhow::Result;
@@ -78,6 +78,21 @@ fn run_filtered(name: &str, args: &[String], verbose: u8, skip_env: bool) -> Res
     let args_display = args.join(" ");
     if verbose > 0 {
         eprintln!("Running: {} {}", name, args_display);
+    }
+
+    if name == "npm"
+        && matches!(args, [run, script, ..] if run == "run" && script == "test:coverage")
+    {
+        return runner::run_filtered_with_exit(
+            cmd,
+            name,
+            &args_display,
+            |output, exit_code| {
+                vitest_coverage_filter::compact(output, exit_code)
+                    .unwrap_or_else(|| output.to_owned())
+            },
+            runner::RunOptions::default().no_trailing_newline(),
+        );
     }
 
     runner::run_filtered_with_exit(

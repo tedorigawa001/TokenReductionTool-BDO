@@ -146,6 +146,80 @@ fn shown(out: &Output) -> String {
     )
 }
 
+const VITEST_COVERAGE: &str = "\
+ RUN  v4.1.12 /work
+      Coverage enabled with custom
+
+ ✓ |unit| tests/unit/all-pass.test.js (2 tests) 14ms
+   ✓ a slow passing test  321ms
+ ✓ |unit| tests/unit/partial.test.js (3 tests | 1 skipped) 20ms
+stdout | tests/unit/partial.test.js > emits diagnostics
+npm WARN keep this diagnostic
+text from the test
+
+ Test Files  2 passed (2)
+      Tests  4 passed | 1 skipped (5)
+ % Coverage report from custom
+File       | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+All files  |  91.00  |    92.00 |   93.00 |   94.00 |
+sample.js  |  88.00  |    89.00 |   90.00 |   91.00 | 12-15
+JSON report written to /work/results.json";
+
+#[test]
+fn npm_coverage_only_hides_files_whose_tests_all_passed() {
+    let out = Env::new().bdo(
+        &["npm", "run", "test:coverage"],
+        0,
+        VITEST_COVERAGE,
+        "diagnostic on stderr",
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let output = shown(&out);
+    let expected =
+        VITEST_COVERAGE.replace(" ✓ |unit| tests/unit/all-pass.test.js (2 tests) 14ms\n", "");
+    assert!(output.contains(&expected), "{output}");
+    assert!(output.contains("diagnostic on stderr"), "{output}");
+    assert!(!output.contains("all-pass.test.js"), "{output}");
+}
+
+#[test]
+fn npm_coverage_keeps_pass_rows_and_diagnostics_when_the_runner_fails() {
+    let env = Env::new();
+    for diagnostic in [
+        "ERROR: Coverage for lines (70%) does not meet global threshold (80%)",
+        "AssertionError: expected 2 to be 4\nExpected: 4\nReceived: 2",
+    ] {
+        let out = env.bdo(
+            &["npm", "run", "test:coverage", "--", "--coverage"],
+            1,
+            VITEST_COVERAGE,
+            diagnostic,
+        );
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let output = shown(&out);
+        assert!(output.contains(VITEST_COVERAGE), "{output}");
+        assert!(output.contains(diagnostic), "{output}");
+    }
+}
+
+#[test]
+fn npm_coverage_keeps_ambiguous_results_and_leaves_other_scripts_alone() {
+    let env = Env::new();
+    let ambiguous = VITEST_COVERAGE.replace(
+        "text from the test",
+        "text from the test\n ✓ |unit| diagnostic.test.js (1 test) 2ms",
+    );
+    let out = env.bdo(&["npm", "run", "test:coverage"], 0, &ambiguous, "");
+    assert!(out.status.success(), "{out:?}");
+    let output = shown(&out);
+    assert!(output.contains(&ambiguous), "{output}");
+
+    let out = env.bdo(&["npm", "run", "test:unit"], 0, VITEST_COVERAGE, "");
+    assert!(out.status.success(), "{out:?}");
+    let output = shown(&out);
+    assert!(output.contains("all-pass.test.js"), "{output}");
+}
+
 #[test]
 fn every_tool_gets_its_arguments_and_keeps_its_exit_code() {
     let env = Env::new();
